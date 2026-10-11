@@ -4,6 +4,7 @@ Sin sockets: se simula el subprocess y solo se valida la construcción del
 comando y los flags de desasociación en Windows.
 """
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -11,7 +12,8 @@ from src.infrastructure.client.daemon_launcher import DaemonLauncher
 
 
 class TestDaemonLauncher:
-    def test_launch_spawns_detached(self, monkeypatch) -> None:
+    def test_launch_new_console_flags(self, monkeypatch) -> None:
+        """Por defecto abre consola propia (logs visibles)."""
         recorded = {}
 
         def fake_popen(cmd, **kwargs):
@@ -34,9 +36,29 @@ class TestDaemonLauncher:
         assert cmd[0] == sys.executable
         assert Path(cmd[1]).name == "daemon.py"
         kwargs = recorded["kwargs"]
-        assert kwargs["stdout"] is not None  # DEVNULL: sin consola colgando
+        assert kwargs["stdout"] is not None  # DEVNULL: la consola muestra los logs
         if sys.platform == "win32":
-            assert kwargs["creationflags"] != 0  # DETACHED_PROCESS | NEW_GROUP
+            assert kwargs["creationflags"] == subprocess.CREATE_NEW_CONSOLE
+
+    def test_launch_detached_when_no_console(self, monkeypatch) -> None:
+        """new_console=False: proceso oculto (arranque automático, sin ventana)."""
+        recorded = {}
+
+        def fake_popen(cmd, **kwargs):
+            recorded["kwargs"] = kwargs
+
+            class P:
+                pid = 1
+
+            return P()
+
+        monkeypatch.setattr("src.infrastructure.client.daemon_launcher.subprocess.Popen",
+                            fake_popen)
+        DaemonLauncher().launch(new_console=False)
+        if sys.platform == "win32":
+            flags = recorded["kwargs"]["creationflags"]
+            assert flags & subprocess.DETACHED_PROCESS
+            assert flags & subprocess.CREATE_NEW_PROCESS_GROUP
 
     def test_launch_custom_python(self, monkeypatch) -> None:
         recorded = {}

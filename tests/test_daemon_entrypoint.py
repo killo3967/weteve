@@ -70,3 +70,36 @@ class TestCli:
     def test_stop_sin_daemon(self, capsys) -> None:
         rc = daemon_mod.cmd_stop(port=1)
         assert rc == 1
+
+
+class TestSetupLogging:
+    """Log dual: consola + fichero logs/weteve-daemon.log."""
+
+    def test_configura_console_y_file(self, tmp_path) -> None:
+        import logging
+        from logging.handlers import RotatingFileHandler
+
+        log_path = tmp_path / "weteve-daemon.log"
+        daemon_mod.setup_logging(log_path)
+        root = logging.getLogger()
+        handlers = list(root.handlers)
+        types = [type(h) for h in handlers]
+        assert logging.StreamHandler in types
+        assert logging.handlers.RotatingFileHandler in types
+        # el fichero recibe registros
+        logging.getLogger("test").info("hola log")
+        for h in handlers:
+            h.flush()
+        assert log_path.exists()
+
+    def test_no_duplica_handlers(self, tmp_path) -> None:
+        daemon_mod.setup_logging(tmp_path / "a.log")
+        import logging
+        n = len(logging.getLogger().handlers)
+        daemon_mod.setup_logging(tmp_path / "a.log")
+        assert len(logging.getLogger().handlers) == n
+
+    def test_default_log_dir_junto_al_repo(self) -> None:
+        p = daemon_mod.default_log_path()
+        assert p.parent.name == "logs"
+        assert p.name == "weteve-daemon.log"

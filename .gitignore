@@ -25,3 +25,4 @@ config.ini
 
 # Tooling artifacts
 .atl/
+logs/

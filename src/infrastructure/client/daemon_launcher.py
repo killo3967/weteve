@@ -25,18 +25,31 @@ class DaemonLauncher:
         self._python = python_path or Path(sys.executable)
         self._script = script_path or _daemon_script()
 
-    def launch(self) -> bool:
-        """Arranca el daemon. False si el proceso no pudo crearse."""
-        cmd = [str(self._python), str(self._script), "run"]
+    def _build_cmd(self) -> list[str]:
+        return [str(self._python), str(self._script), "run"]
+
+    def launch(self, new_console: bool = True) -> bool:
+        """Arranca el daemon.
+
+        Args:
+            new_console: En Windows, abrir una consola propia para el daemon
+                (logs visibles en vivo). False = totalmente oculto (DETACHED).
+                En no-Windows este flag se ignora (siempre adjunto al terminal).
+        """
+        cmd = self._build_cmd()
         kwargs: dict = {
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
             "stdin": subprocess.DEVNULL,
         }
         if sys.platform == "win32":
-            # DETACHED_PROCESS: sin consola; CREATE_NEW_PROCESS_GROUP: aislado
-            kwargs["creationflags"] = (subprocess.DETACHED_PROCESS
-                                       | subprocess.CREATE_NEW_PROCESS_GROUP)
+            if new_console:
+                # Consola propia: los logs del daemon se ven en vivo.
+                kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
+            else:
+                # Sin ventana ni consola: solo log a fichero.
+                kwargs["creationflags"] = (subprocess.DETACHED_PROCESS
+                                           | subprocess.CREATE_NEW_PROCESS_GROUP)
             kwargs["close_fds"] = True
         try:
             proc = subprocess.Popen(cmd, **kwargs)  # noqa: S603

@@ -34,6 +34,36 @@ from src.infrastructure.client.daemon_client import DaemonClient
 
 logger = logging.getLogger("weteve.daemon")
 
+
+def default_log_path() -> Path:
+    """Ruta del log del daemon: <repo>/logs/weteve-daemon.log."""
+    return Path(__file__).resolve().parent / "logs" / "weteve-daemon.log"
+
+
+def setup_logging(log_path: Path | None = None) -> None:
+    """Configura logging dual: consola (stderr) + fichero rotado por tamaño.
+
+    Idempotente: no duplica handlers si se llama más de una vez.
+    """
+    from logging.handlers import RotatingFileHandler
+
+    root = logging.getLogger()
+    if any(isinstance(h, RotatingFileHandler) for h in root.handlers):
+        return  # ya configurado
+    root.setLevel(logging.INFO)
+    fmt = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    root.addHandler(console)
+
+    path = log_path or default_log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    file_h = RotatingFileHandler(path, maxBytes=1_000_000, backupCount=3,
+                                 encoding="utf-8")
+    file_h.setFormatter(fmt)
+    root.addHandler(file_h)
+
 DEFAULT_CONFIG = Path("config.ini")
 
 def build_daemon(config_path: Path = DEFAULT_CONFIG) -> dict:
@@ -83,9 +113,7 @@ def build_daemon(config_path: Path = DEFAULT_CONFIG) -> dict:
 
 
 def cmd_run(config_path: Path) -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    setup_logging()
     try:
         d = build_daemon(config_path)
     except RuntimeError as e:
