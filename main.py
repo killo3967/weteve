@@ -6,7 +6,6 @@ xTeVe) + asignación EPG + servidor web local (playlist.m3u / epg.xml).
 Uso: python main.py
 """
 
-import configparser
 import logging
 import sys
 from pathlib import Path
@@ -14,6 +13,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QDialog
 
 from src.infrastructure.client.persistencia import load_config, save_config
+from src.infrastructure.ui.list_manager_dialog import ListManagerDialog
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_FILE = BASE_DIR / "config.ini"
