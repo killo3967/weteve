@@ -112,8 +112,12 @@ def main() -> int:
     targets = config["targets"]
 
     # weteve no tiene listas internas: sources vacío, el diálogo trabaja en
-    # modo "custom" (M3U/EPG propio por URL o fichero).
-    dialog = ListManagerDialog(None, config={})
+    # modo "custom" (M3U/EPG propio por URL o fichero). El target 0 es el
+    # que edita el diálogo; el daemon lo sirve permanentemente.
+    target_cfg = dict(targets.get("0", targets.get(0, {})))
+    target_cfg["_config_path"] = CONFIG_FILE
+    target_cfg.setdefault("target_id", "0")
+    dialog = ListManagerDialog(None, config=target_cfg)
     dialog.setWindowTitle("weteve — Gestor de listas")
     result = dialog.exec()
 
@@ -124,7 +128,8 @@ def main() -> int:
         # get_target_config() devuelve la config del target, con rules ya
         # serializables. Se persiste en config.ini para la próxima ejecución.
         logger.info("Target guardado: %s (puerto %s)", new_config["name"], new_config.get("port"))
-        # TODO(weteve): editar/gestionar múltiples targets desde la UI.
+        # El panel «Demonio» ya persiste vía TargetStore; aquí solo se
+        # mantiene el formato legacy por compatibilidad.
         targets[0] = new_config
         save_config(CONFIG_FILE, {"targets": targets})
 

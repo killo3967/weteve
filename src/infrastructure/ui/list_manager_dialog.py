@@ -389,6 +389,17 @@ class ListManagerDialog(QDialog):
         self._check_port()
         layout.addWidget(service_group)
 
+        # Demonio: estado y aplicación de la config al servicio permanente
+        from src.application.services.daemon.target_store import TargetStore
+        from src.infrastructure.ui.daemon_panel import DaemonPanel
+        config_path = config.get("_config_path")
+        store = TargetStore(config_path) if config_path else None
+        self.daemon_panel = DaemonPanel(
+            target_store=store, target_id=str(config.get("target_id", "0")),
+            get_target_config=self._build_target, config_path=config_path)
+        self.daemon_panel.refresh_status()
+        layout.addWidget(self.daemon_panel)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Close
         )
