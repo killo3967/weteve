@@ -165,7 +165,12 @@ class FilterRulesWidget(QWidget):
         return w
 
     def _move_row(self, row: int, delta: int) -> None:
-        """Mueve una fila arriba (-1) o abajo (+1) conservando sus widgets."""
+        """Mueve una fila arriba (-1) o abajo (+1).
+
+        Reconstruye la tabla desde el estado capturado: mover widgets de
+        sitio con removeCellWidget/setCellWidget crucea la propiedad de los
+        widgets en Qt y provocaba cierres inesperados al pulsar las flechas.
+        """
         n = self.table.rowCount()
         if not (0 <= row < n):
             return
@@ -174,30 +179,33 @@ class FilterRulesWidget(QWidget):
             return
         if target == row:
             return
-        # Intercambio de filas conservando widgets e items.
-        ncols = self.table.columnCount()
-        # 1) Retirar los widgets de ambas filas (pasan a propiedad del caller).
-        row_widgets = [self.table.cellWidget(row, c) for c in range(ncols)]
-        tgt_widgets = [self.table.cellWidget(target, c) for c in range(ncols)]
-        for c in range(ncols):
-            if row_widgets[c] is not None:
-                self.table.removeCellWidget(row, c)
-            if tgt_widgets[c] is not None:
-                self.table.removeCellWidget(target, c)
-        # 2) Intercambiar items.
-        row_items = [self.table.takeItem(row, c) for c in range(ncols)]
-        tgt_items = [self.table.takeItem(target, c) for c in range(ncols)]
-        for c in range(ncols):
-            if row_items[c] is not None:
-                self.table.setItem(target, c, row_items[c])
-            if tgt_items[c] is not None:
-                self.table.setItem(row, c, tgt_items[c])
-        # 3) Reasignar los widgets cruzados.
-        for c in range(ncols):
-            if row_widgets[c] is not None:
-                self.table.setCellWidget(target, c, row_widgets[c])
-            if tgt_widgets[c] is not None:
-                self.table.setCellWidget(row, c, tgt_widgets[c])
+
+        rows = [self._row_state(r) for r in range(n)]
+        rows[row], rows[target] = rows[target], rows[row]
+
+        current = self.table.currentRow()
+        self.table.setRowCount(0)
+        for state in rows:
+            self._add_row(
+                field=state["field"], text=state["text"],
+                exclude=state["exclude"], case_sensitive=state["case"],
+                operator=state["operator"],
+            )
+        self.table.setCurrentCell(target, 2)
+
+    def _row_state(self, row: int) -> dict:
+        """Captura el estado completo de una fila para reconstruirla."""
+        op_combo = self.table.cellWidget(row, 0)
+        field_combo = self.table.cellWidget(row, 1)
+        action_combo = self.table.cellWidget(row, 3)
+        cs_check = self.table.cellWidget(row, 4)
+        return {
+            "operator": op_combo.currentData() if op_combo else "or",
+            "field": field_combo.currentData() if field_combo else "custom-filter",
+            "text": self._cell_text(row),
+            "exclude": action_combo.currentData() if action_combo else False,
+            "case": cs_check.isChecked() if cs_check else False,
+        }
 
     # -- celda de texto: combo de grupos o texto libre ------------------------
 

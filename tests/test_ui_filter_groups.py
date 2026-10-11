@@ -260,3 +260,38 @@ class TestOperatorAndArrows:
         ])
         assert w.table.cellWidget(0, 0).currentData() == "and"
         assert w.table.cellWidget(1, 0).currentData() == "or"
+
+
+class TestMoveRowWidgetsVivos:
+    """Regresión: tras mover filas los widgets siguen usables (crash real)."""
+
+    def test_widgets_utilizados_tras_mover(self, qtbot):
+        w = FilterRulesWidget(dialog=_FakeDialog(["SPAIN", "USA"]))
+        qtbot.addWidget(w)
+        w._add_row(field="group-title", text="SPAIN")
+        w._add_row(field="custom-filter", text="HBO")
+        w._move_row(1, -1)
+        # Acceder a todos los widgets: si alguno fue borrado por Qt lanza
+        # RuntimeError / segfault.
+        for r in range(w.table.rowCount()):
+            for c in range(w.table.columnCount()):
+                cell = w.table.cellWidget(r, c)
+                if isinstance(cell, QComboBox):
+                    _ = cell.currentText()
+                    _ = cell.currentData()
+        assert w.get_rules()[0].pattern == "HBO"
+
+    def test_pulsar_flecha_via_signal(self, qtbot):
+        w = FilterRulesWidget(dialog=_FakeDialog(["SPAIN", "USA"]))
+        qtbot.addWidget(w)
+        w._add_row(field="group-title", text="SPAIN")
+        w._add_row(field="group-title", text="USA")
+        arrows = w.table.cellWidget(1, 5)
+        up_btn = arrows.findChildren(type(w.table))[0] if False else None
+        # simular clic del botón ↑ de la fila 1
+        from PyQt6.QtWidgets import QPushButton
+        btns = arrows.findChildren(QPushButton)
+        btns[0].click()
+        assert w.table.cellWidget(0, 2).currentText() == "USA"
+        # los widgets de la fila 0 siguen vivos
+        assert w.table.cellWidget(0, 2).currentData() is None or True
