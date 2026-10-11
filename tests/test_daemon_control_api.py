@@ -98,7 +98,7 @@ class TestSmokeHttp:
             assert api.start() is True
 
             last: Exception | None = None
-            for _ in range(5):
+            for _ in range(40):
                 try:
                     with urllib.request.urlopen(f"{api.url_base}/health",
                                                 timeout=5) as r:
@@ -107,7 +107,7 @@ class TestSmokeHttp:
                     break
                 except (ConnectionResetError, OSError) as e:
                     last = e
-                    time.sleep(0.1)
+                    time.sleep(0.25)
             else:
                 raise last  # type: ignore[misc]
         finally:

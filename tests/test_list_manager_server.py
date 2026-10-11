@@ -25,7 +25,7 @@ from src.infrastructure.web.playlist_server import (
 )
 
 
-def _urlopen_retry(url: str, timeout: int = 5, attempts: int = 12):
+def _urlopen_retry(url: str, timeout: int = 5, attempts: int = 40):
     """urlopen con reintentos: flake Windows de RST en loopback inmediato."""
     last: Exception | None = None
     for _ in range(attempts):

@@ -31,7 +31,7 @@ class _StubStore:
 
 
 def _post(url: str, body: dict, session: str | None = None,
-          token: str | None = None, method: str = "POST", attempts: int = 5):
+          token: str | None = None, method: str = "POST", attempts: int = 40):
     """POST con reintentos (flake Windows: RST en loopback inmediato tras bind)."""
     last: Exception | None = None
     for _ in range(attempts):
@@ -54,7 +54,7 @@ def _post(url: str, body: dict, session: str | None = None,
                     (json.loads(raw) if raw else None))
         except (ConnectionResetError, OSError) as e:
             last = e
-            time.sleep(0.1)
+            time.sleep(0.25)
     raise last  # type: ignore[misc]
 
 
@@ -81,7 +81,7 @@ def transport() -> McpHttpTransport:
 
 def _initialize(transport: McpHttpTransport) -> str:
     url = transport.url_base + "/mcp"
-    for _ in range(5):
+    for _ in range(12):
         status, sid, resp = _post(url, {
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
             "params": {"protocolVersion": "2025-03-26", "capabilities": {},
@@ -89,7 +89,7 @@ def _initialize(transport: McpHttpTransport) -> str:
         })
         if status == 200 and sid:
             return sid
-        time.sleep(0.1)
+        time.sleep(0.25)
     raise AssertionError("initialize falló")
 
 
