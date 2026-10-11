@@ -78,6 +78,14 @@ class PlaylistServer:
         self._epg: str = ""
 
     @property
+    def host(self) -> str:
+        return self._host
+
+    @property
+    def port(self) -> int:
+        return self._server.server_address[1] if self._server is not None else self._port
+
+    @property
     def url_base(self) -> str:
         # 0.0.0.0 no es una IP navegable: mostrar la del equipo en la red local.
         display_host = self._host
@@ -90,7 +98,7 @@ class PlaylistServer:
                     display_host = s.getsockname()[0]
             except OSError:
                 display_host = "<ip-local>"
-        return f"http://{display_host}:{self._port}"
+        return f"http://{display_host}:{self.port}"
 
     @property
     def is_running(self) -> bool:

@@ -10,6 +10,7 @@ Dos niveles:
 """
 
 import socket
+import time
 import urllib.error
 import urllib.request
 
@@ -22,6 +23,20 @@ from src.infrastructure.web.playlist_server import (
     find_port_owner,
     port_in_use,
 )
+
+
+def _urlopen_retry(url: str, timeout: int = 5, attempts: int = 12):
+    """urlopen con reintentos: flake Windows de RST en loopback inmediato."""
+    last: Exception | None = None
+    for _ in range(attempts):
+        try:
+            return urllib.request.urlopen(url, timeout=timeout)
+        except urllib.error.HTTPError:
+            raise
+        except (ConnectionResetError, OSError) as e:
+            last = e
+            time.sleep(0.25)
+    raise last  # type: ignore[misc]
 
 
 class TestRouting:
@@ -104,7 +119,7 @@ class TestHttpEndToEnd:
         m3u = "#EXTM3U\n#EXTINF:-1 tvg-id=\"a\" ,Canal A\nhttp://a/1\n"
         server = self._start(playlist=m3u, epg="<tv/>")
         try:
-            with urllib.request.urlopen(self._url(server, PLAYLIST_PATH), timeout=5) as r:
+            with _urlopen_retry(self._url(server, PLAYLIST_PATH), timeout=5) as r:
                 assert r.status == 200
                 assert r.headers.get_content_type() == "audio/x-mpegurl"
                 body = r.read().decode("utf-8")
@@ -116,7 +131,7 @@ class TestHttpEndToEnd:
         epg = "<?xml version=\"1.0\"?><tv><channel id=\"a\"/></tv>"
         server = self._start(playlist="#EXTM3U\n", epg=epg)
         try:
-            with urllib.request.urlopen(self._url(server, EPG_PATH), timeout=5) as r:
+            with _urlopen_retry(self._url(server, EPG_PATH), timeout=5) as r:
                 assert r.status == 200
                 assert r.headers.get_content_type() == "application/xml"
                 body = r.read().decode("utf-8")
@@ -128,7 +143,7 @@ class TestHttpEndToEnd:
         server = self._start(playlist="x", epg="y")
         try:
             with pytest.raises(urllib.error.HTTPError) as excinfo:
-                urllib.request.urlopen(self._url(server, "/no-existe"), timeout=5)
+                _urlopen_retry(self._url(server, "/no-existe"))
             assert excinfo.value.code == 404
         finally:
             server.stop()
@@ -136,10 +151,10 @@ class TestHttpEndToEnd:
     def test_contenido_actualizable_en_caliente(self):
         server = self._start(playlist="#EXTM3U v1\n", epg="<tv/>")
         try:
-            with urllib.request.urlopen(self._url(server, PLAYLIST_PATH), timeout=5) as r:
+            with _urlopen_retry(self._url(server, PLAYLIST_PATH), timeout=5) as r:
                 assert "v1" in r.read().decode("utf-8")
             server.set_content("#EXTM3U v2\n", "<tv/>")
-            with urllib.request.urlopen(self._url(server, PLAYLIST_PATH), timeout=5) as r:
+            with _urlopen_retry(self._url(server, PLAYLIST_PATH), timeout=5) as r:
                 assert "v2" in r.read().decode("utf-8")
         finally:
             server.stop()
@@ -149,7 +164,7 @@ class TestHttpEndToEnd:
         m3u = "#EXTM3U\n#EXTINF:-1,Cañón Televisión Ñ\nhttp://a/1\n"
         server = self._start(playlist=m3u, epg="<tv/>")
         try:
-            with urllib.request.urlopen(self._url(server, PLAYLIST_PATH), timeout=5) as r:
+            with _urlopen_retry(self._url(server, PLAYLIST_PATH), timeout=5) as r:
                 body = r.read()
             assert len(body) == len(m3u.encode("utf-8"))
             assert "Cañón Televisión Ñ" in body.decode("utf-8")
@@ -185,9 +200,8 @@ class TestBindRedLocal:
         server.set_content("#EXTM3U red\n", "<tv/>")
         assert server.start() is True
         try:
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{server._server.server_port}{PLAYLIST_PATH}",
-                timeout=5,
+            with _urlopen_retry(
+                f"http://127.0.0.1:{server._server.server_port}{PLAYLIST_PATH}"
             ) as r:
                 assert r.status == 200
                 assert "red" in r.read().decode("utf-8")
