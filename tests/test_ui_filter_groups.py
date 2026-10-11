@@ -8,6 +8,7 @@ seleccionada. Evita teclear grupos a mano.
 import pytest
 
 from src.domain.entities.channel import Channel
+from PyQt6.QtWidgets import QComboBox
 from src.infrastructure.ui.list_manager_dialog import FilterRulesWidget
 
 
@@ -70,7 +71,7 @@ class TestPickGroup:
         rules_widget._choose_group = lambda groups: "Cine"  # sin menú modal
         rules_widget.table.setCurrentCell(0, 1)
         rules_widget._pick_group_for_row(0)
-        assert rules_widget.table.item(0, 1).text() == "Cine"
+        assert rules_widget.table.cellWidget(0, 1).currentText() == "Cine"
         # campo cambiado a "Grupo" automáticamente
         combo = rules_widget.table.cellWidget(0, 0)
         assert combo.currentData() == "group-title"
@@ -97,5 +98,57 @@ class TestPickGroup:
         combo = rules_widget.table.cellWidget(0, 0)
         assert combo.currentData() == "custom-filter"
         rules_widget._apply_group_to_row(0, "Cine")
-        assert rules_widget.table.item(0, 1).text() == "Cine"
+        assert rules_widget.table.cellWidget(0, 1).currentText() == "Cine"
         assert rules_widget.table.cellWidget(0, 0).currentData() == "group-title"
+
+
+class TestGroupCellCombo:
+    """Cuando Campo = Grupo, el texto de la regla es un desplegable de grupos."""
+
+    def test_fila_grupo_usa_combo_con_grupos(self, qtbot):
+        w = FilterRulesWidget(dialog=_FakeDialog(["SPAIN", "USA", "VOD ES"]))
+        qtbot.addWidget(w)
+        w._add_row(field="group-title", text="SPAIN")
+        cell = w.table.cellWidget(0, 1)
+        assert isinstance(cell, QComboBox)
+        assert [cell.itemText(i) for i in range(cell.count())] == \
+            ["SPAIN", "USA", "VOD ES"]
+        assert cell.currentText() == "SPAIN"
+
+    def test_fila_nombre_usa_texto_libre(self, qtbot):
+        w = FilterRulesWidget(dialog=_FakeDialog(["SPAIN"]))
+        qtbot.addWidget(w)
+        w._add_row(field="custom-filter", text="La 1")
+        assert isinstance(w.table.cellWidget(0, 1), QComboBox) is False
+        assert w.table.item(0, 1).text() == "La 1"
+
+    def test_get_rules_lee_combo_de_grupo(self, qtbot):
+        w = FilterRulesWidget(dialog=_FakeDialog(["SPAIN"]))
+        qtbot.addWidget(w)
+        w._add_row(field="group-title", text="SPAIN")
+        rules = w.get_rules()
+        assert len(rules) == 1
+        assert rules[0].field == "group-title"
+        assert rules[0].pattern == "SPAIN"
+
+    def test_cambio_de_campo_convierte_celda(self, qtbot):
+        """Cambiar el combo Campo alterna entre combo de grupos y texto libre."""
+        w = FilterRulesWidget(dialog=_FakeDialog(["SPAIN", "USA"]))
+        qtbot.addWidget(w)
+        w._add_row(field="custom-filter", text="La 1")
+        combo_campo = w.table.cellWidget(0, 0)
+        combo_campo.setCurrentIndex(0)  # Grupo
+        assert isinstance(w.table.cellWidget(0, 1), QComboBox)
+        combo_campo.setCurrentIndex(1)  # Nombre
+        assert not isinstance(w.table.cellWidget(0, 1), QComboBox)
+        assert w.table.item(0, 1).text() == "La 1"  # conserva el texto
+
+    def test_combo_grupo_es_editable_sin_lista(self, qtbot):
+        """Sin grupos cargados aún, el combo queda vacío pero editable."""
+        w = FilterRulesWidget(dialog=_FakeDialog([]))
+        qtbot.addWidget(w)
+        w._add_row(field="group-title", text="SPAIN")
+        cell = w.table.cellWidget(0, 1)
+        assert isinstance(cell, QComboBox)
+        assert cell.isEditable()
+        assert cell.currentText() == "SPAIN"

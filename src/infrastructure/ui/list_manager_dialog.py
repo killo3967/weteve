@@ -91,9 +91,11 @@ class FilterRulesWidget(QWidget):
         for value, label in FILTER_FIELDS:
             field_combo.addItem(label, value)
         field_combo.setCurrentIndex(0 if field == "group-title" else 1)
+        field_combo.currentIndexChanged.connect(
+            lambda _i, r=row: self._on_field_changed(r))
         self.table.setCellWidget(row, 0, field_combo)
 
-        self.table.setItem(row, 1, QTableWidgetItem(text))
+        self._set_text_cell(row, field, text)
 
         action_combo = QComboBox()
         action_combo.addItem("Incluir", False)
@@ -109,6 +111,42 @@ class FilterRulesWidget(QWidget):
         row = self.table.currentRow()
         if row >= 0:
             self.table.removeRow(row)
+
+    # -- celda de texto: combo de grupos o texto libre ------------------------
+
+    def _set_text_cell(self, row: int, field: FilterField, text: str) -> None:
+        """Campo=Grupo → combo editable con los grupos reales; Nombre → texto."""
+        if field == "group-title":
+            combo = QComboBox()
+            combo.setEditable(True)
+            groups = self._current_groups()
+            if text and text not in groups:
+                groups = [text] + groups
+            combo.addItems(groups)
+            combo.setCurrentText(text)
+            self.table.setCellWidget(row, 1, combo)
+        else:
+            self.table.setItem(row, 1, QTableWidgetItem(text))
+
+    def _on_field_changed(self, row: int) -> None:
+        """Al cambiar el campo, convertir la celda de texto conservando el valor."""
+        combo_campo = self.table.cellWidget(row, 0)
+        if combo_campo is None:
+            return
+        field = combo_campo.currentData()
+        current = self._cell_text(row)
+        if field == "group-title":
+            self._set_text_cell(row, field, current)
+        else:
+            self.table.removeCellWidget(row, 1)
+            self.table.setItem(row, 1, QTableWidgetItem(current))
+
+    def _cell_text(self, row: int) -> str:
+        cell = self.table.cellWidget(row, 1)
+        if isinstance(cell, QComboBox):
+            return cell.currentText()
+        item = self.table.item(row, 1)
+        return item.text() if item else ""
 
     # -- selección de grupo -------------------------------------------------
 
@@ -166,12 +204,10 @@ class FilterRulesWidget(QWidget):
             "(botón Aplicar del diálogo) para cargar los canales.")
 
     def _apply_group_to_row(self, row: int, group: str) -> None:
-        """Pone el grupo en el campo Texto y sugiere tipo "Grupo"."""
-        self.table.setItem(row, 1, QTableWidgetItem(group))
-        # Si la fila era de tipo Nombre, cambiar a Grupo:
-        # un grupo elegido del listado solo tiene sentido filtrado por grupo.
+        """Pone el grupo en la celda de texto y cambia el campo a "Grupo"."""
+        self._set_text_cell(row, "group-title", group)
         combo = self.table.cellWidget(row, 0)
-        if combo is not None and combo.currentData() == "custom-filter":
+        if combo is not None:
             combo.setCurrentIndex(0)  # "Grupo"
 
     def load_rules(self, rules: list[FilterRule]) -> None:
@@ -200,8 +236,7 @@ class FilterRulesWidget(QWidget):
             field_combo = self.table.cellWidget(row, 0)
             action_combo = self.table.cellWidget(row, 2)
             cs_check = self.table.cellWidget(row, 3)
-            text_item = self.table.item(row, 1)
-            text = (text_item.text() if text_item else "").strip()
+            text = self._cell_text(row).strip()
             if not text:
                 continue
             field: FilterField = field_combo.currentData()
