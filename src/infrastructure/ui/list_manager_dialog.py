@@ -5,6 +5,7 @@ en el pipeline (application) y en el servidor (infrastructure/web).
 """
 
 import logging
+from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -613,9 +614,23 @@ class ListManagerDialog(QDialog):
         save_btn = buttons.button(QDialogButtonBox.StandardButton.Save)
         if save_btn is not None:
             save_btn.setText("&Guardar")
-        buttons.accepted.connect(self.accept)
+        buttons.accepted.connect(self._on_save)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _on_save(self) -> None:
+        """Guardar persiste la config SIN cerrar el diálogo."""
+        from src.infrastructure.client.persistencia import save_config
+
+        config_path = self._config.get("_config_path")
+        if config_path is None:
+            return
+        new_config = self.get_target_config()
+        targets = {0: new_config}
+        save_config(Path(config_path), {"targets": targets})
+        self.result_label.setText(
+            f"Configuración guardada: {new_config['name']} "
+            f"(puerto {new_config.get('port')}).")
 
         # weteve es standalone: el único modo de origen es "custom" (URL o
         # fichero propio). No hay selector de modo ni listas de la app.
