@@ -24,8 +24,16 @@ config.ini  ←── TargetStore ──→ TargetSupervisor ──→ PlaylistS
 
 - **Qt es UI-only**: el diálogo guarda la config vía `TargetStore`, pide
   `reload` por la API de control y puede **arrancar/parar/reiniciar el
-  demonio** (botones del panel «Demonio»; arrancar lanza `daemon.py run`
-  como proceso desasociado sin consola). El demonio puede vivir sin UI abierta.
+  demonio** (botones del panel «Demonio»). Arrancar desde la GUI abre una
+  **consola propia con los logs en vivo**; el demonio también escribe
+  `logs/weteve-daemon.log` (rotación 1 MB × 3). El demonio puede vivir sin UI abierta.
+
+## Logs
+
+- **Consola**: al arrancar en primer plano (`daemon.py run`) o desde la GUI
+  (consola propia del proceso).
+- **Fichero**: `logs/weteve-daemon.log` siempre, rota a 1 MB guardando 3
+  backups. Nivel INFO, mismo formato que consola.
 - **El MCP es la superficie de control total** (CRUD incluido); la API de
   control HTTP es lo mínimo que la UI necesita.
 
