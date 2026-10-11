@@ -34,14 +34,29 @@ class TestGroupTitle:
 
 
 class TestCustomFilter:
+    """"custom-filter" = búsqueda por subcadena SOLO en el nombre del canal.
+
+    Los atributos del EXTINF (tvg-id, tvg-name, tvg-logo) y la URL quedan
+    fuera del filtro: son metadatos técnicos, no criterio de selección.
+    """
+
     def test_subcadena_en_nombre(self):
         rule = FilterRule(field="custom-filter", pattern="deportes")
         assert evaluate_channel("Canal de Deportes HD", "General", "", [rule]) is True
 
-    def test_subcadena_en_atributos_crudos(self):
-        attrs = 'tvg-id="es.la1" tvg-name="La 1" group-title="General"'
+    def test_no_busca_en_atributos(self):
+        attrs = 'tvg-id="es.la1" tvg-name="La 1"'
         rule = FilterRule(field="custom-filter", pattern="es.la1")
-        assert evaluate_channel("La 1", "General", attrs, [rule]) is True
+        assert evaluate_channel("La 1", "General", attrs, [rule]) is False
+
+    def test_no_busca_en_url(self):
+        rule = FilterRule(field="custom-filter", pattern="cdn.movistar")
+        assert evaluate_channel("La 1", "General", "http://cdn.movistar/x.m3u8", [rule]) is False
+
+    def test_no_busca_en_grupo_usar_group_title(self):
+        """Para el grupo está la opción "Grupo"; custom-filter no lo toca."""
+        rule = FilterRule(field="custom-filter", pattern="spain")
+        assert evaluate_channel("La 1", "SPAIN", "", [rule]) is False
 
     def test_sin_coincidencia(self):
         rule = FilterRule(field="custom-filter", pattern="xxx")
@@ -91,7 +106,7 @@ class TestMultipleRules:
     ("pattern", "name", "group", "expected"),
     [
         ("SPAIN", "La 1 SPAIN", "General", True),
-        ("SPAIN", "La 1", "spain", True),
+        ("SPAIN", "La 1", "spain", False),  # grupo: usar regla "group-title"
         ("SPAIN", "La 1", "General", False),
     ],
 )

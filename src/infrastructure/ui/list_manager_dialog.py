@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 FILTER_FIELDS: list[tuple[FilterField, str]] = [
     ("group-title", "Grupo"),
-    ("custom-filter", "Nombre/atributos"),
+    ("custom-filter", "Nombre"),
 ]
 
 
@@ -168,7 +168,7 @@ class FilterRulesWidget(QWidget):
     def _apply_group_to_row(self, row: int, group: str) -> None:
         """Pone el grupo en el campo Texto y sugiere tipo "Grupo"."""
         self.table.setItem(row, 1, QTableWidgetItem(group))
-        # Si la fila era de tipo Nombre/atributos, cambiar a Grupo:
+        # Si la fila era de tipo Nombre, cambiar a Grupo:
         # un grupo elegido del listado solo tiene sentido filtrado por grupo.
         combo = self.table.cellWidget(row, 0)
         if combo is not None and combo.currentData() == "custom-filter":

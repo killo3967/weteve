@@ -92,7 +92,7 @@ class TestPickGroup:
         assert rules_widget.table.item(0, 1).text() == "preexistente"
 
     def test_aplicar_cambia_campo_a_grupo(self, qtbot, rules_widget):
-        """Elegir un grupo con campo Nombre/atributos lo convierte a Grupo."""
+        """Elegir un grupo con campo Nombre lo convierte a Grupo."""
         # la fila nueva es custom-filter por defecto
         combo = rules_widget.table.cellWidget(0, 0)
         assert combo.currentData() == "custom-filter"

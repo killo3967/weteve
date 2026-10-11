@@ -2,7 +2,8 @@
 
 Semántica equivalente a ``filterThisStream`` de xTeVe (src/m3u.go):
   - Regla de tipo ``group-title``: coincidencia del grupo (con include/exclude).
-  - Regla de tipo ``custom-filter``: subcadena sobre grupo o nombre.
+  - Regla de tipo ``custom-filter``: subcadena sobre el NOMBRE del canal
+    (los atributos del EXTINF y la URL no son criterio de selección).
   - ``{texto}`` dentro del patrón: incluir adicionalmente los canales que
     cumplan ``texto``.
   - ``!{texto}`` dentro del patrón: excluir los canales que cumplan ``texto``.
@@ -110,6 +111,7 @@ def _rule_matches(
     """Comprueba si el patrón coincide según el campo de la regla."""
     if rule.field == "group-title":
         return _matches_pattern(group_lower, pattern)
-    # custom-filter: subcadena sobre grupo, nombre o atributos crudos
-    haystack = f"{group_lower} {name_lower} {raw_attrs.lower()}"
-    return _matches_pattern(haystack, pattern)
+    # custom-filter: subcadena SOLO sobre el nombre. Los atributos del EXTINF
+    # y la URL son metadatos técnicos, no criterio de selección; para grupos
+    # está la regla "group-title".
+    return _matches_pattern(name_lower, pattern)
