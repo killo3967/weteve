@@ -1,0 +1,11 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="es.la1" tvg-name="La 1" tvg-logo="https://example.com/la1.png" group-title="General",La 1 HD
+http://stream.example.com/la1
+#EXTINF:-1 tvg-id="es.la2" tvg-name="La 2" group-title="General",La 2
+http://stream.example.com/la2
+#EXTINF:-1 tvg-name="Teledeporte" group-title="Deportes",Teledeporte
+http://stream.example.com/tdp
+#EXTINF:-1 tvg-id="es.xxx1" group-title="Adultos",Canal XXX
+http://stream.example.com/xxx1
+#EXTINF:-1 group-title="Cine",Canal Cine Plus
+http://stream.example.com/cineplus

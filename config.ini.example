@@ -1,0 +1,18 @@
+# weteve — ejemplo de configuración
+# Un target = un resultado servido por el servidor web local.
+# Copia este fichero a config.ini para arrancar con configuración previa.
+
+[listmanager.target.0]
+name = Mi lista
+; M3U propio: URL o ruta de fichero
+custom_m3u = http://ejemplo.com/lista.m3u
+; EPG propio (opcional): URL o ruta de fichero XMLTV
+custom_epg =
+; Índice de guía EPG heredado de IPTVViewer (-1 = sin EPG de la app)
+epg_source = -1
+; Reglas de filtro en sintaxis xTeVe, separadas por | (campo:patrón:case 0/1)
+rules = group-title:spain:0
+; Overrides EPG: url::canal-id separados por ;;
+epg_overrides =
+port = 8080
+bind = 127.0.0.1

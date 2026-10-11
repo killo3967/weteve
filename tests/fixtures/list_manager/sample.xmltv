@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="es.la1"><display-name>La 1</display-name></channel>
+  <channel id="es.la2"><display-name>La 2</display-name></channel>
+  <channel id="es.tdp"><display-name>Teledeporte</display-name></channel>
+  <channel id="es.24h"><display-name>Canal 24 Horas</display-name></channel>
+  <programme start="20261008120000 +0200" stop="20261008130000 +0200" channel="es.la1">
+    <title>Noticias 1</title>
+    <desc>Informativo mediodía.</desc>
+    <category>Noticias</category>
+  </programme>
+  <programme start="20261008130000 +0200" stop="20261008140000 +0200" channel="es.la1">
+    <title>Deportes</title>
+    <desc>Resumen deportivo.</desc>
+    <category>Deportes</category>
+  </programme>
+  <programme start="20261008120000 +0200" stop="20261008140000 +0200" channel="es.tdp">
+    <title>Partido amistoso</title>
+    <desc>Fútbol.</desc>
+    <category>Deportes</category>
+  </programme>
+</tv>

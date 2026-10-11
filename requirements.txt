@@ -1,0 +1,18 @@
+# weteve — gestor de listas IPTV (extraído de IPTVViewer)
+
+# UI
+PyQt6>=6.5
+
+# HTTP / descargas (repositorios M3U y XMLTV)
+requests>=2.28
+
+# Diagnóstico de puertos (identificar proceso que ocupa el puerto del servicio web)
+psutil>=5.9
+
+# Tests
+pytest>=8.0
+pytest-qt>=4.2
+
+# Dev tools (lint + type checking)
+ruff>=0.16
+mypy>=2.0
