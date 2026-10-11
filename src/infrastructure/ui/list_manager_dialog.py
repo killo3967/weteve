@@ -155,6 +155,25 @@ class FilterRulesWidget(QWidget):
         if combo.count() == 1:
             combo.addItem("Grupo", "group-title")
 
+    def refresh_group_options(self) -> None:
+        """Repuebla campos y valores de grupo tras resolver la fuente.
+
+        Las reglas se construyen en el __init__ antes de cargar el M3U, así que
+        sus desplegables nacen vacíos; sin esto, seleccionar "Grupo" no muestra
+        ningún grupo hasta cambiar el campo a mano.
+        """
+        for row in range(self.table.rowCount()):
+            combo_campo = self.table.cellWidget(row, 1)
+            if combo_campo is None:
+                continue
+            field = combo_campo.currentData()
+            text = self._cell_text(row)
+            combo_campo.blockSignals(True)
+            self._fill_field_combo(combo_campo)
+            self._select_field(combo_campo, field)
+            combo_campo.blockSignals(False)
+            self._set_text_cell(row, field, text)
+
     @staticmethod
     def _select_field(combo: QComboBox, field: FilterField) -> None:
         idx = combo.findData(field)
@@ -229,7 +248,10 @@ class FilterRulesWidget(QWidget):
             return
         combo = QComboBox()
         combo.setEditable(True)
-        groups = self._current_groups() if field == "group-title"             else self._group_fields().get(field, [])
+        if field == "group-title":
+            groups = self._current_groups()
+        else:
+            groups = self._group_fields().get(field, [])
         combo.addItems(groups)
         if text:
             combo.setCurrentText(text)
@@ -555,6 +577,8 @@ class ListManagerDialog(QDialog):
         form.addRow("EPG propio:", custom_epg_container)
 
         self.source_mode_combo.currentIndexChanged.connect(self._update_source_mode)
+        # Al escribir o elegir una ruta se recargan los grupos de las reglas.
+        self.custom_m3u_edit.editingFinished.connect(self._update_source_mode)
         self.source_combo.currentIndexChanged.connect(self._refresh_mapping)
         self.epg_combo.currentIndexChanged.connect(self._refresh_mapping)
         source_layout.addWidget(source_group)
@@ -628,6 +652,11 @@ class ListManagerDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+        # weteve es standalone: el único modo de origen es "custom" (URL o
+        # fichero propio). Esta llamada carga la fuente por primera vez y
+        # alimenta los desplegables de grupos de las reglas.
+        self._update_source_mode()
+
     def _on_save(self) -> None:
         """Guardar persiste la config SIN cerrar el diálogo."""
         from src.infrastructure.client.persistencia import save_config
@@ -641,10 +670,6 @@ class ListManagerDialog(QDialog):
         self.result_label.setText(
             f"Configuración guardada: {new_config['name']} "
             f"(puerto {new_config.get('port')}).")
-
-        # weteve es standalone: el único modo de origen es "custom" (URL o
-        # fichero propio). No hay selector de modo ni listas de la app.
-        self._update_source_mode()
 
     # ------------------------------------------------------------------
     def _source_mode(self) -> str:
@@ -734,6 +759,9 @@ class ListManagerDialog(QDialog):
         for w in (self.custom_m3u_edit.parentWidget(), self.custom_epg_edit.parentWidget()):
             w.setVisible(custom)
         self._refresh_mapping()
+        # La fuente ya está cargada: los desplegables de grupo de las reglas
+        # se crearon vacíos en el __init__, hay que repoblarlos.
+        self.rules_widget.refresh_group_options()
 
     def available_groups(self) -> list[str]:
         """Grupos reales de la fuente actual (para el desplegable de reglas)."""
