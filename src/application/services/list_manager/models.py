@@ -7,7 +7,10 @@ xTeVe (ver odd/tasks/list-manager.md, sección "Filtros").
 from dataclasses import dataclass, field
 from typing import Literal
 
-FilterField = Literal["group-title", "custom-filter"]
+# Campos fijos conocidos; los dinámicos (tvg-group, extgrp, futuros) son
+# cualesquiera claves presentes en Channel.groups.
+FilterField = Literal["group-title", "custom-filter", "tvg-group", "extgrp"]
+RuleOperator = Literal["or", "and"]
 
 
 @dataclass(frozen=True)
@@ -18,37 +21,60 @@ class FilterRule:
       - texto plano: coincide si aparece en el campo objetivo.
       - ``{texto}``: incluir además los canales que cumplan ``texto``.
       - ``!{texto}``: excluir los canales que cumplan ``texto``.
+
+    ``operator`` es cómo se combina esta regla con las anteriores:
+      - "or" (por defecto, compatibilidad con configs xTeVe): el canal pasa si
+        alguna regla OR coincide.
+      - "and": esta regla debe cumplir además de las anteriores.
     """
 
     field: FilterField
     pattern: str
     exclude: bool = False
     case_sensitive: bool = False
+    operator: RuleOperator = "or"
 
     def serialize(self) -> str:
-        """Formato plano para config.ini: ``field:pattern:case`` (case 0/1)."""
-        return f"{self.field}:{self.pattern}:{int(self.case_sensitive)}"
+        """Formato plano para config.ini: ``field:pattern:case[:op]``.
+
+        El operador solo se escribe si no es el default (back-compat con
+        configs xTeVe existentes).
+        """
+        base = f"{self.field}:{self.pattern}:{int(self.case_sensitive)}"
+        if self.operator != "or":
+            base += f":{self.operator}"
+        return base
 
     @staticmethod
     def parse(raw: str) -> "FilterRule":
-        """Parsea ``field:pattern:case``. Detecta ``!{...}`` como exclusión.
+        """Parsea ``field:pattern:case[:op]``. Detecta ``!{...}`` como exclusión.
 
-        Tolerante con formatos parciales (sin campo, sin case).
+        Tolerante con formatos parciales (sin campo, sin case, sin operador).
         """
         import re
 
-        parts = raw.split(":", 2)
-        field: FilterField = "custom-filter"
+        parts = raw.split(":")
+        f: FilterField = "custom-filter"
         pattern = raw
         case_sensitive = False
-        if len(parts) >= 2 and parts[0] in ("group-title", "custom-filter"):
-            field = parts[0]  # type: ignore[assignment]
-            pattern = parts[1]
-            if len(parts) == 3:
-                case_sensitive = parts[2] == "1"
+        operator: RuleOperator = "or"
+        if len(parts) >= 2 and parts[0] in (
+            "group-title", "custom-filter", "tvg-group", "extgrp"
+        ):
+            f = parts[0]  # type: ignore[assignment]
+            if len(parts) >= 3:
+                tail = parts[-1]
+                if tail in ("and", "or"):
+                    operator = tail  # type: ignore[assignment]
+                    case_sensitive = parts[-2] == "1"
+                else:
+                    case_sensitive = tail == "1"
+                pattern = parts[1]
+            else:
+                pattern = parts[1]
         exclude = bool(re.search(r"!+\{[^.]+\}", pattern))
-        return FilterRule(field=field, pattern=pattern, exclude=exclude,
-                          case_sensitive=case_sensitive)
+        return FilterRule(field=f, pattern=pattern, exclude=exclude,
+                          case_sensitive=case_sensitive, operator=operator)
 
 
 @dataclass(frozen=True)

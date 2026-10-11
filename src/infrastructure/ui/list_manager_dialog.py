@@ -57,8 +57,9 @@ class FilterRulesWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.table = QTableWidget(0, 4, self)
-        self.table.setHorizontalHeaderLabels(["Campo", "Texto", "Acción", "Mayús./minús."])
+        self.table = QTableWidget(0, 6, self)
+        self.table.setHorizontalHeaderLabels(
+            ["Operador", "Campo", "Texto", "Acción", "Mayús./minús.", ""])
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
 
@@ -83,17 +84,22 @@ class FilterRulesWidget(QWidget):
 
     def _add_row(self, _checked: bool = False, field: FilterField = "custom-filter",
                  text: str = "", exclude: bool = False,
-                 case_sensitive: bool = False) -> None:
+                 case_sensitive: bool = False, operator: str = "or") -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
 
+        op_combo = QComboBox()
+        op_combo.addItem("OR", "or")
+        op_combo.addItem("AND", "and")
+        op_combo.setCurrentIndex(1 if operator == "and" else 0)
+        self.table.setCellWidget(row, 0, op_combo)
+
         field_combo = QComboBox()
-        for value, label in FILTER_FIELDS:
-            field_combo.addItem(label, value)
-        field_combo.setCurrentIndex(0 if field == "group-title" else 1)
+        self._fill_field_combo(field_combo)
+        self._select_field(field_combo, field)
         field_combo.currentIndexChanged.connect(
             lambda _i, r=row: self._on_field_changed(r))
-        self.table.setCellWidget(row, 0, field_combo)
+        self.table.setCellWidget(row, 1, field_combo)
 
         self._set_text_cell(row, field, text)
 
@@ -101,51 +107,128 @@ class FilterRulesWidget(QWidget):
         action_combo.addItem("Incluir", False)
         action_combo.addItem("Excluir", True)
         action_combo.setCurrentIndex(1 if exclude else 0)
-        self.table.setCellWidget(row, 2, action_combo)
+        self.table.setCellWidget(row, 3, action_combo)
 
         cs_check = QCheckBox("Respetar mayús./minús.")
         cs_check.setChecked(case_sensitive)
-        self.table.setCellWidget(row, 3, cs_check)
+        self.table.setCellWidget(row, 4, cs_check)
+
+        self.table.setCellWidget(row, 5, self._build_arrows_widget(row))
 
     def _remove_row(self) -> None:
         row = self.table.currentRow()
         if row >= 0:
             self.table.removeRow(row)
 
+    # -- campo dinámico: lo que traiga la fuente ------------------------------
+
+    def _group_fields(self) -> dict[str, list[str]]:
+        """Campos de agrupación disponibles vía el diálogo, o solo group-title."""
+        if self._dialog is None:
+            return {}
+        try:
+            return dict(self._dialog.available_group_fields())
+        except Exception:  # noqa: BLE001 - fuente no disponible aún
+            return {}
+
+    def _fill_field_combo(self, combo: QComboBox) -> None:
+        """Rellena el combo Campo: Nombre fijo + un opción por campo de grupo."""
+        combo.clear()
+        combo.addItem("Nombre", "custom-filter")
+        labels = {"group-title": "Grupo", "tvg-group": "Grupo (tvg-group)",
+                  "extgrp": "Grupo (#EXTGRP)"}
+        for fname in self._group_fields():
+            combo.addItem(labels.get(fname, fname), fname)
+        # fallback si la fuente aún no tiene grupos
+        if combo.count() == 1:
+            combo.addItem("Grupo", "group-title")
+
+    @staticmethod
+    def _select_field(combo: QComboBox, field: FilterField) -> None:
+        idx = combo.findData(field)
+        combo.setCurrentIndex(idx if idx >= 0 else 0)
+
+    # -- flechas de reordenación ----------------------------------------------
+
+    def _build_arrows_widget(self, row: int) -> QWidget:
+        w = QWidget(self.table)
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(2, 0, 2, 0)
+        up = QPushButton("↑")
+        up.setFixedWidth(24)
+        up.clicked.connect(lambda _c=False, r=row: self._move_row(r, -1))
+        down = QPushButton("↓")
+        down.setFixedWidth(24)
+        down.clicked.connect(lambda _c=False, r=row: self._move_row(r, +1))
+        lay.addWidget(up)
+        lay.addWidget(down)
+        return w
+
+    def _move_row(self, row: int, delta: int) -> None:
+        """Mueve una fila arriba (-1) o abajo (+1) conservando sus widgets."""
+        n = self.table.rowCount()
+        if not (0 <= row < n):
+            return
+        target = row + delta
+        if not (0 <= target < n):
+            return
+        if target == row:
+            return
+        # Intercambio de filas conservando widgets e items.
+        ncols = self.table.columnCount()
+        # 1) Retirar los widgets de ambas filas (pasan a propiedad del caller).
+        row_widgets = [self.table.cellWidget(row, c) for c in range(ncols)]
+        tgt_widgets = [self.table.cellWidget(target, c) for c in range(ncols)]
+        for c in range(ncols):
+            if row_widgets[c] is not None:
+                self.table.removeCellWidget(row, c)
+            if tgt_widgets[c] is not None:
+                self.table.removeCellWidget(target, c)
+        # 2) Intercambiar items.
+        row_items = [self.table.takeItem(row, c) for c in range(ncols)]
+        tgt_items = [self.table.takeItem(target, c) for c in range(ncols)]
+        for c in range(ncols):
+            if row_items[c] is not None:
+                self.table.setItem(target, c, row_items[c])
+            if tgt_items[c] is not None:
+                self.table.setItem(row, c, tgt_items[c])
+        # 3) Reasignar los widgets cruzados.
+        for c in range(ncols):
+            if row_widgets[c] is not None:
+                self.table.setCellWidget(target, c, row_widgets[c])
+            if tgt_widgets[c] is not None:
+                self.table.setCellWidget(row, c, tgt_widgets[c])
+
     # -- celda de texto: combo de grupos o texto libre ------------------------
 
     def _set_text_cell(self, row: int, field: FilterField, text: str) -> None:
-        """Campo=Grupo → combo editable con los grupos reales; Nombre → texto."""
-        if field == "group-title":
-            combo = QComboBox()
-            combo.setEditable(True)
-            groups = self._current_groups()
-            if text and text not in groups:
-                groups = [text] + groups
-            combo.addItems(groups)
+        """Campo de grupo → combo editable con sus valores; Nombre → texto."""
+        if field == "custom-filter":
+            self.table.removeCellWidget(row, 2)
+            self.table.setItem(row, 2, QTableWidgetItem(text))
+            return
+        combo = QComboBox()
+        combo.setEditable(True)
+        groups = self._current_groups() if field == "group-title"             else self._group_fields().get(field, [])
+        combo.addItems(groups)
+        if text:
             combo.setCurrentText(text)
-            self.table.setCellWidget(row, 1, combo)
-        else:
-            self.table.setItem(row, 1, QTableWidgetItem(text))
+        self.table.setCellWidget(row, 2, combo)
 
     def _on_field_changed(self, row: int) -> None:
         """Al cambiar el campo, convertir la celda de texto conservando el valor."""
-        combo_campo = self.table.cellWidget(row, 0)
+        combo_campo = self.table.cellWidget(row, 1)
         if combo_campo is None:
             return
         field = combo_campo.currentData()
         current = self._cell_text(row)
-        if field == "group-title":
-            self._set_text_cell(row, field, current)
-        else:
-            self.table.removeCellWidget(row, 1)
-            self.table.setItem(row, 1, QTableWidgetItem(current))
+        self._set_text_cell(row, field, current)
 
     def _cell_text(self, row: int) -> str:
-        cell = self.table.cellWidget(row, 1)
+        cell = self.table.cellWidget(row, 2)
         if isinstance(cell, QComboBox):
             return cell.currentText()
-        item = self.table.item(row, 1)
+        item = self.table.item(row, 2)
         return item.text() if item else ""
 
     # -- selección de grupo -------------------------------------------------
@@ -206,9 +289,9 @@ class FilterRulesWidget(QWidget):
     def _apply_group_to_row(self, row: int, group: str) -> None:
         """Pone el grupo en la celda de texto y cambia el campo a "Grupo"."""
         self._set_text_cell(row, "group-title", group)
-        combo = self.table.cellWidget(row, 0)
+        combo = self.table.cellWidget(row, 1)
         if combo is not None:
-            combo.setCurrentIndex(0)  # "Grupo"
+            self._select_field(combo, "group-title")
 
     def load_rules(self, rules: list[FilterRule]) -> None:
         self.table.setRowCount(0)
@@ -227,15 +310,16 @@ class FilterRulesWidget(QWidget):
                 text = m.group(0)[1:-1] if m else pattern
             self._add_row(
                 field=rule.field, text=text, exclude=exclude,
-                case_sensitive=rule.case_sensitive,
+                case_sensitive=rule.case_sensitive, operator=rule.operator,
             )
 
     def get_rules(self) -> list[FilterRule]:
         rules: list[FilterRule] = []
         for row in range(self.table.rowCount()):
-            field_combo = self.table.cellWidget(row, 0)
-            action_combo = self.table.cellWidget(row, 2)
-            cs_check = self.table.cellWidget(row, 3)
+            op_combo = self.table.cellWidget(row, 0)
+            field_combo = self.table.cellWidget(row, 1)
+            action_combo = self.table.cellWidget(row, 3)
+            cs_check = self.table.cellWidget(row, 4)
             text = self._cell_text(row).strip()
             if not text:
                 continue
@@ -245,6 +329,7 @@ class FilterRulesWidget(QWidget):
             rules.append(FilterRule(
                 field=field, pattern=pattern, exclude=exclude,
                 case_sensitive=cs_check.isChecked(),
+                operator=op_combo.currentData(),
             ))
         return rules
 
@@ -615,6 +700,13 @@ class ListManagerDialog(QDialog):
         if source is None:
             return []
         return self._pipeline.get_groups(source)
+
+    def available_group_fields(self) -> dict[str, list[str]]:
+        """Campos de agrupación de la fuente actual con sus valores."""
+        source = self._resolve_source_path()
+        if source is None:
+            return {}
+        return self._pipeline.get_group_fields(source)
 
     def _refresh_mapping(self):
         """Ejecuta el pipeline y actualiza el editor de EPG + resumen."""

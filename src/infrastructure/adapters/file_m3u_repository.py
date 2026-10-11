@@ -49,29 +49,58 @@ class FileM3URepository(IPlaylistRepository):
         """Lógica de parseo de M3U extraída del código original."""
         channels = []
         i = 0
+        pending_extgrp: list[str] = []  # herencia de la directiva #EXTGRP
         while i < len(lines):
             line = lines[i].strip()
+            if line.startswith('#EXTGRP'):
+                # #EXTGRP:Grupo añade grupo a los siguientes canales;
+                # vacío lo limpia.
+                value = line[len('#EXTGRP:'):].strip() if ':' in line else ""
+                pending_extgrp = [normalize_spacing(value)] if value else []
+                i += 1
+                continue
             if line.startswith('#EXTINF'):
                 info = self._parse_extinf(line)
-                
+
                 # Buscar la URL real
                 j = i + 1
                 while j < len(lines) and (lines[j].strip().startswith('#') or not lines[j].strip()):
                     j += 1
-                
+
                 url = lines[j].strip() if j < len(lines) else ""
-                
+
                 if url:
                     name = normalize_spacing(
                         info.get('tvg-name') or info.get('display-name')
                         or info.get('tvg-id') or "")
-                    group = normalize_spacing(info.get('group-title', ''))
+                    raw_group = normalize_spacing(info.get('group-title', ''))
+                    # Primario = primer group-title (los múltiples van por ';')
+                    group = raw_group.split(';')[0].strip() or "Otros"
+
+                    # Campos de agrupación presentes en ESTA línea EXTINF.
+                    # Un group-title propio reinicia la herencia de #EXTGRP.
+                    groups: dict[str, list[str]] = {}
+                    if raw_group:
+                        groups["group-title"] = [
+                            normalize_spacing(g) for g in raw_group.split(';')
+                            if normalize_spacing(g)
+                        ]
+                    tvg_group = normalize_spacing(info.get('tvg-group', ''))
+                    if tvg_group:
+                        groups["tvg-group"] = [
+                            normalize_spacing(g) for g in tvg_group.split(';')
+                            if normalize_spacing(g)
+                        ]
+                    if pending_extgrp and "group-title" not in groups:
+                        groups["extgrp"] = list(pending_extgrp)
+
                     channels.append(Channel(
                         name=name or "Canal sin nombre",
                         url=url,
-                        group=group or "Otros",
+                        group=group,
                         logo_url=info.get('tvg-logo'),
-                        tvg_id=info.get('tvg-id')
+                        tvg_id=info.get('tvg-id'),
+                        groups=groups,
                     ))
                 i = j
             else:
@@ -84,7 +113,8 @@ class FileM3URepository(IPlaylistRepository):
             'tvg-id': r'tvg-id="(.*?)"',
             'tvg-name': r'tvg-name="(.*?)"',
             'tvg-logo': r'tvg-logo="(.*?)"',
-            'group-title': r'group-title="(.*?)"'
+            'group-title': r'group-title="(.*?)"',
+            'tvg-group': r'tvg-group="(.*?)"',
         }
         results = {}
         for key, pattern in patterns.items():

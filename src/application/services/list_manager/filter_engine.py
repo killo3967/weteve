@@ -4,6 +4,10 @@ Semántica equivalente a ``filterThisStream`` de xTeVe (src/m3u.go):
   - Regla de tipo ``group-title``: coincidencia del grupo (con include/exclude).
   - Regla de tipo ``custom-filter``: subcadena sobre el NOMBRE del canal
     (los atributos del EXTINF y la URL no son criterio de selección).
+  - Reglas de campos dinámicos (tvg-group, extgrp): subcadena sobre los
+    grupos de ese campo; un canal con varios matchea si alguno coincide.
+  - Operador por regla: "and" exige cumplir además de las anteriores,
+    "or" (default) añade una alternativa.
   - ``{texto}`` dentro del patrón: incluir adicionalmente los canales que
     cumplan ``texto``.
   - ``!{texto}`` dentro del patrón: excluir los canales que cumplan ``texto``.
@@ -26,16 +30,24 @@ def evaluate_channel(
     group: str,
     raw_attrs: str,
     rules: list[FilterRule],
+    channel_groups: dict[str, list[str]] | None = None,
 ) -> bool:
     """Decide si un canal pasa los filtros.
 
     Args:
         name: nombre del canal.
-        group: group-title del canal.
-        raw_attrs: atributos crudos del EXTINF (para custom-filter ampliado).
-        rules: reglas a evaluar en orden. Un canal se incluye si al menos una
-            regla activa lo incluye y ninguna lo excluye (semántica xTeVe:
-            la primera regla que decide gana; sin reglas, todo pasa).
+        group: grupo primario del canal (primer group-title).
+        raw_attrs: atributos crudos del EXTINF (reservado; hoy sin uso).
+        rules: reglas a evaluar en orden.
+        channel_groups: campos de agrupación del canal
+            ({"group-title": [...], "tvg-group": [...], "extgrp": [...]}).
+
+    Semántica de combinación (en orden de aparición):
+      - Exclusiones primero: cualquier !{...} que coincida elimina el canal.
+      - El operador de una regla dice cómo se une a la condición acumulada:
+        "and" exige que también esta regla pase; "or" la añade como
+        alternativa. Si TODAS las reglas son OR (formato legacy xTeVe) el
+        resultado equivale al comportamiento anterior: basta una que pase.
 
     Returns:
         True si el canal pasa los filtros.
@@ -43,44 +55,38 @@ def evaluate_channel(
     active = [r for r in rules if r.pattern]
     if not active:
         return True
+    groups = channel_groups or {}
 
-    # Prioridad de exclusión: cualquier !{...} que coincida elimina el canal.
+    # 1) Exclusiones: prioridad absoluta.
     for rule in active:
         _included, excluded, _base = _split_rule(rule)
-        hay_name = name if rule.case_sensitive else name.lower()
-        hay_group = group if rule.case_sensitive else group.lower()
-        raw = raw_attrs if rule.case_sensitive else raw_attrs.lower()
-        exc = excluded if rule.case_sensitive else excluded.lower()
-
-        if excluded and _rule_matches(rule, exc, hay_name, hay_group, raw):
+        if excluded and _rule_matches(rule, excluded, name, group, groups):
             return False
 
-    for rule in active:
+    # 2) Inclusiones: las reglas "and" son obligatorias; entre las "or"
+    #    basta con que una pase. Sin reglas "or", resultan solo las "and".
+    def _rule_pass(rule: FilterRule) -> bool:
         included, excluded, base = _split_rule(rule)
-        hay_name = name if rule.case_sensitive else name.lower()
-        hay_group = group if rule.case_sensitive else group.lower()
-        raw = raw_attrs if rule.case_sensitive else raw_attrs.lower()
-        inc = included if rule.case_sensitive else included.lower()
-        base_l = base if rule.case_sensitive else base.lower()
         if included and base:
-            # Ej. xTeVe "Sports {deportes}": grupo base O inclusion adicional.
-            if (
-                _rule_matches(rule, base_l, hay_name, hay_group, raw)
-                or _rule_matches(rule, inc, hay_name, hay_group, raw)
-            ):
-                return True
-        elif included:
-            if _rule_matches(rule, inc, hay_name, hay_group, raw):
-                return True
-        elif not base:
+            return (
+                _rule_matches(rule, base, name, group, groups)
+                or _rule_matches(rule, included, name, group, groups)
+            )
+        if included:
+            return _rule_matches(rule, included, name, group, groups)
+        if not base:
             # Patrón solo de exclusión (p. ej. "!{XXX}"): incluye todo lo
             # no excluido.
             return True
-        elif _rule_matches(rule, base_l, hay_name, hay_group, raw):
-            return True
+        return _rule_matches(rule, base, name, group, groups)
 
-    return False
-
+    and_rules = [r for r in active if r.operator == "and"]
+    or_rules = [r for r in active if r.operator != "and"]
+    if not all(_rule_pass(r) for r in and_rules):
+        return False
+    if or_rules and not any(_rule_pass(r) for r in or_rules):
+        return False
+    return True
 
 def _split_rule(rule: FilterRule) -> tuple[str, str, str]:
     """Extrae (include, exclude, base) del patrón."""
@@ -104,14 +110,29 @@ def _split_rule(rule: FilterRule) -> tuple[str, str, str]:
 def _rule_matches(
     rule: FilterRule,
     pattern: str,
-    name_lower: str,
-    group_lower: str,
-    raw_attrs: str,
+    name: str,
+    group: str,
+    channel_groups: dict[str, list[str]],
 ) -> bool:
-    """Comprueba si el patrón coincide según el campo de la regla."""
+    """Comprueba si el patrón coincide según el campo de la regla.
+
+    Insensible a mayúsculas salvo que la regla pida lo contrario.
+    """
+    if rule.field == "custom-filter":
+        hay = name if rule.case_sensitive else name.lower()
+        needle = pattern if rule.case_sensitive else pattern.lower()
+        return _matches_pattern(hay, needle)
+
     if rule.field == "group-title":
-        return _matches_pattern(group_lower, pattern)
-    # custom-filter: subcadena SOLO sobre el nombre. Los atributos del EXTINF
-    # y la URL son metadatos técnicos, no criterio de selección; para grupos
-    # está la regla "group-title".
-    return _matches_pattern(name_lower, pattern)
+        # Grupo primario + los múltiples del mismo campo.
+        values = [group] + list(channel_groups.get("group-title", []))
+    else:
+        # Campos dinámicos: tvg-group, extgrp, futuros.
+        values = list(channel_groups.get(rule.field, []))
+
+    if not rule.case_sensitive:
+        values = [v.lower() for v in values]
+        needle = pattern.lower()
+    else:
+        needle = pattern
+    return any(_matches_pattern(v, needle) for v in values)

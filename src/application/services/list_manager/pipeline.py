@@ -81,6 +81,35 @@ class ListManagerPipeline:
         groups = sorted({c.group for c in channels if c.group and c.group.strip()})
         return groups
 
+    def get_group_fields(self, source: int | str | None = None) -> dict[str, list[str]]:
+        """Campos de agrupación disponibles en una fuente y sus valores.
+
+        Devuelve {nombre_de_campo: [valores ordenados]} a partir de
+        ``Channel.groups``: p. ej. {"group-title": [...], "tvg-group": [...],
+        "extgrp": [...]}. Solo incluye campos con al menos un valor.
+        """
+        channels = self._channels_of(source)
+        fields: dict[str, set[str]] = {}
+        for ch in channels:
+            for fname, values in (ch.groups or {}).items():
+                fields.setdefault(fname, set()).update(
+                    v for v in values if v and v.strip())
+        return {k: sorted(v) for k, v in sorted(fields.items())}
+
+    def _channels_of(self, source: int | str | None) -> list:
+        """Canales de una fuente registrada, usando la cache."""
+        if source is None:
+            if not self._sources:
+                return []
+            source = next(iter(self._sources))
+        if source not in self._sources:
+            return []
+        channels = self._channel_cache.get(source)
+        if channels is None:
+            channels = self._m3u_repo.get_channels(self._sources[source][0])
+            self._channel_cache[source] = channels
+        return channels
+
     def get_epg(self, index: int | str) -> EPGData | None:
         """Devuelve la EPG cacheada de una fuente registrada, o None."""
         entry = self._sources.get(index)
