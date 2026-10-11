@@ -284,8 +284,8 @@ class ListManagerDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # Paso 1: fuente
-        source_group = QGroupBox("Paso 1 — Fuente")
+        # Orígenes (fuente)
+        source_group = QGroupBox("Orígenes")
         form = QFormLayout(source_group)
         self.name_edit = QLineEdit(str(config.get("name", "")))
         form.addRow("&Nombre del resultado:", self.name_edit)
@@ -343,16 +343,16 @@ class ListManagerDialog(QDialog):
         self.epg_combo.currentIndexChanged.connect(self._refresh_mapping)
         layout.addWidget(source_group)
 
-        # Paso 2: filtros
-        filter_group = QGroupBox("Paso 2 — Filtros")
+        # Filtro de canales
+        filter_group = QGroupBox("Filtro de canales")
         filter_layout = QVBoxLayout(filter_group)
         self.rules_widget = FilterRulesWidget(on_apply=self._refresh_mapping)
         self.rules_widget.load_rules(config.get("rules", []))
         filter_layout.addWidget(self.rules_widget)
         layout.addWidget(filter_group)
 
-        # Paso 3: EPG
-        epg_group = QGroupBox("Paso 3 — Guía EPG (asignación manual)")
+        # Mapeado canal<-->epg
+        epg_group = QGroupBox("Mapeado canal<-->epg")
         epg_layout = QVBoxLayout(epg_group)
         self.epg_mapping = EpgMappingWidget()
         epg_layout.addWidget(self.epg_mapping)
