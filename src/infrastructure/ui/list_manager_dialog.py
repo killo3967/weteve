@@ -84,9 +84,19 @@ class FilterRulesWidget(QWidget):
             buttons.addWidget(apply_btn)
         layout.addLayout(buttons)
 
+    # Valores por defecto al crear una fila nueva: "AND + Excluir" es lo más
+    # habitual (afinar una lista existente quitando canales).
+    DEFAULT_OPERATOR = "and"
+    DEFAULT_EXCLUDE = True
+
     def _add_row(self, _checked: bool = False, field: FilterField = "custom-filter",
-                 text: str = "", exclude: bool = False,
-                 case_sensitive: bool = False, operator: str = "or") -> None:
+                 text: str = "", exclude: bool | None = None,
+                 case_sensitive: bool = False,
+                 operator: str | None = None) -> None:
+        if exclude is None:
+            exclude = self.DEFAULT_EXCLUDE
+        if operator is None:
+            operator = self.DEFAULT_OPERATOR
         row = self.table.rowCount()
         self.table.insertRow(row)
 
@@ -258,7 +268,7 @@ class FilterRulesWidget(QWidget):
         if row < 0:
             row = 0 if self.table.rowCount() else -1
         if row < 0:
-            self._add_row()
+            self._add_row(exclude=False, operator="or")
             row = 0
         self._pick_group_for_row(row)
 

@@ -127,7 +127,10 @@ class TestGroupCellCombo:
     def test_get_rules_lee_combo_de_grupo(self, qtbot):
         w = FilterRulesWidget(dialog=_FakeDialog(["SPAIN"]))
         qtbot.addWidget(w)
-        w._add_row(field="group-title", text="SPAIN")
+        # exclusión explícita off: esta prueba comprueba el combo de grupos,
+        # no los valores por defecto de la fila (ver test_ui_rule_defaults)
+        w._add_row(field="group-title", text="SPAIN", exclude=False,
+                   operator="or")
         rules = w.get_rules()
         assert len(rules) == 1
         assert rules[0].field == "group-title"
@@ -215,11 +218,12 @@ class TestOperatorAndArrows:
         assert self._col_count(w) == 6  # Operador, Campo, Texto, Acción, Mayús., ""
         assert w.table.horizontalHeaderItem(0).text() == "Operador"
 
-    def test_operador_default_or(self, qtbot):
+    def test_operador_default_and(self, qtbot):
+        """Una fila nueva nace con AND (y Excluir): afinar listas existentes."""
         w = self._make(qtbot)
         w._add_row(field="group-title", text="SPAIN")
         op = w.table.cellWidget(0, 0)
-        assert op.currentData() == "or"
+        assert op.currentData() == "and"
 
     def test_get_rules_lee_operador(self, qtbot):
         w = self._make(qtbot)
@@ -269,7 +273,8 @@ class TestMoveRowWidgetsVivos:
         w = FilterRulesWidget(dialog=_FakeDialog(["SPAIN", "USA"]))
         qtbot.addWidget(w)
         w._add_row(field="group-title", text="SPAIN")
-        w._add_row(field="custom-filter", text="HBO")
+        w._add_row(field="custom-filter", text="HBO", exclude=False,
+                   operator="or")
         w._move_row(1, -1)
         # Acceder a todos los widgets: si alguno fue borrado por Qt lanza
         # RuntimeError / segfault.
