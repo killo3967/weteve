@@ -51,8 +51,9 @@ FILTER_FIELDS: list[tuple[FilterField, str]] = [
 class FilterRulesWidget(QWidget):
     """Tabla editable de reglas de filtro simple (modelo xTeVe interno)."""
 
-    def __init__(self, parent=None, on_apply=None):
+    def __init__(self, parent=None, on_apply=None, dialog=None):
         super().__init__(parent)
+        self._dialog = dialog  # proveedor de grupos (ListManagerDialog)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -66,8 +67,13 @@ class FilterRulesWidget(QWidget):
         add_btn.clicked.connect(self._add_row)
         remove_btn = QPushButton("&Quitar")
         remove_btn.clicked.connect(self._remove_row)
+        self.groups_btn = QPushButton("&Grupos…")
+        self.groups_btn.setToolTip(
+            "Elegir un grupo real de la fuente y ponerlo en la regla seleccionada")
+        self.groups_btn.clicked.connect(self._pick_group)
         buttons.addWidget(add_btn)
         buttons.addWidget(remove_btn)
+        buttons.addWidget(self.groups_btn)
         buttons.addStretch()
         if on_apply is not None:
             apply_btn = QPushButton("&Aplicar")
@@ -103,6 +109,70 @@ class FilterRulesWidget(QWidget):
         row = self.table.currentRow()
         if row >= 0:
             self.table.removeRow(row)
+
+    # -- selección de grupo -------------------------------------------------
+
+    def _current_groups(self) -> list[str]:
+        """Grupos disponibles vía el diálogo, o lista vacía."""
+        if self._dialog is None:
+            return []
+        try:
+            return list(self._dialog.available_groups())
+        except Exception:  # noqa: BLE001 - fuente no disponible aún
+            return []
+
+    def _pick_group(self) -> None:
+        """Muestra el menú de grupos y lo aplica a la fila seleccionada."""
+        row = self.table.currentRow()
+        if row < 0:
+            row = 0 if self.table.rowCount() else -1
+        if row < 0:
+            self._add_row()
+            row = 0
+        self._pick_group_for_row(row)
+
+    def _pick_group_for_row(self, row: int) -> None:
+        """Muestra el menú de grupos y aplica el elegido a la fila."""
+        groups = self._current_groups()
+        if not groups:
+            self._warn_no_groups()
+            return
+        chosen = self._choose_group(groups)
+        if chosen is None:
+            return
+        self._apply_group_to_row(row, chosen)
+
+    def _choose_group(self, groups: list[str]) -> str | None:
+        """Interacción: menú desplegable. None = cancelado.
+
+        Separada para poder sustituirla en tests (evita el exec modal).
+        """
+        from PyQt6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        for g in groups:
+            menu.addAction(g)
+        action = menu.exec(self.groups_btn.mapToGlobal(
+            self.groups_btn.rect().bottomLeft()))
+        return action.text() if action is not None else None
+
+    def _warn_no_groups(self) -> None:
+        """Aviso cuando la fuente aún no está cargada."""
+        from PyQt6.QtWidgets import QMessageBox
+
+        QMessageBox.information(
+            self, "Sin grupos",
+            "No hay grupos disponibles. Aplica primero la fuente "
+            "(botón Aplicar del diálogo) para cargar los canales.")
+
+    def _apply_group_to_row(self, row: int, group: str) -> None:
+        """Pone el grupo en el campo Texto y sugiere tipo "Grupo"."""
+        self.table.setItem(row, 1, QTableWidgetItem(group))
+        # Si la fila era de tipo Nombre/atributos, cambiar a Grupo:
+        # un grupo elegido del listado solo tiene sentido filtrado por grupo.
+        combo = self.table.cellWidget(row, 0)
+        if combo is not None and combo.currentData() == "custom-filter":
+            combo.setCurrentIndex(0)  # "Grupo"
 
     def load_rules(self, rules: list[FilterRule]) -> None:
         self.table.setRowCount(0)
@@ -346,7 +416,8 @@ class ListManagerDialog(QDialog):
         # Filtro de canales
         filter_group = QGroupBox("Filtro de canales")
         filter_layout = QVBoxLayout(filter_group)
-        self.rules_widget = FilterRulesWidget(on_apply=self._refresh_mapping)
+        self.rules_widget = FilterRulesWidget(on_apply=self._refresh_mapping,
+                                              dialog=self)
         self.rules_widget.load_rules(config.get("rules", []))
         filter_layout.addWidget(self.rules_widget)
         layout.addWidget(filter_group)
@@ -502,6 +573,13 @@ class ListManagerDialog(QDialog):
         for w in (self.custom_m3u_edit.parentWidget(), self.custom_epg_edit.parentWidget()):
             w.setVisible(custom)
         self._refresh_mapping()
+
+    def available_groups(self) -> list[str]:
+        """Grupos reales de la fuente actual (para el desplegable de reglas)."""
+        source = self._resolve_source_path()
+        if source is None:
+            return []
+        return self._pipeline.get_groups(source)
 
     def _refresh_mapping(self):
         """Ejecuta el pipeline y actualiza el editor de EPG + resumen."""

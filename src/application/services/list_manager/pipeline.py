@@ -50,6 +50,8 @@ class ListManagerPipeline:
         self._epg_repo = epg_repository or XMLTVRepository()
         # cache de fuentes resueltas por clave: índice (modo app) o ruta (custom)
         self._sources: dict[int | str, tuple[str, EPGData | None]] = {}
+        # cache de canales por fuente para get_groups (evita re-descargar)
+        self._channel_cache: dict[int | str, list] = {}
 
     def register_source(self, index: int | str, m3u_path: str, epg_path: str | None) -> None:
         """Registra (sin descargar) la fuente M3U y su EPG opcional."""
@@ -57,6 +59,27 @@ class ListManagerPipeline:
         if epg_path:
             epg = self._epg_repo.load_epg(epg_path)
             self._sources[index] = (m3u_path, epg)
+
+    def get_groups(self, source: int | str | None = None) -> list[str]:
+        """Grupos distintos de una fuente, ordenados y sin duplicados.
+
+        Args:
+            source: clave de la fuente (índice o ruta). None = última usada.
+
+        Usa la cache de canales si está; si no, los carga del repositorio.
+        """
+        if source is None:
+            if not self._sources:
+                return []
+            source = next(iter(self._sources))
+        if source not in self._sources:
+            return []
+        channels = self._channel_cache.get(source)
+        if channels is None:
+            channels = self._m3u_repo.get_channels(self._sources[source][0])
+            self._channel_cache[source] = channels
+        groups = sorted({c.group for c in channels if c.group and c.group.strip()})
+        return groups
 
     def get_epg(self, index: int | str) -> EPGData | None:
         """Devuelve la EPG cacheada de una fuente registrada, o None."""

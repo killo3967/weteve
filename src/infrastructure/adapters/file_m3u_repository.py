@@ -8,6 +8,14 @@ from src.domain.entities.channel import Channel
 from src.domain.ports.i_playlist_repo import IPlaylistRepository
 
 
+def normalize_spacing(text: str) -> str:
+    """Limpia espacios: recorta extremos y colapsa secuencias a un espacio.
+
+    "MOVISTAR  CINE" -> "MOVISTAR CINE". Evita que el filtro por subcadena
+    falle por diferencias invisibles de espaciado en las listas reales.
+    """
+    return " ".join(text.split())
+
 class FileM3URepository(IPlaylistRepository):
     """Adaptador que gestiona la persistencia y carga de canales desde archivos M3U."""
     
@@ -54,10 +62,14 @@ class FileM3URepository(IPlaylistRepository):
                 url = lines[j].strip() if j < len(lines) else ""
                 
                 if url:
+                    name = normalize_spacing(
+                        info.get('tvg-name') or info.get('display-name')
+                        or info.get('tvg-id') or "")
+                    group = normalize_spacing(info.get('group-title', ''))
                     channels.append(Channel(
-                        name=info.get('tvg-name') or info.get('display-name') or info.get('tvg-id') or "Canal sin nombre",
+                        name=name or "Canal sin nombre",
                         url=url,
-                        group=info.get('group-title', 'Otros'),
+                        group=group or "Otros",
                         logo_url=info.get('tvg-logo'),
                         tvg_id=info.get('tvg-id')
                     ))
