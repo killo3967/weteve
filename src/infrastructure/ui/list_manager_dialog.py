@@ -825,7 +825,7 @@ class ListManagerDialog(QDialog):
     def _browse_epg(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Seleccionar guía EPG (XMLTV)", "",
-            "Guías XMLTV (*.xml *.xmltv *.gz);;Todos los ficheros (*)",
+            "Guías XMLTV (*.xml *.xmltv *.mlx *.gz);;Todos los ficheros (*)",
         )
         if path:
             self.custom_epg_edit.setText(path)

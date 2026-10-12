@@ -41,10 +41,24 @@ class LocationDelegate(QStyledItemDelegate):
 
     La detección URL/fichero vive aquí (infer_source_type): si el texto
     empieza por http(s) es URL remota y el botón se deshabilita; en caso
-    contrario abre un QFileDialog.
+    contrario abre un QFileDialog con el filtro del tipo de pestaña.
     """
 
-    FILTER = "Listas M3U/EPG (*.m3u *.m3u8 *.epg);;Todos (*.*)"
+    # un EPG real es XML (a veces .mlx) y suele venir comprimido en .gz
+    # (xml dentro); el repositorio ya descomprime por extensión o magic
+    FILTER_M3U = "Listas M3U (*.m3u *.m3u8);;Todos los ficheros (*)"
+    FILTER_EPG = (
+        "Guías XMLTV (*.xml *.xmltv *.mlx *.gz);;"
+        "Todos los ficheros (*)"
+    )
+
+    def __init__(self, kind: str = "m3u", parent=None) -> None:
+        super().__init__(parent)
+        self._kind = kind
+
+    @property
+    def FILTER(self) -> str:  # noqa: N802 - compat con tests existentes
+        return self.FILTER_M3U if self._kind == "m3u" else self.FILTER_EPG
 
     @staticmethod
     def infer_source_type(location: str) -> str:
@@ -107,7 +121,8 @@ class SourceCatalogWidget(QWidget):
         self.table.setHorizontalHeaderLabels(_COLS)
         self.table.horizontalHeader().setSectionResizeMode(
             2, QHeaderView.ResizeMode.Stretch)
-        self.table.setItemDelegateForColumn(2, LocationDelegate(self.table))
+        self.table.setItemDelegateForColumn(
+            2, LocationDelegate(self._kind, self.table))
         layout.addWidget(self.table)
 
         buttons = QHBoxLayout()

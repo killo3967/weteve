@@ -85,5 +85,21 @@ class TestLocationEditor:
         assert btn.isEnabled()
 
 
+class TestFiltrosPorTipo:
+    def test_filtro_epg_incluye_xml_gz_mlx(self, qtbot):
+        w = SourceCatalogWidget("epg")
+        qtbot.addWidget(w)
+        delegate = w.table.itemDelegateForColumn(2)
+        for ext in (".xml", ".xmltv", ".gz", ".mlx"):
+            assert ext in delegate.FILTER, f"falta {ext} en filtro EPG"
+
+    def test_filtro_m3u_incluye_m3u8(self, qtbot):
+        w = SourceCatalogWidget("m3u")
+        qtbot.addWidget(w)
+        delegate = w.table.itemDelegateForColumn(2)
+        for ext in (".m3u", ".m3u8"):
+            assert ext in delegate.FILTER
+
+
 def widget_value(index):
     return index.model().data(index)
