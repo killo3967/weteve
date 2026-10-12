@@ -300,3 +300,38 @@ class TestMoveRowWidgetsVivos:
         assert w.table.cellWidget(0, 2).currentText() == "USA"
         # los widgets de la fila 0 siguen vivos
         assert w.table.cellWidget(0, 2).currentData() is None or True
+
+
+class TestCampoLista:
+    """Campo de filtro 'Lista' (source): valores vía get_group_fields."""
+
+    def test_get_group_fields_expone_source_tras_merged(self):
+        class _Repo:
+            def get_channels(self, source):
+                return [_Ch({"group-title": ["G"]})]
+        class _Ch:
+            def __init__(self, groups):
+                self.group = groups.get("group-title", ["Otros"])[0]
+                self.groups = groups
+        from src.application.services.list_manager.models import SourceRef
+        pl = ListManagerPipeline(m3u_repository=_Repo())
+        pl.register_merged("m", (SourceRef("s1", "platero", "x.m3u"),), ())
+        fields = pl.get_group_fields("m")
+        assert fields["source"] == ["platero"]
+
+    def test_combo_incluye_lista(self, qtbot, rules_widget):
+        """El combo Campo ofrece 'Lista' cuando el pipeline la expone."""
+        rules_widget._dialog = type("D", (), {
+            "available_group_fields": staticmethod(lambda: {
+                "group-title": ["A"], "source": ["platero"]}),
+        })()
+        rules_widget._fill_field_combo(rules_widget._field_combo) \
+            if hasattr(rules_widget, "_field_combo") else None
+        # localiza el combo de campo de la primera fila
+        from src.infrastructure.ui.list_manager_dialog import FilterRulesWidget
+        combo = rules_widget.findChildren(QComboBox)[0]
+        rules_widget._fill_field_combo(combo)
+        data = [combo.itemData(i) for i in range(combo.count())]
+        assert "source" in data
+        idx = data.index("source")
+        assert combo.itemText(idx) == "Lista"

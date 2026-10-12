@@ -148,7 +148,7 @@ class FilterRulesWidget(QWidget):
         combo.clear()
         combo.addItem("Nombre", "custom-filter")
         labels = {"group-title": "Grupo", "tvg-group": "Grupo (tvg-group)",
-                  "extgrp": "Grupo (#EXTGRP)"}
+                  "extgrp": "Grupo (#EXTGRP)", "source": "Lista"}
         for fname in self._group_fields():
             combo.addItem(labels.get(fname, fname), fname)
         # fallback si la fuente aún no tiene grupos
