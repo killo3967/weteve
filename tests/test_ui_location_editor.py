@@ -101,5 +101,48 @@ class TestFiltrosPorTipo:
             assert ext in delegate.FILTER
 
 
+class TestTipoOrigenCombo:
+    def test_editor_de_tipo_es_combo(self, widget):
+        delegate = widget.table.itemDelegateForColumn(1)
+        from PyQt6.QtWidgets import QComboBox
+        idx = widget.table.model().index(0, 1)
+        ed = delegate.createEditor(widget.table, None, idx)
+        combo = ed.findChild(QComboBox)
+        assert combo is not None
+        assert [combo.itemText(i) for i in range(combo.count())] == [
+            "Fichero local", "URL remota"]
+
+    def test_elegir_url_con_ubicacion_vacia_prefija_http(self, widget):
+        delegate = widget.table.itemDelegateForColumn(1)
+        from PyQt6.QtWidgets import QComboBox
+        idx = widget.table.model().index(0, 1)
+        ed = delegate.createEditor(widget.table, None, idx)
+        delegate.setEditorData(ed, idx)
+        ed.findChild(QComboBox).setCurrentText("URL remota")
+        delegate.setModelData(ed, widget.table.model(), idx)
+        # ubicación preparada para completar la URL y tipo sincronizado
+        assert widget.table.item(0, 2).text() == "http://"
+        assert widget.table.item(0, 1).text() == "URL remota"
+
+    def test_elegir_fichero_no_toca_ubicacion_http(self, widget):
+        widget.table.item(0, 2).setText("http://s/l.m3u")
+        delegate = widget.table.itemDelegateForColumn(1)
+        from PyQt6.QtWidgets import QComboBox
+        idx = widget.table.model().index(0, 1)
+        ed = delegate.createEditor(widget.table, None, idx)
+        ed.findChild(QComboBox).setCurrentText("Fichero local")
+        delegate.setModelData(ed, widget.table.model(), idx)
+        # una URL http no puede pasar a fichero: ubicación intacta,
+        # y el tipo mostrado sigue reflejando la inferencia
+        assert widget.table.item(0, 2).text() == "http://s/l.m3u"
+        assert widget.table.item(0, 1).text() == "URL remota"
+
+    def test_editar_ubicacion_actualiza_tipo_en_vivo(self, widget):
+        widget.table.item(0, 2).setText("http://s/l.m3u")
+        assert widget.table.item(0, 1).text() == "URL remota"
+        widget.table.item(0, 2).setText("C:/x/l.m3u")
+        assert widget.table.item(0, 1).text() == "Fichero local"
+
+
 def widget_value(index):
     return index.model().data(index)

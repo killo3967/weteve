@@ -103,6 +103,52 @@ class LocationDelegate(QStyledItemDelegate):
         editor.setGeometry(option.rect)
 
 
+class _TypeDelegate(QStyledItemDelegate):
+    """Celda «Tipo de origen»: combo Fichero local / URL remota.
+
+    Elegir URL remota con la ubicación vacía o de ruta local la convierte
+    en http:// para completar; elegir Fichero local solo tiene efecto si
+    la ubicación no es una URL http(s) (una URL no se puede «convertir»).
+    """
+
+    OPTIONS = ("Fichero local", "URL remota")
+
+    def createEditor(self, parent, option, index):
+        from PyQt6.QtWidgets import QComboBox, QWidget as _W
+        editor = _W(parent)
+        lay = QHBoxLayout(editor)
+        lay.setContentsMargins(0, 0, 0, 0)
+        combo = QComboBox(editor)
+        combo.addItems(self.OPTIONS)
+        lay.addWidget(combo)
+        editor._combo = combo
+        editor._signals = _EditorSignals(editor)
+        combo.currentTextChanged.connect(lambda _: editor._signals.commit.emit())
+        return editor
+
+    def setEditorData(self, editor, index):
+        current = index.data() or self.OPTIONS[0]
+        i = self.OPTIONS.index(current) if current in self.OPTIONS else 0
+        editor._combo.blockSignals(True)
+        editor._combo.setCurrentIndex(i)
+        editor._combo.blockSignals(False)
+
+    def setModelData(self, editor, model, index):
+        want = editor._combo.currentText()
+        loc_model = index.sibling(index.row(), 2)
+        loc = (loc_model.data() or "").strip()
+        is_url = LocationDelegate.infer_source_type(loc) == "url"
+        if want == "URL remota" and not is_url:
+            model.setData(loc_model, "http://")
+            model.setData(index, "URL remota")
+        elif want == "Fichero local" and not is_url:
+            model.setData(index, "Fichero local")
+        # si es http y piden fichero: la ubicación manda, no se cambia
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
+
+
 class SourceCatalogWidget(QWidget):
     """Tabla de filas de la cartera filtrada por ``kind`` (m3u/epg)."""
 
@@ -123,6 +169,10 @@ class SourceCatalogWidget(QWidget):
             2, QHeaderView.ResizeMode.Stretch)
         self.table.setItemDelegateForColumn(
             2, LocationDelegate(self._kind, self.table))
+        self.table.setItemDelegateForColumn(
+            1, _TypeDelegate(self.table))
+        # sincronizar tipo mostrado cuando la ubicación cambia a mano
+        self.table.itemChanged.connect(self._sync_type_label)
         layout.addWidget(self.table)
 
         buttons = QHBoxLayout()
@@ -160,6 +210,16 @@ class SourceCatalogWidget(QWidget):
                              else Qt.CheckState.Unchecked)
         self.table.setItem(row, 4, active)
         self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, e.id)
+
+    def _sync_type_label(self, item) -> None:
+        """Etiqueta de tipo al día cuando la ubicación se edita a mano."""
+        col = item.column()
+        row = item.row()
+        if col == 2:
+            tipo = self.table.item(row, 1)
+            if tipo is not None:
+                tipo.setText(_TYPE_LABELS[LocationDelegate.infer_source_type(
+                    (item.text() or "").strip())])
 
     def add_row(self) -> None:
         """Fila nueva: fichero local, refresco 0 (estática), activa."""
