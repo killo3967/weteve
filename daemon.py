@@ -28,6 +28,7 @@ from src.application.services.daemon.control_api import ControlApiServer
 from src.application.services.daemon.mcp_server import McpStreamableServer
 from src.application.services.daemon.mcp_tools import build_tool_registry
 from src.application.services.daemon.mcp_transport import McpHttpTransport
+from src.infrastructure.client.sources_store import load_catalog
 from src.application.services.daemon.supervisor import TargetSupervisor
 from src.application.services.daemon.target_store import TargetStore
 from src.infrastructure.client.daemon_client import DaemonClient
@@ -76,7 +77,9 @@ def build_daemon(config_path: Path = DEFAULT_CONFIG) -> dict:
     store = TargetStore(config_path)
     store.load()
 
-    supervisor = TargetSupervisor()
+    supervisor = TargetSupervisor(
+        catalog_fn=lambda: load_catalog(config_path),
+    )
     running = {"flag": True}
 
     def shutdown() -> None:
