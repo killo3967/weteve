@@ -1,4 +1,4 @@
-"""Pestañas del diálogo: Orígenes / Filtros / Mapeado en QTabWidget."""
+"""Pestañas del diálogo: Listas IPTV / Listas EPG / Filtros / Mapeado."""
 from pathlib import Path
 
 import pytest
@@ -16,11 +16,11 @@ def dialog(qtbot):
 class TestTabs:
     def test_tab_widget_existe(self, dialog):
         assert dialog.tabs is not None
-        assert dialog.tabs.count() == 3
+        assert dialog.tabs.count() == 4
 
     def test_titulos_de_pestanas(self, dialog):
         titles = [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())]
-        assert titles == ["Orígenes", "Filtros", "Mapeado EPG"]
+        assert titles == ["Listas IPTV", "Listas EPG", "Filtros", "Mapeado EPG"]
 
     def test_widgets_dentro_de_pestanas(self, dialog):
         # el contenido sigue accesible por los mismos atributos
@@ -35,3 +35,8 @@ class TestTabs:
         assert _ancestor(dialog.name_edit, dialog.tab_sources)
         assert _ancestor(dialog.rules_widget, dialog.tab_filters)
         assert _ancestor(dialog.epg_mapping, dialog.tab_mapping)
+
+    def test_carteras_son_widgets_de_cartera(self, dialog):
+        from src.infrastructure.ui.source_catalog_widget import SourceCatalogWidget
+        assert isinstance(dialog.catalog_m3u_widget, SourceCatalogWidget)
+        assert isinstance(dialog.catalog_epg_widget, SourceCatalogWidget)
