@@ -8,11 +8,11 @@ import logging
 
 from PyQt6.QtCore import QDir, QObject, Qt
 from PyQt6.QtWidgets import (
-    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLineEdit,
+    QMenu,
     QPushButton,
     QStyledItemDelegate,
     QTableWidget,
@@ -105,49 +105,18 @@ class LocationDelegate(QStyledItemDelegate):
 
 
 class _TypeDelegate(QStyledItemDelegate):
-    """Celda «Tipo de origen»: combo Fichero local / URL remota.
+    """Definiciones de la celda «Tipo de origen».
 
-    Elegir URL remota con la ubicación vacía o de ruta local la convierte
-    en http:// para completar; elegir Fichero local solo tiene efecto si
-    la ubicación no es una URL http(s) (una URL no se puede «convertir»).
+    La celda no lleva delegado de edición: la elección se hace con un
+    menú emergente (``SourceCatalogWidget._show_type_menu``) porque el
+    editor in-cell de combo se renderiza mal con el tema oscuro del
+    sistema (flecha invisible, opciones superpuestas). Elegir URL remota
+    con ubicación vacía o ruta local la convierte en http://; elegir
+    Fichero local solo tiene efecto si la ubicación no es una URL
+    http(s) (una URL no se puede «convertir»).
     """
 
     OPTIONS = ("Fichero local", "URL remota")
-
-    def createEditor(self, parent, option, index):
-        from PyQt6.QtWidgets import QComboBox
-        # QComboBox nativo como editor directo: flecha y popup garantizados
-        editor = QComboBox(parent)
-        editor.addItems(self.OPTIONS)
-        editor.currentIndexChanged.connect(self._on_activated)
-        return editor
-
-    def _on_activated(self, _index: int) -> None:
-        # el usuario eligió (popup o programático): comprometer y cerrar
-        self.commitData.emit(self.sender())
-        self.closeEditor.emit(self.sender())
-
-    def setEditorData(self, editor, index):
-        current = index.data() or self.OPTIONS[0]
-        i = self.OPTIONS.index(current) if current in self.OPTIONS else 0
-        editor.blockSignals(True)
-        editor.setCurrentIndex(i)
-        editor.blockSignals(False)
-
-    def setModelData(self, editor, model, index):
-        want = editor.currentText()
-        loc_model = index.sibling(index.row(), 2)
-        loc = (loc_model.data() or "").strip()
-        is_url = LocationDelegate.infer_source_type(loc) == "url"
-        if want == "URL remota" and not is_url:
-            model.setData(loc_model, "http://")
-            model.setData(index, "URL remota")
-        elif want == "Fichero local" and not is_url:
-            model.setData(index, "Fichero local")
-        # si es http y piden fichero: la ubicación manda, no se cambia
-
-    def updateEditorGeometry(self, editor, option, index):
-        editor.setGeometry(option.rect)
 
 
 class SourceCatalogWidget(QWidget):
@@ -170,8 +139,6 @@ class SourceCatalogWidget(QWidget):
             2, QHeaderView.ResizeMode.Stretch)
         self.table.setItemDelegateForColumn(
             2, LocationDelegate(self._kind, self.table))
-        self.table.setItemDelegateForColumn(
-            1, _TypeDelegate(self.table))
         # sincronizar tipo mostrado cuando la ubicación cambia a mano
         self.table.itemChanged.connect(self._sync_type_label)
         # un solo clic sobre la celda de tipo abre el desplegable
@@ -202,6 +169,8 @@ class SourceCatalogWidget(QWidget):
     def _fill_row(self, row: int, e) -> None:
         self.table.setItem(row, 0, QTableWidgetItem(e.name))
         tipo = QTableWidgetItem(_TYPE_LABELS.get(e.source_type, e.source_type))
+        # no editable: la elección va por menú emergente en cellClicked
+        tipo.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         self.table.setItem(row, 1, tipo)
         self.table.setItem(row, 2, QTableWidgetItem(e.location))
         self.table.setItem(row, 3, QTableWidgetItem(str(e.refresh_min)))
@@ -215,29 +184,41 @@ class SourceCatalogWidget(QWidget):
 
     def _on_cell_clicked(self, row: int, column: int) -> None:
         if column == 1:
-            self._open_type_editor(row, column)
+            self._show_type_menu(row)
 
-    def _open_type_editor(self, row: int, column: int) -> None:
-        """Abre el desplegable de tipo con un solo clic."""
-        from PyQt6.QtWidgets import QAbstractItemView, QStyledItemDelegate
-        # cerrar cualquier editor activo (p. ej. el de la ubicación que
-        # add_row deja abierto): hay que commitar vía las señales del
-        # delegado de la celda en edición (currentColumn() es -1 si el
-        # click no pasó por setCurrentCell); fallback: delegado default
-        if self.table.state() == QAbstractItemView.State.EditingState:
-            editor = self.table.focusWidget()
-            col = self.table.currentColumn()
-            if col < 0:
-                col = column
-            delegate = self.table.itemDelegateForColumn(col)
-            delegate.commitData.emit(editor)
-            delegate.closeEditor.emit(
-                editor, QStyledItemDelegate.EndEditHint.NoHint)
-        self.table.editItem(self.table.item(row, column))
-        # popup inmediato: elegir sin clicks extra
-        ed = self.table.focusWidget()
-        if isinstance(ed, QComboBox):
-            ed.showPopup()
+    def _show_type_menu(self, row: int) -> None:
+        """Menú emergente con las opciones de tipo; render 100% nativo.
+
+        El editor in-cell de combo se dibuja mal con el tema oscuro del
+        sistema (flecha invisible, opciones superpuestas); un QMenu
+        flota sobre la ventana y evita el problema por completo.
+        """
+        menu = self._build_type_menu(row)
+        menu.exec(self.table.viewport().mapToGlobal(
+            self.table.visualItemRect(self.table.item(row, 1)).topLeft()))
+
+    def _build_type_menu(self, row: int) -> QMenu:
+        """Menú (sin exec): separado para poder testearlo sin bloquear."""
+        menu = QMenu(self.table)
+        for label in _TypeDelegate.OPTIONS:
+            menu.addAction(label, lambda r=row, l=label: self._apply_type_choice(r, l))
+        return menu
+
+    def _apply_type_choice(self, row: int, choice: str) -> None:
+        """Aplica la opción elegida: URL prefija http://; URL no vuelve a fichero."""
+        from src.infrastructure.ui.source_catalog_widget import (
+            LocationDelegate,
+        )
+        tipo = self.table.item(row, 1)
+        loc_item = self.table.item(row, 2)
+        loc = (loc_item.text() or "").strip()
+        is_url = LocationDelegate.infer_source_type(loc) == "url"
+        if choice == "URL remota" and not is_url:
+            loc_item.setText("http://")
+            tipo.setText("URL remota")
+        elif choice == "Fichero local" and not is_url:
+            tipo.setText("Fichero local")
+        # si es http y piden fichero: la ubicación manda, no se cambia
 
     def _sync_type_label(self, item) -> None:
         """Etiqueta de tipo al día cuando la ubicación se edita a mano."""

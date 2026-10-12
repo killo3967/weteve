@@ -102,52 +102,17 @@ class TestFiltrosPorTipo:
 
 
 class TestTipoOrigenCombo:
-    def test_celda_tipo_es_editable_en_la_vista(self, widget):
+    """El combo-editor fue sustituido por menú emergente (tema oscuro).
+
+    La cobertura de comportamiento vive en tests/test_ui_type_menu.py:
+    opciones, prefijo http://, y no-conversión de URLs. Aquí queda la
+    celda como no editable (el menú se lanza desde cellClicked).
+    """
+
+    def test_celda_tipo_no_es_editable(self, widget):
         from PyQt6.QtCore import Qt
         flags = widget.table.item(0, 1).flags()
-        assert flags & Qt.ItemFlag.ItemIsEditable
-
-    def test_cambiar_combo_emite_commit_del_delegado(self, widget, qtbot):
-        from PyQt6.QtWidgets import QComboBox
-        delegate = widget.table.itemDelegateForColumn(1)
-        idx = widget.table.model().index(0, 1)
-        ed = delegate.createEditor(widget.table, None, idx)
-        assert isinstance(ed, QComboBox)  # editor nativo: flecha y popup OK
-        spy = []
-        delegate.commitData.connect(lambda e: spy.append(e))
-        ed.setCurrentText("URL remota")
-        assert spy == [ed]
-
-    def test_editor_de_tipo_es_combo(self, widget):
-        delegate = widget.table.itemDelegateForColumn(1)
-        from PyQt6.QtWidgets import QComboBox
-        idx = widget.table.model().index(0, 1)
-        ed = delegate.createEditor(widget.table, None, idx)
-        assert [ed.itemText(i) for i in range(ed.count())] == [
-            "Fichero local", "URL remota"]
-
-    def test_elegir_url_con_ubicacion_vacia_prefija_http(self, widget):
-        delegate = widget.table.itemDelegateForColumn(1)
-        idx = widget.table.model().index(0, 1)
-        ed = delegate.createEditor(widget.table, None, idx)
-        delegate.setEditorData(ed, idx)
-        ed.setCurrentText("URL remota")
-        delegate.setModelData(ed, widget.table.model(), idx)
-        # ubicación preparada para completar la URL y tipo sincronizado
-        assert widget.table.item(0, 2).text() == "http://"
-        assert widget.table.item(0, 1).text() == "URL remota"
-
-    def test_elegir_fichero_no_toca_ubicacion_http(self, widget):
-        widget.table.item(0, 2).setText("http://s/l.m3u")
-        delegate = widget.table.itemDelegateForColumn(1)
-        idx = widget.table.model().index(0, 1)
-        ed = delegate.createEditor(widget.table, None, idx)
-        ed.setCurrentText("Fichero local")
-        delegate.setModelData(ed, widget.table.model(), idx)
-        # una URL http no puede pasar a fichero: ubicación intacta,
-        # y el tipo mostrado sigue reflejando la inferencia
-        assert widget.table.item(0, 2).text() == "http://s/l.m3u"
-        assert widget.table.item(0, 1).text() == "URL remota"
+        assert not (flags & Qt.ItemFlag.ItemIsEditable)
 
     def test_editar_ubicacion_actualiza_tipo_en_vivo(self, widget):
         widget.table.item(0, 2).setText("http://s/l.m3u")
@@ -157,17 +122,10 @@ class TestTipoOrigenCombo:
 
 
     def test_click_simple_abre_el_selector(self, widget, qtbot):
-        from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate
-        widget.table.itemDelegateForColumn(2).commitData.emit(
-            widget.table.focusWidget())
-        widget.table.itemDelegateForColumn(2).closeEditor.emit(
-            widget.table.focusWidget(), QStyledItemDelegate.EndEditHint.NoHint)
-        widget._open_type_editor(0, 1)
-        cbs = widget.table.findChildren(QComboBox)
-        assert len(cbs) == 1
-        # en offscreen el popup puede cerrarse al procesar eventos: basta
-        # comprobar que showPopup() no lanza y el combo es el editor activo
-        assert widget.table.focusWidget() is cbs[0]
+        from unittest.mock import patch
+        with patch.object(type(widget), "_show_type_menu") as spy:
+            widget.table.cellClicked.emit(0, 1)
+        spy.assert_called_once_with(0)
 
 
 def widget_value(index):
