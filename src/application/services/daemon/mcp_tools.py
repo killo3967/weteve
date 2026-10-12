@@ -123,8 +123,22 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
 
     # -- ciclo de vida ---------------------------------------------------------
 
+    def _definition(target_id: str):
+        """Definición actual de config.ini, no la cacheada al arrancar.
+
+        config.ini lo escribe también la GUI, así que una herramienta de
+        arranque/recarga que lea la cache serviría filtros obsoletos. Stores
+        antiguos sin reload() siguen usando get().
+        """
+        if target_store is None:
+            return None
+        reloader = getattr(target_store, "reload", None)
+        if reloader is not None:
+            return reloader(target_id)
+        return target_store.get(target_id)
+
     def start_target(target_id: str) -> dict:
-        t = target_store.get(target_id) if target_store else None
+        t = _definition(target_id)
         if t is None:
             return {"error": f"target {target_id} no existe"}
         epg = target_store.get_epg_path(target_id) if target_store else None
@@ -138,7 +152,7 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
         return {"ok": ok}
 
     def reload_target(target_id: str) -> dict:
-        t = target_store.get(target_id) if target_store else None
+        t = _definition(target_id)
         if t is None:
             return {"error": f"target {target_id} no existe"}
         epg = target_store.get_epg_path(target_id) if target_store else None
@@ -151,7 +165,7 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
 
     def run_pipeline(target_id: str) -> dict:
         # garantiza definición registrada en supervisor aunque nunca se haya arrancado
-        t = target_store.get(target_id) if target_store else None
+        t = _definition(target_id)
         if t is not None:
             epg = target_store.get_epg_path(target_id) if target_store else None
             supervisor.reload_target(target_id, t, epg_path=epg)

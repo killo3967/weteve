@@ -75,6 +75,17 @@ class TargetStore:
     def get(self, target_id: str) -> PipelineTarget | None:
         return self._targets.get(target_id)
 
+    def reload(self, target_id: str) -> PipelineTarget | None:
+        """Vuelve a leer config.ini y devuelve la definición de ``target_id``.
+
+        El daemon lee el fichero una sola vez al arrancar; lo que escriba
+        después otro proceso (la GUI, un cliente MCP) solo se ve aquí. Ninguno
+        de los dos es dueño del fichero, así que el reload es la forma de
+        reconciliar sin un watcher.
+        """
+        self.load()
+        return self._targets.get(target_id)
+
     def get_epg_path(self, target_id: str) -> str | None:
         return self._epg_paths.get(target_id)
 

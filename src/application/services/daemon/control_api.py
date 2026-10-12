@@ -25,8 +25,11 @@ class ControlApiServer:
     """Servidor HTTP de control. ``on_shutdown`` se invoca en POST /shutdown."""
 
     def __init__(self, supervisor, host: str = "127.0.0.1", port: int = 34400,
-                 token: str = "", on_shutdown=None) -> None:
+                 token: str = "", on_shutdown=None, target_store=None) -> None:
         self._supervisor = supervisor
+        # si hay store, el reload toma la definición de config.ini (fresca)
+        # en vez de la que el supervisor memorizó al arrancar
+        self._store = target_store
         self._host = host
         self._port = port
         self._token = token
@@ -71,6 +74,26 @@ class ControlApiServer:
         self._server = None
         logger.info("API de control detenida")
 
+    # -- config compartida ------------------------------------------------------
+
+    def _fresh_target(self, target_id: str):
+        """Definición actualizada de config.ini, o None si no hay store.
+
+        Sin store (o con uno antiguo sin reload()) se reutiliza lo que ya
+        tiene el supervisor: same reload de pipeline de toda la vida.
+        """
+        if self._store is None:
+            return None
+        try:
+            return self._store.reload(target_id)
+        except Exception:  # noqa: BLE001 - store de test o fichero ilegible
+            return self._store.get(target_id)
+
+    def _fresh_epg_path(self, target_id: str):
+        if self._store is None:
+            return None
+        return self._store.get_epg_path(target_id)
+
     # -- handler -------------------------------------------------------------
 
     def _handle(self, method: str, path: str, auth_ok: bool) -> tuple[int, dict]:
@@ -89,10 +112,13 @@ class ControlApiServer:
             parts = path.strip("/").split("/")
             if len(parts) == 3 and parts[0] == "targets" and parts[2] == "reload":
                 target_id = parts[1]
-                defined = target_id in self._supervisor.get_status()["targets"]
+                fresh = self._fresh_target(target_id)
+                defined = (fresh is not None
+                           or target_id in self._supervisor.get_status()["targets"])
                 if not defined:
                     return 404, {"error": f"target {target_id} no existe"}
-                ok = self._supervisor.reload_target(target_id)
+                ok = self._supervisor.reload_target(
+                    target_id, fresh, epg_path=self._fresh_epg_path(target_id))
                 return (200, {"ok": True}) if ok else (500, {"ok": False})
         return 404, {"error": "ruta desconocida"}
 

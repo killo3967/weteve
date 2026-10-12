@@ -84,7 +84,7 @@ def build_daemon(config_path: Path = DEFAULT_CONFIG) -> dict:
 
     control_api = ControlApiServer(
         supervisor, host=cfg.control_host, port=cfg.control_port,
-        token=cfg.mcp_token, on_shutdown=shutdown,
+        token=cfg.mcp_token, on_shutdown=shutdown, target_store=store,
     )
     if not control_api.start():
         raise RuntimeError(
