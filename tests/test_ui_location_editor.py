@@ -102,6 +102,22 @@ class TestFiltrosPorTipo:
 
 
 class TestTipoOrigenCombo:
+    def test_celda_tipo_es_editable_en_la_vista(self, widget):
+        from PyQt6.QtCore import Qt
+        flags = widget.table.item(0, 1).flags()
+        assert flags & Qt.ItemFlag.ItemIsEditable
+
+    def test_cambiar_combo_emite_commit_del_delegado(self, widget, qtbot):
+        from PyQt6.QtWidgets import QComboBox
+        delegate = widget.table.itemDelegateForColumn(1)
+        idx = widget.table.model().index(0, 1)
+        ed = delegate.createEditor(widget.table, None, idx)
+        spy = []
+        delegate.commitData.connect(
+            lambda e: spy.append(e))
+        ed.findChild(QComboBox).setCurrentText("URL remota")
+        assert spy == [ed]
+
     def test_editor_de_tipo_es_combo(self, widget):
         delegate = widget.table.itemDelegateForColumn(1)
         from PyQt6.QtWidgets import QComboBox

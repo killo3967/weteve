@@ -113,6 +113,10 @@ class _TypeDelegate(QStyledItemDelegate):
 
     OPTIONS = ("Fichero local", "URL remota")
 
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._editing = False
+
     def createEditor(self, parent, option, index):
         from PyQt6.QtWidgets import QComboBox, QWidget as _W
         editor = _W(parent)
@@ -123,8 +127,16 @@ class _TypeDelegate(QStyledItemDelegate):
         lay.addWidget(combo)
         editor._combo = combo
         editor._signals = _EditorSignals(editor)
-        combo.currentTextChanged.connect(lambda _: editor._signals.commit.emit())
+        # al elegir en el combo: comprometer y cerrar el editor, igual
+        # que hace un delegado estándar con su señal commitData/closeEditor
+        combo.currentTextChanged.connect(self._on_combo_change)
         return editor
+
+    def _on_combo_change(self, _text: str) -> None:
+        self._editing = True
+        self.commitData.emit(self.sender().parent())
+        self._editing = False
+        self.closeEditor.emit(self.sender().parent())
 
     def setEditorData(self, editor, index):
         current = index.data() or self.OPTIONS[0]
@@ -199,7 +211,6 @@ class SourceCatalogWidget(QWidget):
     def _fill_row(self, row: int, e) -> None:
         self.table.setItem(row, 0, QTableWidgetItem(e.name))
         tipo = QTableWidgetItem(_TYPE_LABELS.get(e.source_type, e.source_type))
-        tipo.setFlags(tipo.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.table.setItem(row, 1, tipo)
         self.table.setItem(row, 2, QTableWidgetItem(e.location))
         self.table.setItem(row, 3, QTableWidgetItem(str(e.refresh_min)))
