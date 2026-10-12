@@ -83,7 +83,7 @@ escritura (y evita recargar a media escritura).
 .venv\Scripts\python.exe daemon.py install-task
 ```
 
-## Herramientas MCP (12)
+## Herramientas MCP (17)
 
 Transporte: JSON-RPC 2.0 Streamable HTTP (`POST /mcp`), sesión vía cabecera
 `Mcp-Session-Id` asignada en `initialize`. Sin dependencias del SDK oficial
@@ -93,12 +93,32 @@ Transporte: JSON-RPC 2.0 Streamable HTTP (`POST /mcp`), sesión vía cabecera
 |---|---|
 | Estado | `get_status`, `shutdown` |
 | Lectura | `list_targets`, `get_target` |
-| CRUD | `create_target`, `update_target`, `delete_target` |
+| CRUD targets | `create_target`, `update_target`, `delete_target` |
 | Ciclo de vida | `start_target`, `stop_target`, `reload_target` |
 | Pipeline | `run_pipeline`, `preview_channels` |
+| Cartera de fuentes | `add_source`, `list_sources`, `update_source`, `remove_source`, `set_target_sources` |
 
 Las reglas de filtro viajan en sintaxis xTeVe textual (`campo:{patrón}:case`,
 `!{...}` para exclusiones), igual que en `config.ini`.
+
+## Cartera de fuentes y multi-origen
+
+`config.ini` guarda una cartera global de listas en secciones
+`[source.<id>]` (`name`, `kind` = `m3u|epg`, `source_type` = `file|url`,
+`location`, `refresh_min`, `enabled`). Cada target **selecciona** filas con
+las claves `m3u_sources` / `epg_sources` (ids separados por comas) en su
+sección `listmanager.target.N`; la playlist servida es la **unión** de las
+listas M3U activas y la guía la unión de las EPG activas. Los canales
+replicados entre listas NO se deduplican: se muestran como `<Lista>.<Canal>`
+(prefijo solo de presentación; filtros y casado EPG ven el nombre limpio).
+El campo de filtro `source` (etiqueta "Lista" en la GUI) filtra por nombre de
+lista de origen.
+
+Cada fuente tiene un refresco periódico (`refresh_min`, 0 = estática). El
+demonio reejecuta el pipeline de cada target cada
+`min(refrescos de sus fuentes activas)`, con suelo de 5 minutos; targets sin
+fuentes con refresco no se reprograman. Los overrides EPG manuales se
+conservan entre ciclos; el resto del mapeo se recalcula en cada recarga.
 
 ### Ejemplo de sesión MCP
 

@@ -70,6 +70,8 @@ class TestRegistry:
             "create_target", "update_target", "delete_target",
             "start_target", "stop_target", "reload_target",
             "run_pipeline", "preview_channels",
+            "add_source", "list_sources", "update_source", "remove_source",
+            "set_target_sources",
         }
         assert set(registry) == expected
         for spec in registry.values():

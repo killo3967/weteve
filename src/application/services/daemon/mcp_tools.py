@@ -9,11 +9,13 @@ Sintaxis de reglas en argumentos MCP: la textual de xTeVe usada en config.ini
 """
 
 import logging
+from pathlib import Path
 
 from src.application.services.list_manager.models import (
     FilterRule,
     PipelineTarget,
 )
+from src.infrastructure.client.sources_store import load_catalog, save_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,10 @@ def _serialize_target(t: PipelineTarget) -> dict:
         "epg_overrides": dict(t.epg_overrides),
         "port": t.port,
         "starting_number": t.starting_number,
+        "source_refs": [{"id": r.id, "name": r.name, "location": r.location}
+                        for r in t.source_refs],
+        "epg_refs": [{"id": r.id, "name": r.name, "location": r.location}
+                     for r in t.epg_refs],
     }
 
 def _parse_rules(raw_rules: list[str]) -> tuple[FilterRule, ...]:
@@ -191,11 +197,173 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
         ),
     }
 
+    # -- cartera de fuentes ---------------------------------------------------
+
+    def _catalog_path() -> Path | None:
+        if target_store is None:
+            return None
+        return Path(getattr(target_store, "_path"))
+
+    def add_source(name: str, kind: str, location: str,
+                   refresh_min: int = 0) -> dict:
+        path = _catalog_path()
+        if path is None:
+            return {"error": "configuracion de targets no disponible"}
+        if kind not in ("m3u", "epg"):
+            return {"error": f"kind inválido: {kind} (m3u|epg)"}
+        catalog = load_catalog(path)
+        entry = catalog.add_new(name, kind, "url" if location.lower().startswith(("http://", "https://")) else "file", location, refresh_min)
+        save_catalog(path, catalog)
+        return {"id": entry.id, "name": entry.name, "kind": entry.kind,
+                "location": entry.location, "refresh_min": entry.refresh_min}
+
+    def list_sources(kind: str | None = None) -> dict:
+        path = _catalog_path()
+        if path is None:
+            return {"error": "configuracion de targets no disponible"}
+        catalog = load_catalog(path)
+        entries = catalog.all() if not kind else catalog.of_kind(kind)
+        return {"sources": [
+            {"id": e.id, "name": e.name, "kind": e.kind,
+             "source_type": e.source_type, "location": e.location,
+             "refresh_min": e.refresh_min, "enabled": e.enabled}
+            for e in entries
+        ]}
+
+    def update_source(id: str, name: str | None = None,
+                      location: str | None = None,
+                      refresh_min: int | None = None) -> dict:
+        path = _catalog_path()
+        if path is None:
+            return {"error": "configuracion de targets no disponible"}
+        catalog = load_catalog(path)
+        entry = catalog.get(id)
+        if entry is None:
+            return {"error": f"fuente {id} no existe"}
+        updates = {}
+        if name is not None:
+            updates["name"] = name
+        if location is not None:
+            updates["location"] = location
+            updates["source_type"] = ("url" if location.lower().startswith(("http://", "https://")) else "file")
+        if refresh_min is not None:
+            updates["refresh_min"] = max(0, int(refresh_min))
+        updated = catalog.update(id, **updates)
+        save_catalog(path, catalog)
+        return {"ok": True, "source": {
+            "id": updated.id, "name": updated.name, "kind": updated.kind,
+            "source_type": updated.source_type, "location": updated.location,
+            "refresh_min": updated.refresh_min, "enabled": updated.enabled}}
+
+    def remove_source(id: str) -> dict:
+        path = _catalog_path()
+        if path is None:
+            return {"error": "configuracion de targets no disponible"}
+        catalog = load_catalog(path)
+        if catalog.get(id) is None:
+            return {"error": f"fuente {id} no existe"}
+        catalog.remove(id)
+        save_catalog(path, catalog)
+        return {"ok": True}
+
+    def set_target_sources(target_id: str, m3u_ids: list[str] | None = None,
+                           epg_ids: list[str] | None = None) -> dict:
+        path = _catalog_path()
+        if path is None:
+            return {"error": "configuracion de targets no disponible"}
+        catalog = load_catalog(path)
+        for sid in (m3u_ids or []) + (epg_ids or []):
+            if catalog.get(sid) is None:
+                return {"error": f"fuente {sid} no existe"}
+        t = target_store.reload(target_id) if hasattr(target_store, "reload") \
+            else target_store.get(target_id)
+        if t is None:
+            return {"error": f"target {target_id} no existe"}
+        from dataclasses import replace
+
+        from src.application.services.list_manager.models import SourceRef
+
+        def _refs(ids: list[str]) -> tuple:
+            return tuple(
+                SourceRef(e.id, e.name, e.location)
+                for e in (catalog.get(sid) for sid in ids) if e
+            )
+
+        if m3u_ids is not None:
+            t = replace(t, source_refs=_refs(m3u_ids))
+        if epg_ids is not None:
+            t = replace(t, epg_refs=_refs(epg_ids))
+        target_store.save(target_id, t,
+                          epg_path=target_store.get_epg_path(target_id))
+        return {"ok": True, "target_id": target_id,
+                "m3u_ids": [r.id for r in t.source_refs],
+                "epg_ids": [r.id for r in t.epg_refs]}
+
     return {
         "get_status": {
             "description": "Estado del daemon: targets, si sirven, URLs de playlist/EPG, errores",
             "schema": {"type": "object", "properties": {}, "additionalProperties": False},
             "handler": get_status,
+        },
+        "add_source": {
+            "description": "Añade una fuente a la cartera global (kind: m3u|epg)",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "name": STRING,
+                    "kind": {"type": "string", "enum": ["m3u", "epg"]},
+                    "location": {"type": "string",
+                                 "description": "URL http(s) o ruta de fichero"},
+                    "refresh_min": {"type": "integer", "minimum": 0,
+                                    "description": "Minutos entre recargas; 0 = estática"},
+                },
+                "required": ["name", "kind", "location"],
+            },
+            "handler": add_source,
+        },
+        "list_sources": {
+            "description": "Lista la cartera de fuentes (filtro opcional por kind)",
+            "schema": {
+                "type": "object",
+                "properties": {"kind": {"type": "string", "enum": ["m3u", "epg"]}},
+            },
+            "handler": list_sources,
+        },
+        "update_source": {
+            "description": "Actualiza nombre/ubicación/refresco de una fuente",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "id": STRING,
+                    "name": STRING,
+                    "location": STRING,
+                    "refresh_min": {"type": "integer", "minimum": 0},
+                },
+                "required": ["id"],
+            },
+            "handler": update_source,
+        },
+        "remove_source": {
+            "description": "Elimina una fuente de la cartera",
+            "schema": {
+                "type": "object",
+                "properties": {"id": STRING},
+                "required": ["id"],
+            },
+            "handler": remove_source,
+        },
+        "set_target_sources": {
+            "description": "Selecciona qué fuentes de la cartera usa un target (unión)",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "target_id": STRING,
+                    "m3u_ids": {"type": "array", "items": {"type": "string"}},
+                    "epg_ids": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["target_id"],
+            },
+            "handler": set_target_sources,
         },
         "shutdown": {
             "description": "Detiene el daemon weteve",
