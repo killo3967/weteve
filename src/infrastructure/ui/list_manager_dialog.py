@@ -785,6 +785,19 @@ class ListManagerDialog(QDialog):
         )
 
     def _run_pipeline(self):
+        target = self._build_target()
+        if target.source_refs:
+            # multi-fuente: la unión se registra bajo la clave "merged";
+            # no hay custom_m3u que resolver en este modo
+            self._pipeline.register_merged(
+                target.source_index, target.source_refs, target.epg_refs)
+            try:
+                return self._pipeline.run(target)
+            except Exception as e:
+                logger.error("Error ejecutando pipeline: %s", e)
+                QMessageBox.warning(
+                    self, "Gestor de listas", f"Error al procesar la lista:\n{e}")
+                return None
         cache_key = self._resolve_source_path()
         m3u_path = self._source_m3u_path()
         if cache_key is None or m3u_path is None:
@@ -792,7 +805,7 @@ class ListManagerDialog(QDialog):
         epg_path = self._resolve_epg_path()
         self._pipeline.register_source(cache_key, m3u_path, epg_path)
         try:
-            return self._pipeline.run(self._build_target())
+            return self._pipeline.run(target)
         except Exception as e:
             logger.error("Error ejecutando pipeline: %s", e)
             QMessageBox.warning(self, "Gestor de listas", f"Error al procesar la lista:\n{e}")
