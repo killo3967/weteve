@@ -9,7 +9,7 @@ from typing import Literal
 
 # Campos fijos conocidos; los dinámicos (tvg-group, extgrp, futuros) son
 # cualesquiera claves presentes en Channel.groups.
-FilterField = Literal["group-title", "custom-filter", "tvg-group", "extgrp"]
+FilterField = Literal["group-title", "custom-filter", "tvg-group", "extgrp", "source"]
 RuleOperator = Literal["or", "and"]
 
 
@@ -59,7 +59,7 @@ class FilterRule:
         case_sensitive = False
         operator: RuleOperator = "or"
         if len(parts) >= 2 and parts[0] in (
-            "group-title", "custom-filter", "tvg-group", "extgrp"
+            "group-title", "custom-filter", "tvg-group", "extgrp", "source"
         ):
             f = parts[0]  # type: ignore[assignment]
             if len(parts) >= 3:
