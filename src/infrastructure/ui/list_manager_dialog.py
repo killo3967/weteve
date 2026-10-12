@@ -35,6 +35,7 @@ from src.application.services.list_manager.models import (
     FilterRule,
     PipelineTarget,
 )
+from src.application.services.list_manager.source_catalog import SourceCatalog
 from src.application.services.list_manager.pipeline import ListManagerPipeline
 from src.infrastructure.web.playlist_server import (
     PlaylistServer,
@@ -520,7 +521,9 @@ class ListManagerDialog(QDialog):
         self.tabs = QTabWidget(self)
         layout.addWidget(self.tabs)
 
-        # Orígenes (fuente)
+        # Orígenes (fuente) — pestaña legacy oculta: los accesores
+        # (custom_m3u_edit, source_combo…) siguen vivos para compatibilidad,
+        # pero la edición de fuentes se hace en las pestañas de cartera.
         self.tab_sources = QWidget(self)
         source_layout = QVBoxLayout(self.tab_sources)
         source_group = QGroupBox("Orígenes")
@@ -582,7 +585,28 @@ class ListManagerDialog(QDialog):
         self.source_combo.currentIndexChanged.connect(self._refresh_mapping)
         self.epg_combo.currentIndexChanged.connect(self._refresh_mapping)
         source_layout.addWidget(source_group)
-        self.tabs.addTab(self.tab_sources, "Orígenes")
+        # Cartera de fuentes: dos pestañas con la misma forma; "Activa"
+        # marca qué filas aporta este target a la unión.
+        from src.infrastructure.ui.source_catalog_widget import SourceCatalogWidget
+        from src.infrastructure.client.sources_store import (
+            load_catalog, migrate_legacy_sources,
+        )
+        config_path = config.get("_config_path")
+        catalog = SourceCatalog()
+        if config_path:
+            try:
+                catalog = migrate_legacy_sources(Path(config_path))
+            except Exception:  # noqa: BLE001 - cartera ilegible = vacía
+                logger.warning("Cartera ilegible en %s", config_path, exc_info=True)
+        self.catalog_m3u_widget = SourceCatalogWidget(kind="m3u", catalog=catalog)
+        self.catalog_epg_widget = SourceCatalogWidget(kind="epg", catalog=catalog)
+        for widget, refs in (
+            (self.catalog_m3u_widget, config.get("m3u_refs", [])),
+            (self.catalog_epg_widget, config.get("epg_refs", [])),
+        ):
+            widget.set_selection([r.id for r in refs])
+        self.tabs.addTab(self.catalog_m3u_widget, "Listas IPTV")
+        self.tabs.addTab(self.catalog_epg_widget, "Listas EPG")
 
         # Filtro de canales
         self.tab_filters = QWidget(self)
@@ -660,11 +684,23 @@ class ListManagerDialog(QDialog):
     def _on_save(self) -> None:
         """Guardar persiste la config SIN cerrar el diálogo."""
         from src.infrastructure.client.persistencia import save_config
+        from src.infrastructure.client.sources_store import save_catalog
 
         config_path = self._config.get("_config_path")
         if config_path is None:
             return
+        # 1) cartera de fuentes (ambas pestañas)
+        catalog = SourceCatalog([
+            *self.catalog_m3u_widget.get_catalog().all(),
+            *self.catalog_epg_widget.get_catalog().all(),
+        ])
+        save_catalog(Path(config_path), catalog)
         new_config = self.get_target_config()
+        # las selecciones se serializan en el dict para save_config
+        new_config["m3u_refs"] = list(
+            self._catalog_refs(self.catalog_m3u_widget, "m3u"))
+        new_config["epg_refs"] = list(
+            self._catalog_refs(self.catalog_epg_widget, "epg"))
         targets = {0: new_config}
         save_config(Path(config_path), {"targets": targets})
         # El daemon también sirve este target; si está vivo hay que avisarle,
@@ -718,15 +754,31 @@ class ListManagerDialog(QDialog):
         data = self.epg_combo.currentData()
         return None if data is None or int(data) < 0 else int(data)
 
+    def _catalog_refs(self, widget, kind: str) -> tuple:
+        """SourceRefs de las filas activas del widget de cartera."""
+        from src.application.services.list_manager.models import SourceRef
+        catalog = widget.get_catalog()
+        return tuple(
+            SourceRef(e.id, e.name, e.location)
+            for e in catalog.all() if e.kind == kind and e.enabled
+        )
+
     def _build_target(self) -> PipelineTarget:
+        # multi-fuente: hay filas activas en la cartera => unión;
+        # si no, flujo legacy de fuente única (custom_m3u/custom_epg)
+        m3u_refs = self._catalog_refs(self.catalog_m3u_widget, "m3u")
+        epg_refs = self._catalog_refs(self.catalog_epg_widget, "epg")
         return PipelineTarget(
             name=self.name_edit.text().strip() or "target",
             # La clave de cache es el propio origen: índice (app) o ruta (custom).
-            source_index=self._resolve_source_path() or 0,
+            source_index=("merged" if m3u_refs
+                          else self._resolve_source_path() or 0),
             rules=tuple(self.rules_widget.get_rules()),
             epg_source_index=self._selected_epg(),
             epg_overrides=self.epg_mapping.get_overrides(),
             port=self.port_spin.value(),
+            source_refs=m3u_refs,
+            epg_refs=epg_refs,
         )
 
     def _run_pipeline(self):
