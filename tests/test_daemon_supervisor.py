@@ -173,3 +173,36 @@ class TestTargetSupervisor:
             assert "EPG inaccesible" in st["error"]
         finally:
             sup.stop_all()
+
+
+class TestSupervisorMultiFuente:
+    def test_target_con_refs_sirve_la_union(self, tmp_path: Path) -> None:
+        m1 = _write_m3u(tmp_path / "a.m3u", ["Canal A"])
+        m2 = _write_m3u(tmp_path / "b.m3u", ["Canal B"])
+        from src.application.services.list_manager.models import SourceRef
+        t = PipelineTarget(
+            name="multi", source_index="merged",
+            source_refs=(SourceRef("s1", "A", m1), SourceRef("s2", "B", m2)),
+            port=0,
+        )
+        sup = TargetSupervisor()
+        try:
+            assert sup.start_target("t0", t)
+            body = _get(sup.get_status()["targets"]["t0"]["playlist_url"])
+            assert "A.Canal A" in body   # prefijo por lista
+            assert "B.Canal B" in body
+        finally:
+            sup.stop_all()
+
+    def test_target_con_refs_puerto_cero_elige_libre(self, tmp_path: Path) -> None:
+        m1 = _write_m3u(tmp_path / "a.m3u", ["Canal A"])
+        from src.application.services.list_manager.models import SourceRef
+        t = PipelineTarget(name="multi", source_index="merged",
+                           source_refs=(SourceRef("s1", "A", m1),), port=0)
+        sup = TargetSupervisor()
+        try:
+            assert sup.start_target("t0", t)
+            url = sup.get_status()["targets"]["t0"]["playlist_url"]
+            assert url  # hay servidor vivo en un puerto asignado
+        finally:
+            sup.stop_all()

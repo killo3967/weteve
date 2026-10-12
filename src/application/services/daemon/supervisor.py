@@ -45,8 +45,17 @@ class TargetSupervisor:
         return playlist, epg_xml
 
     def _ensure_source(self, target: PipelineTarget, epg_path: str | None) -> None:
-        """Registra (o actualiza) la fuente M3U+EPG del target en el pipeline."""
-        self._pipeline.register_source(target.source_index, target.source_index, epg_path)
+        """Registra la(s) fuente(s) del target en el pipeline.
+
+        Con cartera (source_refs) registra la unión multi-fuente; sin ella,
+        el flujo antiguo de fuente única (custom_m3u/custom_epg).
+        """
+        if target.source_refs:
+            self._pipeline.register_merged(target.source_index,
+                                           target.source_refs, target.epg_refs)
+        else:
+            self._pipeline.register_source(target.source_index, target.source_index,
+                                           epg_path)
 
     def _remember(self, target_id: str, result) -> None:
         self._results[target_id] = result

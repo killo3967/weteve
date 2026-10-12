@@ -64,6 +64,8 @@ class ListManagerPipeline:
         self._sources: dict[int | str, tuple[str, EPGData | None]] = {}
         # cartera: refs de un target multi-fuente (clave -> (source_refs, epg_refs))
         self._merged: dict[int | str, tuple[tuple, tuple]] = {}
+        # EPG fusionada por clave multi-fuente (calculada en register_merged)
+        self._merged_epg: dict[int | str, EPGData | None] = {}
         # cache de canales por fuente para get_groups (evita re-descargar)
         self._channel_cache: dict[int | str, list] = {}
 
@@ -83,6 +85,9 @@ class ListManagerPipeline:
         se fusiona en un solo EPGData (unión por id de canal).
         """
         self._merged[index] = (tuple(source_refs), tuple(epg_refs))
+        # la EPG fusionada se calcula aquí (register_source también carga la
+        # suya de forma anticipada): run() y get_epg() la leen de la cache
+        self._merged_epg[index] = self._merge_epgs(self._merged[index][1])
         # clave visible en _sources para que run()/get_groups() la encuentren;
         # el primer location sirve de placeholder para la carga por clave.
         self._sources.setdefault(index,
@@ -156,6 +161,8 @@ class ListManagerPipeline:
 
     def get_epg(self, index: int | str) -> EPGData | None:
         """Devuelve la EPG cacheada de una fuente registrada, o None."""
+        if index in self._merged:
+            return self._merged_epg.get(index)
         entry = self._sources.get(index)
         return entry[1] if entry else None
 
@@ -177,7 +184,7 @@ class ListManagerPipeline:
         raw_channels = self._load_channels(target.source_index)
         total_input = len(raw_channels)
 
-        epg = self._merge_epgs(epg_refs)
+        epg = self._merged_epg.get(target.source_index)
         kept: list[MappedChannel] = []
         for ch in raw_channels:
             if _is_separator_channel(ch.name):
