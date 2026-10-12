@@ -607,6 +607,9 @@ class ListManagerDialog(QDialog):
             widget.set_selection([r.id for r in refs])
         self.tabs.addTab(self.catalog_m3u_widget, "Listas IPTV")
         self.tabs.addTab(self.catalog_epg_widget, "Listas EPG")
+        # la pestaña legacy ya no va en el QTabWidget: sin contenedor se
+        # quedaría flotando sobre la pestaña activa (texto superpuesto)
+        self.tab_sources.hide()
 
         # Filtro de canales
         self.tab_filters = QWidget(self)
