@@ -16,6 +16,18 @@ from src.infrastructure.adapters.xmltv_repository import XMLTVRepository
 logger = logging.getLogger(__name__)
 
 
+def _is_separator_channel(name: str) -> bool:
+    """True si el nombre es en realidad un separador de sesion, no un canal.
+
+    Varias listas codifican cabeceras de seccion como canales cuyo display
+    name empieza por '#' ("### SUP MOVIES ###", "#### NEWS ####"). No son
+    reproducibles como tal y el usuario los quiere fuera de la salida siempre.
+    Solo cuenta el prefijo: un nombre con '#' intermedia ("Tele Mundo #1")
+    es un canal legitimo.
+    """
+    return name.lstrip().startswith("#")
+
+
 class PipelineResult:
     """Resultado de ejecutar el pipeline sobre un target."""
 
@@ -126,6 +138,11 @@ class ListManagerPipeline:
 
         kept: list[MappedChannel] = []
         for ch in raw_channels:
+            # Los separadores de sección escritos como canales ("### TOP ###",
+            # "#### NEWS ####") no son canales: se descartan siempre, sin
+            # regla explicita. (Las LINEAS # ya las ignora el parser M3U.)
+            if _is_separator_channel(ch.name):
+                continue
             rules = list(target.rules)
             # channel_groups lleva los campos de agrupación reales (group-title
             # múltiples, tvg-group, #EXTGRP). Sin él, una regla de grupo solo
