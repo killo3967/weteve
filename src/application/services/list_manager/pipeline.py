@@ -127,7 +127,11 @@ class ListManagerPipeline:
         kept: list[MappedChannel] = []
         for ch in raw_channels:
             rules = list(target.rules)
-            if not evaluate_channel(ch.name, ch.group, ch.url, rules):
+            # channel_groups lleva los campos de agrupación reales (group-title
+            # múltiples, tvg-group, #EXTGRP). Sin él, una regla de grupo solo
+            # ve el grupo primario y los campos dinámicos no filtran nada.
+            if not evaluate_channel(ch.name, ch.group, ch.url, rules,
+                                     channel_groups=ch.groups):
                 continue
             kept.append(
                 MappedChannel(
