@@ -8,6 +8,7 @@ import logging
 
 from PyQt6.QtCore import QDir, QObject, Qt
 from PyQt6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -113,40 +114,28 @@ class _TypeDelegate(QStyledItemDelegate):
 
     OPTIONS = ("Fichero local", "URL remota")
 
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self._editing = False
-
     def createEditor(self, parent, option, index):
-        from PyQt6.QtWidgets import QComboBox, QWidget as _W
-        editor = _W(parent)
-        lay = QHBoxLayout(editor)
-        lay.setContentsMargins(0, 0, 0, 0)
-        combo = QComboBox(editor)
-        combo.addItems(self.OPTIONS)
-        lay.addWidget(combo)
-        editor._combo = combo
-        editor._signals = _EditorSignals(editor)
-        # al elegir en el combo: comprometer y cerrar el editor, igual
-        # que hace un delegado estándar con su señal commitData/closeEditor
-        combo.currentTextChanged.connect(self._on_combo_change)
+        from PyQt6.QtWidgets import QComboBox
+        # QComboBox nativo como editor directo: flecha y popup garantizados
+        editor = QComboBox(parent)
+        editor.addItems(self.OPTIONS)
+        editor.currentIndexChanged.connect(self._on_activated)
         return editor
 
-    def _on_combo_change(self, _text: str) -> None:
-        self._editing = True
-        self.commitData.emit(self.sender().parent())
-        self._editing = False
-        self.closeEditor.emit(self.sender().parent())
+    def _on_activated(self, _index: int) -> None:
+        # el usuario eligió (popup o programático): comprometer y cerrar
+        self.commitData.emit(self.sender())
+        self.closeEditor.emit(self.sender())
 
     def setEditorData(self, editor, index):
         current = index.data() or self.OPTIONS[0]
         i = self.OPTIONS.index(current) if current in self.OPTIONS else 0
-        editor._combo.blockSignals(True)
-        editor._combo.setCurrentIndex(i)
-        editor._combo.blockSignals(False)
+        editor.blockSignals(True)
+        editor.setCurrentIndex(i)
+        editor.blockSignals(False)
 
     def setModelData(self, editor, model, index):
-        want = editor._combo.currentText()
+        want = editor.currentText()
         loc_model = index.sibling(index.row(), 2)
         loc = (loc_model.data() or "").strip()
         is_url = LocationDelegate.infer_source_type(loc) == "url"
@@ -185,6 +174,8 @@ class SourceCatalogWidget(QWidget):
             1, _TypeDelegate(self.table))
         # sincronizar tipo mostrado cuando la ubicación cambia a mano
         self.table.itemChanged.connect(self._sync_type_label)
+        # un solo clic sobre la celda de tipo abre el desplegable
+        self.table.cellClicked.connect(self._on_cell_clicked)
         layout.addWidget(self.table)
 
         buttons = QHBoxLayout()
@@ -221,6 +212,32 @@ class SourceCatalogWidget(QWidget):
                              else Qt.CheckState.Unchecked)
         self.table.setItem(row, 4, active)
         self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, e.id)
+
+    def _on_cell_clicked(self, row: int, column: int) -> None:
+        if column == 1:
+            self._open_type_editor(row, column)
+
+    def _open_type_editor(self, row: int, column: int) -> None:
+        """Abre el desplegable de tipo con un solo clic."""
+        from PyQt6.QtWidgets import QAbstractItemView, QStyledItemDelegate
+        # cerrar cualquier editor activo (p. ej. el de la ubicación que
+        # add_row deja abierto): hay que commitar vía las señales del
+        # delegado de la celda en edición (currentColumn() es -1 si el
+        # click no pasó por setCurrentCell); fallback: delegado default
+        if self.table.state() == QAbstractItemView.State.EditingState:
+            editor = self.table.focusWidget()
+            col = self.table.currentColumn()
+            if col < 0:
+                col = column
+            delegate = self.table.itemDelegateForColumn(col)
+            delegate.commitData.emit(editor)
+            delegate.closeEditor.emit(
+                editor, QStyledItemDelegate.EndEditHint.NoHint)
+        self.table.editItem(self.table.item(row, column))
+        # popup inmediato: elegir sin clicks extra
+        ed = self.table.focusWidget()
+        if isinstance(ed, QComboBox):
+            ed.showPopup()
 
     def _sync_type_label(self, item) -> None:
         """Etiqueta de tipo al día cuando la ubicación se edita a mano."""
