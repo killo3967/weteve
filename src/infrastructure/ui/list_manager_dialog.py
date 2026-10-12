@@ -667,9 +667,18 @@ class ListManagerDialog(QDialog):
         new_config = self.get_target_config()
         targets = {0: new_config}
         save_config(Path(config_path), {"targets": targets})
+        # El daemon también sirve este target; si está vivo hay que avisarle,
+        # si no seguirá con los filtros que leyó al arrancar.
+        notified = False
+        try:
+            notified = self.daemon_panel.notify_daemon()
+        except Exception:  # noqa: BLE001 - notificar nunca puede tumbar el guardado
+            notified = False
         self.result_label.setText(
             f"Configuración guardada: {new_config['name']} "
-            f"(puerto {new_config.get('port')}).")
+            f"(puerto {new_config.get('port')})."
+            + (" Demonio avisado: recargando."
+               if notified else " No se notificó al demonio (no responde)."))
 
     # ------------------------------------------------------------------
     def _source_mode(self) -> str:

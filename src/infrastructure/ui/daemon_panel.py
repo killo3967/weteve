@@ -132,6 +132,24 @@ class DaemonPanel(QWidget):
         self.status_label.setText(
             f"Demonio: activo — «{t.get('name', '?')}» {state}{extra}{err}")
 
+    def notify_daemon(self) -> bool:
+        """Avisa a un daemon vivo de que relea la config recién guardada.
+
+        No escribe nada: quien llama (Guardar) ya persistió. Solo ping +
+        reload, para que el servicio pase a usar los filtros nuevos sin
+        reiniciar el proceso. False si el daemon no responde o el reload
+        falla.
+        """
+        client = self._client
+        if client is None:
+            try:
+                client = self._ensure_client()
+            except Exception:  # noqa: BLE001 - config de test sin [DAEMON]
+                return False
+        if not client.ping():
+            return False
+        return client.reload_target(self._target_id)
+
     def apply_to_daemon(self) -> None:
         """Guarda la config actual del diálogo y pide reload al daemon."""
         target = self._get_target_config()

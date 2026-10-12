@@ -22,11 +22,32 @@ config.ini  ←── TargetStore ──→ TargetSupervisor ──→ PlaylistS
                               └──────────────┘
 ```
 
-- **Qt es UI-only**: el diálogo guarda la config vía `TargetStore`, pide
-  `reload` por la API de control y puede **arrancar/parar/reiniciar el
-  demonio** (botones del panel «Demonio»). Arrancar desde la GUI abre una
-  **consola propia con los logs en vivo**; el demonio también escribe
-  `logs/weteve-daemon.log` (rotación 1 MB × 3). El demonio puede vivir sin UI abierta.
+- **Qt es UI-only**: el diálogo guarda la config en `config.ini` y puede
+  **arrancar/parar/reiniciar el demonio** (botones del panel «Demonio»). Arrancar
+  desde la GUI abre una **consola propia con los logs en vivo**; el demonio también
+  escribe `logs/weteve-daemon.log` (rotación 1 MB × 3). El demonio puede vivir sin
+  UI abierta.
+
+## Quién tiene la config: flujo de Guardar → demonio
+
+`config.ini` es el único estado compartido, pero **ninguno de los dos procesos es
+su dueño**: hay que reconciliarlo de forma explícita.
+
+1. **Guardar** (diálogo) escribe `config.ini` y, si el demonio responde al
+   `/health`, hace `POST /targets/{id}/reload`. El `result_label` dice si el
+   demonio fue avisado o si no respondió (en ese caso el servicio sigue con la
+   config anterior hasta que lo arranques o pulses «Aplicar»).
+2. **El reload relee el fichero**: `TargetStore.reload(target_id)` vuelve a parsear
+   `config.ini` y devuelve la definición fresca, que `ControlApiServer` pasa a
+   `supervisor.reload_target(...)` como `target`. Sin store (o para targets nunca
+   arrancados) se conserva el comportamiento antiguo: recargar lo que el supervisor
+   ya tenía en memoria.
+3. **MCP** usa la misma definición fresca en `start_target`, `reload_target` y
+   `run_pipeline`; lo que otro proceso haya escrito en el fichero se ve sin
+   reiniciar el demonio.
+
+No hay file watcher: un reload provocado es más predecible que reaccionar a cada
+escritura (y evita recargar a media escritura).
 
 ## Logs
 
