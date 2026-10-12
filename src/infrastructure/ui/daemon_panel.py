@@ -7,6 +7,7 @@ vía DaemonClient (API de control localhost). El panel:
   - pide reload del target al daemon si está vivo.
 """
 
+from PyQt6.QtCore import QObject, QRunnable, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -19,6 +20,31 @@ from src.application.services.daemon.config import load_daemon_config
 from src.application.services.daemon.target_store import TargetStore
 from src.infrastructure.client.daemon_client import DaemonClient
 from src.infrastructure.client.daemon_launcher import DaemonLauncher
+
+
+class _NotifySignals(QObject):
+    done = pyqtSignal(bool)
+
+
+class NotifyDaemonTask(QRunnable):
+    """Avisa al demonio en segundo plano (ping HTTP bloqueante).
+
+    Guardar no debe congelar la UI esperando al timeout del ping; la
+    señal done(ok) entrega el resultado al hilo de la UI.
+    """
+
+    def __init__(self, panel: "DaemonPanel") -> None:
+        super().__init__()
+        self._panel = panel
+        self.signals = _NotifySignals()
+
+    @pyqtSlot()
+    def run(self) -> None:  # hilo del QThreadPool
+        try:
+            ok = self._panel.notify_daemon()
+        except Exception:  # noqa: BLE001 - notificar nunca puede tumbar el guardado
+            ok = False
+        self.signals.done.emit(bool(ok))
 
 class DaemonPanel(QWidget):
     """Grupo «Demonio»: control del ciclo de vida + estado + aplicar config.

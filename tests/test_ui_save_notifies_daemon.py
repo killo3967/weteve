@@ -69,20 +69,24 @@ class TestDialogSaveNotifies:
         d.daemon_panel._client = client
         return d, client
 
-    def test_guardar_pide_reload(self, dialog_with_daemon):
+    def test_guardar_pide_reload(self, dialog_with_daemon, qtbot):
         from PyQt6.QtWidgets import QDialogButtonBox
         d, client = dialog_with_daemon
         d.name_edit.setText("renovada")
         bb = d.findChildren(QDialogButtonBox)[0]
         bb.button(QDialogButtonBox.StandardButton.Save).click()
-        assert client.reload_calls == ["0"]
-        assert "demonio" in d.result_label.text().lower()
+        # el aviso al demonio va en segundo plano: esperar su callback
+        qtbot.waitUntil(lambda: client.reload_calls == ["0"], timeout=3000)
+        qtbot.waitUntil(
+            lambda: "demonio" in d.result_label.text().lower(), timeout=3000)
 
-    def test_guardar_funciona_sin_daemon(self, dialog_with_daemon):
+    def test_guardar_funciona_sin_daemon(self, dialog_with_daemon, qtbot):
         from PyQt6.QtWidgets import QDialogButtonBox
         d, client = dialog_with_daemon
         client.alive = False
         bb = d.findChildren(QDialogButtonBox)[0]
         bb.button(QDialogButtonBox.StandardButton.Save).click()
+        qtbot.waitUntil(
+            lambda: "No se notificó al demonio" in d.result_label.text(),
+            timeout=3000)
         assert client.reload_calls == []
-        assert "No se notificó al demonio" in d.result_label.text()

@@ -707,17 +707,20 @@ class ListManagerDialog(QDialog):
         targets = {0: new_config}
         save_config(Path(config_path), {"targets": targets})
         # El daemon también sirve este target; si está vivo hay que avisarle,
-        # si no seguirá con los filtros que leyó al arrancar.
-        notified = False
-        try:
-            notified = self.daemon_panel.notify_daemon()
-        except Exception:  # noqa: BLE001 - notificar nunca puede tumbar el guardado
-            notified = False
-        self.result_label.setText(
-            f"Configuración guardada: {new_config['name']} "
-            f"(puerto {new_config.get('port')})."
+        # si no seguirá con los filtros que leyó al arrancar. El aviso es
+        # best-effort y bloqueante (ping HTTP hasta 5 s): va en segundo plano
+        # para no congelar la UI cuando el demonio no responde.
+        from PyQt6.QtCore import QThreadPool
+        from src.infrastructure.ui.daemon_panel import NotifyDaemonTask
+        port = new_config.get("port")
+        name = new_config["name"]
+        task = NotifyDaemonTask(self.daemon_panel)
+        task.signals.done.connect(lambda ok: self.result_label.setText(
+            f"Configuración guardada: {name} "
+            f"(puerto {port})."
             + (" Demonio avisado: recargando."
-               if notified else " No se notificó al demonio (no responde)."))
+               if ok else " No se notificó al demonio (no responde).")))
+        QThreadPool.globalInstance().start(task)
 
     # ------------------------------------------------------------------
     def _source_mode(self) -> str:
