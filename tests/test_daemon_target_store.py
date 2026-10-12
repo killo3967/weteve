@@ -5,10 +5,16 @@ compartan la misma lectura/escritura sin duplicación.
 """
 
 import configparser
+import dataclasses
+from dataclasses import replace as dataclasses_replace
 from pathlib import Path
 
 from src.application.services.daemon.target_store import TargetStore
-from src.application.services.list_manager.models import FilterRule, PipelineTarget
+from src.application.services.list_manager.models import (
+    FilterRule,
+    PipelineTarget,
+    SourceRef,
+)
 
 
 def _seed(path: Path) -> None:
@@ -112,3 +118,111 @@ class TestTargetStore:
         store = TargetStore(tmp_path / "nope.ini")
         store.load()
         assert store.list() == {}
+
+
+class TestTargetStoreSelections:
+    """Selección de la cartera: m3u_sources / epg_sources por target."""
+
+    def test_load_mapea_selecciones_a_source_refs(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.ini"
+        _seed(path)
+        parser = configparser.ConfigParser()
+        parser.read(path, encoding="utf-8")
+        parser["source.aa"] = {"name": "platero", "kind": "m3u",
+                               "source_type": "file",
+                               "location": "C:/listas/platero.m3u",
+                               "refresh_min": "60", "enabled": "1"}
+        parser["source.bb"] = {"name": "TV", "kind": "epg", "source_type": "file",
+                               "location": "C:/e.xml", "refresh_min": "0",
+                               "enabled": "1"}
+        parser["listmanager.target.0"]["m3u_sources"] = "aa"
+        parser["listmanager.target.0"]["epg_sources"] = "bb"
+        with open(path, "w", encoding="utf-8") as f:
+            parser.write(f)
+
+        store = TargetStore(path)
+        store.load()
+        t = store.get("0")
+        assert t.source_refs == (SourceRef("aa", "platero", "C:/listas/platero.m3u"),)
+        assert t.epg_refs == (SourceRef("bb", "TV", "C:/e.xml"),)
+
+    def test_save_con_refs_persiste_selecciones(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.ini"
+        _seed(path)
+        parser = configparser.ConfigParser()
+        parser.read(path, encoding="utf-8")
+        parser["source.aa"] = {"name": "platero", "kind": "m3u",
+                               "source_type": "file", "location": "C:/l.m3u",
+                               "refresh_min": "60", "enabled": "1"}
+        parser["source.bb"] = {"name": "TV", "kind": "epg",
+                               "source_type": "file", "location": "C:/e.xml",
+                               "refresh_min": "0", "enabled": "1"}
+        with open(path, "w", encoding="utf-8") as f:
+            parser.write(f)
+
+        store = TargetStore(path)
+        store.load()
+        t = dataclasses_replace(
+            store.get("0"),
+            source_refs=(SourceRef("aa", "platero", "C:/l.m3u"),),
+            epg_refs=(SourceRef("bb", "TV", "C:/e.xml"),),
+        )
+        store.save("0", t, epg_path="/lists/existing.xml")
+        parser = configparser.ConfigParser()
+        parser.read(path, encoding="utf-8")
+        assert parser.get("listmanager.target.0", "m3u_sources") == "aa"
+        assert parser.get("listmanager.target.0", "epg_sources") == "bb"
+
+    def test_save_con_refs_resuelve_location_desde_la_cartera(self, tmp_path: Path) -> None:
+        """Los refs se serializan con location aunque venga sin ella."""
+        path = tmp_path / "config.ini"
+        _seed(path)
+        parser = configparser.ConfigParser()
+        parser.read(path, encoding="utf-8")
+        parser["source.aa"] = {"name": "platero", "kind": "m3u",
+                               "source_type": "url",
+                               "location": "http://s/l.m3u",
+                               "refresh_min": "30", "enabled": "1"}
+        parser["listmanager.target.0"]["m3u_sources"] = "aa"
+        with open(path, "w", encoding="utf-8") as f:
+            parser.write(f)
+
+        store = TargetStore(path)
+        store.load()
+        t = dataclasses_replace(store.get("0"))
+        store.save("0", t)
+        parser = configparser.ConfigParser()
+        parser.read(path, encoding="utf-8")
+        assert parser.get("listmanager.target.0", "m3u_sources") == "aa"
+
+    def test_save_sin_refs_borra_selecciones_viejas(self, tmp_path: Path) -> None:
+        """Un target vuelve a fuente única => sus selecciones no quedan muertas."""
+        path = tmp_path / "config.ini"
+        _seed(path)
+        parser = configparser.ConfigParser()
+        parser.read(path, encoding="utf-8")
+        parser["listmanager.target.0"]["m3u_sources"] = "aa"
+        parser["listmanager.target.0"]["epg_sources"] = "bb"
+        with open(path, "w", encoding="utf-8") as f:
+            parser.write(f)
+        store = TargetStore(path)
+        store.load()
+        store.save("0", store.get("0"))
+        parser = configparser.ConfigParser()
+        parser.read(path, encoding="utf-8")
+        assert parser.get("listmanager.target.0", "m3u_sources", fallback="") == ""
+        assert parser.get("listmanager.target.0", "epg_sources", fallback="") == ""
+
+    def test_refs_huerfanos_ignorados(self, tmp_path: Path) -> None:
+        """Si la fila de cartera ya no existe, el ref se descarta al cargar."""
+        path = tmp_path / "config.ini"
+        _seed(path)
+        parser = configparser.ConfigParser()
+        parser.read(path, encoding="utf-8")
+        parser["listmanager.target.0"]["m3u_sources"] = "fantasma,aa"
+        with open(path, "w", encoding="utf-8") as f:
+            parser.write(f)
+        store = TargetStore(path)
+        store.load()
+        # 'aa' no existe => no queda ningún ref válido
+        assert store.get("0").source_refs == ()

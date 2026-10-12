@@ -4,7 +4,8 @@ import configparser
 import logging
 from pathlib import Path
 
-from src.application.services.list_manager.models import FilterRule
+from src.application.services.list_manager.models import FilterRule, SourceRef
+from src.infrastructure.client.sources_store import refs_for_target, selection_ids, read_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,8 @@ def load_config(path: Path) -> dict:
             "epg_overrides": epg_overrides,
             "port": parser.getint(sec, "port", fallback=8080),
             "bind": parser.get(sec, "bind", fallback="127.0.0.1"),
+            "m3u_refs": list(refs_for_target(parser, sec, "m3u")),
+            "epg_refs": list(refs_for_target(parser, sec, "epg")),
         }
         j += 1
     return {"targets": targets}
@@ -58,6 +61,7 @@ def save_config(path: Path, config: dict) -> None:
         overrides = tgt.get("epg_overrides", {})
         overrides_str = ";;".join(f"{u}::{c}" for u, c in overrides.items())
         epg_source = tgt.get("epg_source")
+        catalog = read_catalog(parser)
         parser[f"listmanager.target.{idx}"] = {
             "name": tgt.get("name", f"Target {idx + 1}"),
             "custom_m3u": str(tgt.get("custom_m3u", "")),
@@ -67,6 +71,8 @@ def save_config(path: Path, config: dict) -> None:
             "epg_overrides": overrides_str,
             "port": str(tgt.get("port", 8080)),
             "bind": str(tgt.get("bind", "127.0.0.1")),
+            "m3u_sources": selection_ids(tgt.get("m3u_refs", []), catalog),
+            "epg_sources": selection_ids(tgt.get("epg_refs", []), catalog),
         }
 
     with open(path, "w", encoding="utf-8") as f:

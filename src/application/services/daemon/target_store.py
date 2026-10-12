@@ -11,11 +11,18 @@ import configparser
 import logging
 from pathlib import Path
 
-from src.application.services.list_manager.models import FilterRule, PipelineTarget
+from src.application.services.list_manager.models import FilterRule, PipelineTarget, SourceRef
+from src.infrastructure.client.sources_store import read_catalog, refs_for_target, selection_ids
 
 logger = logging.getLogger(__name__)
 
 _TARGET_PREFIX = "listmanager.target."
+
+
+def _refs_for(parser: configparser.ConfigParser, target_id: str,
+              kind: str) -> tuple[SourceRef, ...]:
+    """Selección ``m3u_sources``/``epg_sources`` del target como SourceRefs."""
+    return refs_for_target(parser, f"{_TARGET_PREFIX}{target_id}", kind)
 
 class TargetStore:
     """Lee y escribe ``listmanager.target.N`` en config.ini."""
@@ -60,6 +67,8 @@ class TargetStore:
                                   if saved_epg_src.isdigit() else None),
                 epg_overrides=overrides,
                 port=parser.getint(sec, "port", fallback=8080),
+                source_refs=_refs_for(parser, tid, "m3u"),
+                epg_refs=_refs_for(parser, tid, "epg"),
             )
             epg_paths[tid] = parser.get(sec, "custom_epg", fallback="") or None
             binds[tid] = parser.get(sec, "bind", fallback="127.0.0.1")
@@ -106,6 +115,7 @@ class TargetStore:
             f"{u}::{c}" for u, c in target.epg_overrides.items()
         )
         epg_source = target.epg_source_index
+        catalog = read_catalog(parser)
         parser[f"{_TARGET_PREFIX}{target_id}"] = {
             "name": target.name,
             "custom_m3u": str(target.source_index),
@@ -115,6 +125,8 @@ class TargetStore:
             "epg_overrides": overrides_str,
             "port": str(target.port),
             "bind": str(bind or self.get_bind(target_id) or "127.0.0.1"),
+            "m3u_sources": selection_ids(target.source_refs, catalog),
+            "epg_sources": selection_ids(target.epg_refs, catalog),
         }
         with open(self._path, "w", encoding="utf-8") as f:
             parser.write(f)

@@ -22,6 +22,7 @@ from src.application.services.list_manager.source_catalog import (
     SourceEntry,
     new_source_id,
 )
+from src.application.services.list_manager.models import SourceRef
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,50 @@ def _read_entry(parser: configparser.ConfigParser, sec: str, sid: str) -> Source
         refresh_min=refresh,
         enabled=_parse_bool(parser.get(sec, "enabled", fallback="1")),
     )
+
+
+def read_catalog(parser: configparser.ConfigParser) -> SourceCatalog:
+    """Lee la cartera desde un parser ya cargado (sin I/O)."""
+    entries = []
+    for sec in parser.sections():
+        if not sec.startswith(_SOURCE_PREFIX):
+            continue
+        entry = _read_entry(parser, sec, sec[len(_SOURCE_PREFIX):])
+        if entry is not None:
+            entries.append(entry)
+    return SourceCatalog(entries)
+
+
+def refs_for_target(parser: configparser.ConfigParser, sec: str,
+                    kind: str) -> tuple[SourceRef, ...]:
+    """Selección ``<kind>_sources`` de una sección target como SourceRefs.
+
+    ``sec`` es la sección completa (p. ej. ``listmanager.target.0``).
+    Resuelve cada id contra ``[source.*]``; los huérfanos se descartan.
+    """
+    raw = parser.get(sec, f"{kind}_sources", fallback="")
+    catalog = read_catalog(parser)
+    refs = []
+    for sid in (p.strip() for p in raw.split(",") if p.strip()):
+        entry = catalog.get(sid)
+        if entry is not None:
+            refs.append(SourceRef(entry.id, entry.name, entry.location))
+        else:
+            logger.warning("%s referencia la fuente inexistente %r: se ignora",
+                           sec, sid)
+    return tuple(refs)
+
+
+def selection_ids(refs, catalog: SourceCatalog) -> str:
+    """Serializa refs como ids separados por coma, validando contra la cartera."""
+    ids = []
+    for ref in refs:
+        if catalog.get(ref.id) is not None:
+            ids.append(ref.id)
+        else:
+            logger.warning("Ref %s (%s) sin fila en la cartera: no se persiste",
+                           ref.id, ref.name)
+    return ",".join(ids)
 
 
 def load_catalog(path: Path) -> SourceCatalog:

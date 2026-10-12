@@ -94,3 +94,14 @@ class TestRenderPrefijo:
         )
         out = build_xmltv([ch], epg)
         assert "platero.La 1" in out
+
+
+class TestRefsConLocation:
+    """El ref copia location: el pipeline no necesita releer la cartera."""
+
+    def test_ref_con_location(self):
+        r = SourceRef("a", "platero", "C:/x.m3u")
+        assert r.location == "C:/x.m3u"
+
+    def test_location_por_defecto_vacia(self):
+        assert SourceRef("a", "platero").location == ""

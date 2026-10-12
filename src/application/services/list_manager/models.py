@@ -87,6 +87,8 @@ class SourceRef:
 
     id: str
     name: str
+    # copia de la ubicación al guardar; evita releer la cartera en el pipeline
+    location: str = ""
 
 
 @dataclass(frozen=True)
