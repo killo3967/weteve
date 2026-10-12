@@ -78,6 +78,18 @@ class FilterRule:
 
 
 @dataclass(frozen=True)
+class SourceRef:
+    """Referencia de un target a una fila de la cartera de fuentes.
+
+    ``id`` es el id de la entrada en ``[source.*]``; ``name`` se copia para
+    poder prefijar el display name ("Lista.Canal") sin leer la cartera.
+    """
+
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
 class PipelineTarget:
     """Un objetivo de pipeline: fuente + filtros + EPG + servicio."""
 
@@ -90,6 +102,9 @@ class PipelineTarget:
     port: int = 8080
     starting_number: int = 1
     enabled: bool = True
+    # selección de la cartera global; vacío = flujo antiguo de fuente única
+    source_refs: tuple[SourceRef, ...] = ()
+    epg_refs: tuple[SourceRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -114,3 +129,14 @@ class MappedChannel:
     chno: int | None = None
     # tvg-id asignado tras el matching (None si el canal queda sin EPG)
     matched_epg_id: str | None = None
+    # lista de la cartera que lo aportó; vacío = flujo antiguo sin prefijo
+    source_name: str = ""
+
+    @property
+    def display_name(self) -> str:
+        """Nombre visible: '<lista>.<canal>' cuando viene de la cartera.
+
+        El prefijo es solo de presentación: filtros y casado con la EPG
+        trabajan con ``name``, que sigue limpio.
+        """
+        return f"{self.source_name}.{self.name}" if self.source_name else self.name

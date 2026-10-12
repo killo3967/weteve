@@ -22,7 +22,7 @@ def build_m3u(channels: list[MappedChannel]) -> str:
         attrs.append(f'group-title="{group}"')
         if ch.chno is not None:
             attrs.append(f'tvg-chno="{ch.chno}"')
-        lines.append(f'#EXTINF:-1 {" ".join(attrs)},{ch.name}')
+        lines.append(f'#EXTINF:-1 {" ".join(attrs)},{ch.display_name}')
         lines.append(ch.url)
     return "\n".join(lines) + "\n"
 
@@ -46,7 +46,7 @@ def build_xmltv(channels: list[MappedChannel], epg) -> str:
             continue
         channel_el = ET.SubElement(tv, "channel", {"id": epg_id})
         display = ET.SubElement(channel_el, "display-name")
-        display.text = ch.name
+        display.text = ch.display_name
 
     for ch in channels:
         epg_id = ch.matched_epg_id or ch.tvg_id
