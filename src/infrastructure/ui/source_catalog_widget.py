@@ -6,17 +6,20 @@ cada una solo muestra las filas de su tipo (m3u / epg).
 
 import logging
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QDir, QObject, Qt
 from PyQt6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLineEdit,
     QPushButton,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
+from PyQt6.QtCore import pyqtSignal
 
 from src.application.services.list_manager.source_catalog import (
     SourceCatalog,
@@ -29,13 +32,61 @@ _COLS = ("Nombre", "Tipo de origen", "URL o fichero", "Refresco (min)", "Activa"
 _TYPE_LABELS = {"file": "Fichero local", "url": "URL remota"}
 
 
-class _LocationDelegate:
-    """Celda de ubicación: QLineEdit con detección URL/fichero al editar."""
+class _EditorSignals(QObject):
+    commit = pyqtSignal()
+
+
+class LocationDelegate(QStyledItemDelegate):
+    """Celda de ubicación: QLineEdit + botón «…» para ficheros locales.
+
+    La detección URL/fichero vive aquí (infer_source_type): si el texto
+    empieza por http(s) es URL remota y el botón se deshabilita; en caso
+    contrario abre un QFileDialog.
+    """
+
+    FILTER = "Listas M3U/EPG (*.m3u *.m3u8 *.epg);;Todos (*.*)"
 
     @staticmethod
     def infer_source_type(location: str) -> str:
         loc = (location or "").strip().lower()
         return "url" if loc.startswith(("http://", "https://")) else "file"
+
+    def createEditor(self, parent, option, index):
+        editor = QWidget(parent)
+        lay = QHBoxLayout(editor)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        line = QLineEdit(editor)
+        btn = QPushButton("…", editor)
+        btn.setFixedWidth(24)
+        lay.addWidget(line, 1)
+        lay.addWidget(btn)
+        editor._line = line
+        editor._btn = btn
+        editor._signals = _EditorSignals(editor)
+        line.textChanged.connect(lambda t: btn.setEnabled(
+            not (t or "").strip().lower().startswith(("http://", "https://"))))
+        line.editingFinished.connect(editor._signals.commit)
+
+        def _browse():
+            start = line.text().strip()
+            path, _ = QFileDialog.getOpenFileName(
+                editor, "Seleccionar fichero", start, self.FILTER)
+            if path:
+                line.setText(QDir.toNativeSeparators(path))
+                editor._signals.commit.emit()
+
+        btn.clicked.connect(_browse)
+        return editor
+
+    def setEditorData(self, editor, index):
+        editor._line.setText(str(index.data() or ""))
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor._line.text())
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
 
 
 class SourceCatalogWidget(QWidget):
@@ -56,6 +107,7 @@ class SourceCatalogWidget(QWidget):
         self.table.setHorizontalHeaderLabels(_COLS)
         self.table.horizontalHeader().setSectionResizeMode(
             2, QHeaderView.ResizeMode.Stretch)
+        self.table.setItemDelegateForColumn(2, LocationDelegate(self.table))
         layout.addWidget(self.table)
 
         buttons = QHBoxLayout()
@@ -128,7 +180,7 @@ class SourceCatalogWidget(QWidget):
                 id=eid,
                 name=name_item.text().strip(),
                 kind=self._kind,
-                source_type=_LocationDelegate.infer_source_type(location),
+                source_type=LocationDelegate.infer_source_type(location),
                 location=location,
                 refresh_min=refresh,
                 enabled=self.table.item(row, 4).checkState()
