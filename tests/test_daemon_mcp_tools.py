@@ -16,9 +16,25 @@ class _StubSupervisor(TargetSupervisor):
     def run_pipeline(self, target_id: str) -> dict:  # type: ignore[override]
         return {"total_input": 10, "filtered_count": 5, "unmatched_count": 0}
 
-    def preview_channels(self, target_id: str, limit: int = 20) -> list[dict]:  # type: ignore[override]
-        return [{"name": "Canal A", "url": "http://s/1", "group": "G",
-                 "tvg_id": None}][:limit]
+    def list_tv_channels(self, target_id: str, limit: int = 50,
+                         offset: int = 0, unmatched_only: bool = False
+                         ) -> dict:  # type: ignore[override]
+        rows = [{"name": "Canal A", "url": "http://s/1", "group": "G",
+                 "tvg_id": None}]
+        if unmatched_only:
+            rows = [r for r in rows if not r["tvg_id"]]
+        return {"channels": rows, "total": len(rows),
+                "count": len(rows), "offset": offset}
+
+    def list_epg_channels(self, target_id: str, limit: int = 200,
+                          offset: int = 0) -> dict:
+        return {"channels": [{"id": "es.la1", "display_name": "La 1"}],
+                "total": 1, "count": 1, "offset": 0}
+
+    def suggest_epg_matches(self, target_id: str, channel_name: str,
+                            limit: int = 5) -> dict:
+        return {"suggestions": [{"id": "es.la1", "display_name": "La 1"}],
+                "channel_name": channel_name}
 
     def reload_target(self, target_id, target=None, epg_path=None) -> bool:  # type: ignore[override]
         return True
@@ -69,9 +85,12 @@ class TestRegistry:
             "list_targets", "get_target",
             "create_target", "update_target", "delete_target",
             "start_target", "stop_target", "reload_target",
-            "run_pipeline", "preview_channels",
+            "run_pipeline", "list_tv_channels", "list_epg_channels",
+            "suggest_epg_matches",
             "add_source", "list_sources", "update_source", "remove_source",
             "set_target_sources",
+            "create_filter", "delete_filter",
+            "modify_mapping", "modify_mappings",
         }
         assert set(registry) == expected
         for spec in registry.values():
@@ -141,8 +160,9 @@ class TestRegistry:
     def test_pipeline_handlers(self, registry: dict) -> None:
         metrics = registry["run_pipeline"]["handler"](target_id="t0")
         assert metrics["filtered_count"] == 5
-        preview = registry["preview_channels"]["handler"](target_id="t0", limit=1)
-        assert preview["channels"][0]["name"] == "Canal A"
+        page = registry["list_tv_channels"]["handler"](target_id="t0", limit=1)
+        assert page["channels"][0]["name"] == "Canal A"
+        assert page["total"] == 1
 
     def test_rule_parsing_from_mcp_args(self, registry: dict) -> None:
         """Las reglas llegan en sintaxis xteve textual y se parsean."""
@@ -151,3 +171,91 @@ class TestRegistry:
             rules=["group-title:!{Adultos}:0"],
         )
         assert result["ok"] is True
+
+
+# -- create_filter / delete_filter / modify_mapping ---------------------------
+
+class TestNewFilterTools:
+    """create_filter, delete_filter y modify_mapping (con hot-reload)."""
+
+    @pytest.fixture
+    def registry(self) -> dict:
+        return build_tool_registry(_StubSupervisor(), _StubStore())
+
+    def test_registry_contains_new_tools(self, registry: dict) -> None:
+        for name in ("create_filter", "delete_filter", "modify_mapping"):
+            assert name in registry
+            assert registry[name]["schema"]["required"]
+
+    def test_create_filter_ok_and_hot_reload(self, registry: dict) -> None:
+        result = registry["create_filter"]["handler"](
+            target_id="t0", field="group-title", pattern="Deportes")
+        assert result["ok"] is True
+        assert "group-title:Deportes:0" in result["rules"]
+        # el target t0 está "running" en el stub: hot-reload aplicado
+        assert result["reloaded"] is True
+
+    def test_create_filter_duplicate(self, registry: dict) -> None:
+        reg = build_tool_registry(_StubSupervisor(), _StubStore())
+        reg["create_filter"]["handler"](
+            target_id="t0", field="group-title", pattern="Cine")
+        result = reg["create_filter"]["handler"](
+            target_id="t0", field="group-title", pattern="Cine")
+        assert "error" in result
+
+    def test_create_filter_invalid_field(self, registry: dict) -> None:
+        result = registry["create_filter"]["handler"](
+            target_id="t0", field="no-existe", pattern="x")
+        assert "error" in result
+
+    def test_create_filter_unknown_target(self, registry: dict) -> None:
+        result = registry["create_filter"]["handler"](
+            target_id="ghost", field="group-title", pattern="x")
+        assert "error" in result
+
+    def test_delete_filter_by_field_and_pattern(self, registry: dict) -> None:
+        reg = build_tool_registry(_StubSupervisor(), _StubStore())
+        reg["create_filter"]["handler"](
+            target_id="t0", field="group-title", pattern="Cine")
+        result = reg["delete_filter"]["handler"](
+            target_id="t0", field="group-title", pattern="Cine")
+        assert result["ok"] is True
+        assert "group-title:Cine:0" in result["removed"]
+        assert "group-title:Cine:0" not in result["rules"]
+
+    def test_delete_filter_not_found(self, registry: dict) -> None:
+        result = registry["delete_filter"]["handler"](
+            target_id="t0", field="group-title", pattern="Fantasma")
+        assert "error" in result
+
+    def test_modify_mapping_set_and_remove(self, registry: dict) -> None:
+        reg = build_tool_registry(_StubSupervisor(), _StubStore())
+        result = reg["modify_mapping"]["handler"](
+            target_id="t0", channel_url="http://s/1", epg_id="epg.canal1")
+        assert result["ok"] is True
+        assert result["epg_overrides"]["http://s/1"] == "epg.canal1"
+        # eliminar: epg_id omitido
+        result2 = reg["modify_mapping"]["handler"](
+            target_id="t0", channel_url="http://s/1")
+        assert result2["ok"] is True
+        assert "http://s/1" not in result2["epg_overrides"]
+
+    def test_modify_mapping_remove_missing(self, registry: dict) -> None:
+        result = registry["modify_mapping"]["handler"](
+            target_id="t0", channel_url="http://sin-mapeo")
+        assert "error" in result
+
+    def test_new_tools_require_store(self) -> None:
+        reg = build_tool_registry(_StubSupervisor(), target_store=None)
+        for name, kwargs in (
+            ("create_filter", {"target_id": "t0", "field": "group-title",
+                               "pattern": "x"}),
+            ("delete_filter", {"target_id": "t0", "field": "group-title",
+                               "pattern": "x"}),
+            ("modify_mapping", {"target_id": "t0", "channel_url": "u"}),
+        ):
+            assert "error" in reg[name]["handler"](**kwargs)
+
+    def test_serialize_target_includes_disabled(self, registry: dict) -> None:
+        assert "disabled_channels" in registry["get_target"]["handler"](
+            target_id="t0")["target"]

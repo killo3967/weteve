@@ -5,7 +5,11 @@ from pathlib import Path
 
 from src.application.services.list_manager.models import FilterRule, MappedChannel, PipelineTarget
 from src.application.services.list_manager.pipeline import ListManagerPipeline
-from src.application.services.list_manager.playlist_builder import build_m3u, build_xmltv
+from src.application.services.list_manager.playlist_builder import (
+    build_m3u,
+    build_xmltv,
+    epg_id_of,
+)
 from src.domain.entities.channel import Channel
 from src.domain.entities.epg import EPGData, Program
 from src.infrastructure.adapters.xmltv_repository import XMLTVRepository
@@ -72,14 +76,19 @@ class TestPipelineFilters:
     def test_sin_filtros_pasa_todo(self):
         result = _pipeline(epg=_epg()).run(_target())
         assert result.total_input == 4
-        assert result.filtered_count == 4
+        # La EPG del helper solo tiene 'La 1' y 'Teledeporte': la regla de
+        # servidor descarta Canal XXX y Canal Cine Plus por no tener guía
+        # asignada (ver tests/test_no_epg_excluded.py).
+        assert result.filtered_count == 2
 
     def test_filtro_excluye_adultos(self):
         target = _target(rules=(FilterRule("custom-filter", "!{XXX}"),))
         result = _pipeline(epg=_epg()).run(target)
         names = [c.name for c in result.channels]
         assert "Canal XXX" not in names
-        assert result.filtered_count == 3
+        # 4 pasan a la fase de EPG tras el filtro, y 'Canal Cine Plus' cae por
+        # no tener guía asignada.
+        assert result.filtered_count == 2
 
     def test_filtro_grupo(self):
         target = _target(rules=(FilterRule("group-title", "Deportes"),))
@@ -104,8 +113,11 @@ class TestPipelineEpg:
     def test_sin_match_va_a_unmatched(self):
         channels = [Channel("Canal Raro", "http://s/raro", "X")]
         result = _pipeline(epg=_epg(), channels=channels).run(_target())
-        assert result.channels[0].matched_epg_id is None
         assert result.unmatched == ["Canal Raro"]
+        # Sin guía no se sirve: el canal se reporta en excluded_no_epg, que es
+        # de donde la tabla de mapeo saca la fila para asignarle Dummy 1h.
+        assert result.channels == []
+        assert [c.name for c in result.excluded_no_epg] == ["Canal Raro"]
 
     def test_override_tiene_prioridad(self):
         result = _pipeline(epg=_epg()).run(_target(epg_overrides={"http://s/la1": "es.tdp"}))
@@ -122,33 +134,118 @@ class TestPipelineEpg:
         assert result.channels[1].chno == 101
 
 
+class TestEpgIdOf:
+    def test_prefiere_la_asignacion_manual(self):
+        ch = MappedChannel("La 1", "http://s/la1", tvg_id="propio",
+                           matched_epg_id="manual")
+        assert epg_id_of(ch) == "manual"
+
+    def test_cae_al_tvg_id_propio(self):
+        ch = MappedChannel("La 1", "http://s/la1", tvg_id="es.la1")
+        assert epg_id_of(ch) == "es.la1"
+
+    def test_sin_ningun_id_devuelve_none(self):
+        assert epg_id_of(MappedChannel("La 1", "http://s/la1")) is None
+
+
 class TestBuildM3U:
     def test_contenido_minimo(self):
-        ch = MappedChannel("La 1", "http://s/la1", "General", tvg_id="es.la1", matched_epg_id="es.la1", chno=1)
+        ch = MappedChannel("La 1", "http://s/la1", "General",
+                           tvg_id="es.la1", matched_epg_id="es.la1", chno=1)
         out = build_m3u([ch])
         assert out.startswith("#EXTM3U")
-        assert 'tvg-id="es.la1"' in out
         assert 'group-title="General"' in out
         assert "http://s/la1" in out
 
-    def test_sin_epg_deja_tvg_id_vacio(self):
-        ch = MappedChannel("Raro", "http://s/raro", "X")
+    def test_tvg_id_siempre_vacio(self):
+        """Como las listas de proveedor: el id de guía no viaja en el M3U."""
+        chans = [
+            MappedChannel("Raro", "http://s/raro", "X", chno=1),
+            MappedChannel("La 1", "http://s/la1", "X", tvg_id="es.la1",
+                          matched_epg_id="es.la1", chno=2),
+        ]
+        out = build_m3u(chans)
+        extinf = [l for l in out.splitlines() if l.startswith("#EXTINF")]
+        assert len(extinf) == 2
+        assert all('tvg-id=""' in l for l in extinf)
+        assert "es.la1" not in out
+
+    def test_group_title_y_chno_siempre_presentes(self):
+        out = build_m3u([MappedChannel("La 1", "http://s/la1", "SPAIN", chno=7)])
+        assert 'group-title="SPAIN"' in out
+        assert 'tvg-chno="7"' in out
+
+    def test_nombre_sin_prefijo_de_lista(self):
+        ch = MappedChannel("LA 1 HD", "http://s/la1", source_name="platero2026",
+                           chno=1)
         out = build_m3u([ch])
-        assert 'tvg-id=""' in out
+        assert out.rstrip().endswith("http://s/la1")
+        assert ",LA 1 HD" in out
+        assert "platero2026" not in out
 
 
 class TestBuildXmltv:
-    def test_solo_canales_con_match(self):
-        epg = _epg()
+    def test_solo_canales_con_guia_real(self):
         channels = [
             MappedChannel("La 1", "http://s/la1", matched_epg_id="es.la1"),
             MappedChannel("Sin EPG", "http://s/x"),
         ]
-        out = build_xmltv(channels, epg)
+        out = build_xmltv(channels, _epg())
         assert "<channel" in out
         assert "Noticias 1" in out
-        # el canal sin EPG no debe aparecer como canal
-        assert 'channel="es.x"' not in out
+        # el canal sin id EPG no se declara ni recibe guía inventada
+        assert out.count("<channel ") == 1
+        assert "Sin EPG" not in out
+
+    def test_sin_epg_repositorio_no_inventa_nada(self):
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(build_xmltv([MappedChannel("La 1", "http://s/la1")], None))
+        assert root.findall("channel") == []
+        assert root.findall("programme") == []
+
+    def test_usa_el_tvg_id_propio_si_no_hay_match(self):
+        import xml.etree.ElementTree as ET
+
+        ch = MappedChannel("La 1", "http://s/la1", tvg_id="es.la1")
+        root = ET.fromstring(build_xmltv([ch], _epg()))
+        assert [el.get("id") for el in root.findall("channel")] == ["es.la1"]
+        assert len(root.findall("programme")) == 1
+
+    def test_tvg_id_de_m3u_siempre_vacio_no_compromete_el_xmltv(self):
+        """El M3U no referencia ids; el XMLTV solo lleva la guía real."""
+        import re
+
+        channels = [
+            MappedChannel("La 1", "http://s/la1", matched_epg_id="es.la1", chno=1),
+            MappedChannel("Sin EPG", "http://s/x", chno=2),
+        ]
+        m3u = build_m3u(channels)
+        assert set(re.findall(r'tvg-id="([^"]*)"', m3u)) == {""}
+        assert "es.la1" in build_xmltv(channels, _epg())
+
+    def test_dos_canales_al_mismo_id_no_duplican_canal(self):
+        import xml.etree.ElementTree as ET
+
+        chans = [
+            MappedChannel("A", "http://s/a", matched_epg_id="es.la1"),
+            MappedChannel("B", "http://s/b", matched_epg_id="es.la1"),
+        ]
+        root = ET.fromstring(build_xmltv(chans, _epg()))
+        ids = [el.get("id") for el in root.findall("channel")]
+        assert ids.count("es.la1") == 1
+
+    def test_programas_no_se_reptien_por_franja(self):
+        import xml.etree.ElementTree as ET
+
+        chans = [
+            MappedChannel("A", "http://s/a", matched_epg_id="es.la1"),
+            MappedChannel("B", "http://s/b", matched_epg_id="es.la1"),
+        ]
+        root = ET.fromstring(build_xmltv(chans, _epg()))
+        starts = [p.get("start") for p in
+                  root.findall(".//programme[@channel='es.la1']")]
+        assert starts and len(starts) == len(set(starts))
 
     def test_programas_del_canal_matcheado(self):
         epg = _epg()
@@ -192,9 +289,36 @@ class TestFixturesReales:
         pipeline.register_source(0, str(FIXTURES / "sample.m3u"), str(FIXTURES / "sample.xmltv"))
         target = _target(rules=(FilterRule("custom-filter", "!{XXX}"),))
         result = pipeline.run(target)
-        assert result.filtered_count == 4
+        # El fixture trae 5 canales: 1 excluido por el filtro (XXX), 1 sin guía
+        # en el XMLTV (Canal Cine Plus -> descartado por la regla de servidor).
+        assert result.filtered_count == 3
         names = [c.name for c in result.channels]
         assert "Canal XXX" not in names
         # Teledeporte no trae tvg-id en el fixture -> match por nombre
         tdp = next(c for c in result.channels if c.name == "Teledeporte")
         assert tdp.matched_epg_id == "es.tdp"
+
+
+class TestDisabledChannels:
+    def test_disabled_excluded_from_result(self):
+        p = _pipeline(_epg())
+        t = _target(disabled_channels=("http://s/tdp", "http://s/xxx1"))
+        result = p.run(t)
+        urls = [c.url for c in result.channels]
+        assert "http://s/tdp" not in urls
+        assert "http://s/xxx1" not in urls
+        assert "http://s/la1" in urls
+
+    def test_disabled_renumbers_sequence(self):
+        """Al excluir canales, la numeración no deja huecos."""
+        p = _pipeline(_epg())
+        t = _target(disabled_channels=("http://s/la1",))
+        result = p.run(t)
+        assert [c.chno for c in result.channels] == list(
+            range(1, len(result.channels) + 1))
+
+    def test_empty_disabled_no_effect(self):
+        p = _pipeline(_epg())
+        r1 = p.run(_target())
+        r2 = p.run(_target(disabled_channels=()))
+        assert len(r1.channels) == len(r2.channels)

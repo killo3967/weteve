@@ -89,6 +89,31 @@ class TestHandleLogic:
 class TestSmokeHttp:
     """Un test HTTP real: arranque, bind, threading y cierre limpio."""
 
+    def test_log_de_acceso(self, caplog) -> None:
+        """Cada petición deja una línea INFO con cliente, ruta y estado."""
+        import logging
+
+        sup = _StubSupervisor()
+        api = ControlApiServer(sup, host="127.0.0.1", port=0)
+        assert api.start() is True
+        try:
+            with caplog.at_level(logging.INFO):
+                for _ in range(40):
+                    try:
+                        with urllib.request.urlopen(f"{api.url_base}/health",
+                                                    timeout=5) as r:
+                            assert r.status == 200
+                        break
+                    except (ConnectionResetError, OSError):
+                        time.sleep(0.25)
+                else:
+                    raise AssertionError("no se pudo conectar")
+            mensajes = [rec.getMessage() for rec in caplog.records]
+            assert any("control:" in m and "/health" in m and "200" in m
+                       for m in mensajes), mensajes
+        finally:
+            api.stop()
+
     def test_health_roundtrip(self) -> None:
         sup = _StubSupervisor()
         api = ControlApiServer(sup, host="127.0.0.1", port=0)

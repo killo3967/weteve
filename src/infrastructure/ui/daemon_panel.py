@@ -7,6 +7,8 @@ vía DaemonClient (API de control localhost). El panel:
   - pide reload del target al daemon si está vivo.
 """
 
+import logging
+
 from PyQt6.QtCore import QObject, QRunnable, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -20,6 +22,8 @@ from src.application.services.daemon.config import load_daemon_config
 from src.application.services.daemon.target_store import TargetStore
 from src.infrastructure.client.daemon_client import DaemonClient
 from src.infrastructure.client.daemon_launcher import DaemonLauncher
+
+logger = logging.getLogger(__name__)
 
 
 class _NotifySignals(QObject):
@@ -171,8 +175,14 @@ class DaemonPanel(QWidget):
             try:
                 client = self._ensure_client()
             except Exception:  # noqa: BLE001 - config de test sin [DAEMON]
+                logger.warning("no se pudo crear el cliente del demonio "
+                               "(config sin [DAEMON]); no se recarga el "
+                               "target %s", self._target_id)
                 return False
         if not client.ping():
+            logger.warning("demonio no responde en %s; el target %s queda "
+                           "con la config en disco (recargara al arrancar)",
+                           client.base_url, self._target_id)
             return False
         return client.reload_target(self._target_id)
 

@@ -16,6 +16,7 @@ class _FakeClient:
 
     def __init__(self, alive: bool = True) -> None:
         self.alive = alive
+        self.base_url = "http://127.0.0.1:34400"
         self.reload_calls: list[str] = []
         self.shutdowns: list[int] = []
         self.status_payload = {"targets": {"0": {"name": "Mi lista",

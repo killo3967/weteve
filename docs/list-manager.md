@@ -141,10 +141,25 @@ La UI nunca pide esa sintaxis: ofrece filas "campo = [grupo|nombre] contains [te
    puntuación → colapsar espacios.
 2. Match 1º por `tvg-id` exacto (canal vs canal del XMLTV).
 3. Fallback por nombre normalizado exacto.
-4. Sin match: canal queda sin EPG; aparece en el editor manual con hasta 5
-   sugerencias por similitud (`difflib.SequenceMatcher`).
-5. La corrección manual se persiste en `epg_overrides` y tiene prioridad sobre el
-   automático en regeneraciones.
+4. Sin match: el canal **no se sirve** cuando el target tiene fuente EPG
+   (`require_epg`), porque un canal sin guía es ruido en el reproductor. Se
+   conserva en `PipelineResult.excluded_no_epg` para que el editor lo muestre y
+   se pueda rescatar. Sin fuente EPG la regla no se aplica: no se puede exigir
+   una guía que no existe.
+5. Rescate desde el editor: desplegable con los canales de la guía (o texto
+   libre para pegar un channel-id que la guía no anuncia), o `Dummy 1h` para
+   generar una guía de relleno sintética (bloques de 1 h, 7 días, títulos con el
+   nombre del canal). Las sugerencias por similitud
+   (`EpgMatcher.suggestions()`, `difflib`) las expone el daemon como endpoint de
+   solo lectura; la tabla de mapeo **no** las usa.
+6. La corrección manual se persiste en `epg_overrides` (`url::canal-id`, pares
+   separados por `;;`) y tiene prioridad sobre el automático en regeneraciones.
+   `Dummy 1h` se persiste como id sintético `weteve-dummy-<hash>` derivado de la
+   url, único por canal.
+7. La etiqueta del desplegable se muestra sin el sufijo `.TV` (solo visual: lo
+   persistido sigue siendo el channel-id real, p. ej. `La1.TV`). Si la guía
+   trajera un canal llamado literalmente `Dummy 1h`, la opción sintética se
+   retira y gana el canal real.
 
 ### Mini-web
 
@@ -172,9 +187,19 @@ name = TV España filtrada
 source = 0                  ; índice en [source.N]
 epg_source = 0              ; índice de la fuente cuyo epg se usa
 rules = group-title|Sports|include;custom-filter|!{XXX}|exclude
-epg_overrides = <canal_uuid>:<tvg_id_xmltv>, ...
-starting_number = 1
+epg_overrides = <url>::<tvg_id_xmltv>;;<url>::<tvg_id>
+disabled_channels = <url>||<url>   ; solo apagado manual del usuario
+starting_number = 1               ; NO se persiste: ver nota abajo
 ```
+
+> `starting_number` vive en el modelo (`PipelineTarget`) y en las herramientas
+> MCP, pero ni `persistencia.py` ni `target_store.py` lo leen ni lo escriben: se
+> reinicia a 1 en cada carga. Pendiente de decidir si persistirlo.
+
+La casilla `Activo` de la tabla es derivada (sin guía asignada **o** apagado a
+mano), pero `disabled_channels` guarda **únicamente** el apagado manual: si no,
+un guardado convertaría cientos de canales «sin guía» en «apagados» y ya no se
+podrían rescatar con `Dummy 1h`.
 
 Migración: nada que migrar (sección nueva). Si no existe, el menú muestra el
 wizard vacío.

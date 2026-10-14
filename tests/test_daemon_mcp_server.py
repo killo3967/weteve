@@ -75,9 +75,12 @@ class TestInitialize:
             "list_targets", "get_target",
             "create_target", "update_target", "delete_target",
             "start_target", "stop_target", "reload_target",
-            "run_pipeline", "preview_channels",
+            "run_pipeline", "list_tv_channels", "list_epg_channels",
+            "suggest_epg_matches",
             "add_source", "list_sources", "update_source", "remove_source",
             "set_target_sources",
+            "create_filter", "delete_filter",
+            "modify_mapping", "modify_mappings",
         }
         # cada herramienta declara inputSchema
         for t in resp["result"]["tools"]:

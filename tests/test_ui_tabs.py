@@ -1,4 +1,4 @@
-"""Pestañas del diálogo: Listas IPTV / Listas EPG / Filtros / Mapeado."""
+"""Pestañas del diálogo: Listas IPTV / Listas EPG / Filtros / Mapeado / Configuración / Logs."""
 from pathlib import Path
 
 import pytest
@@ -16,11 +16,14 @@ def dialog(qtbot):
 class TestTabs:
     def test_tab_widget_existe(self, dialog):
         assert dialog.tabs is not None
-        assert dialog.tabs.count() == 4
+        assert dialog.tabs.count() == 6
 
     def test_titulos_de_pestanas(self, dialog):
         titles = [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())]
-        assert titles == ["Listas IPTV", "Listas EPG", "Filtros", "Mapeado EPG"]
+        assert titles == [
+            "Listas IPTV", "Listas EPG", "Filtros", "Mapeado EPG",
+            "Configuración", "Logs",
+        ]
 
     def test_widgets_dentro_de_pestanas(self, dialog):
         # el contenido sigue accesible por los mismos atributos
@@ -40,3 +43,85 @@ class TestTabs:
         from src.infrastructure.ui.source_catalog_widget import SourceCatalogWidget
         assert isinstance(dialog.catalog_m3u_widget, SourceCatalogWidget)
         assert isinstance(dialog.catalog_epg_widget, SourceCatalogWidget)
+
+
+class TestEpgMappingTable:
+    """Tabla de mapeo manual: combo EPG por fila, overrides y activación."""
+
+    def _widget(self, qtbot, dialog):
+        w = dialog.epg_mapping
+        qtbot.addWidget(w)
+        return w
+
+    @staticmethod
+    def _epg():
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            channel_names={"es.la1": "La 1", "es.clan": "Clan"},
+            programs_by_channel_ids=lambda: ["es.la1", "es.clan"])
+
+    @staticmethod
+    def _channels():
+        from src.application.services.list_manager.models import MappedChannel
+        return [
+            MappedChannel("La 1", "http://s/la1"),
+            MappedChannel("Raro", "http://s/raro"),
+        ]
+
+    def test_combo_se_llena_con_los_canales_del_epg(self, qtbot, dialog):
+        w = self._widget(qtbot, dialog)
+        w.set_epg(self._epg())
+        w.load_unmatched(self._channels(), {})
+        combo = w.table.cellWidget(0, w.COL_EPG)
+        texts = [combo._combo.itemText(i) for i in range(combo._combo.count())]
+        assert "La 1" in texts and "es.la1" in texts
+        assert "Clan" in texts and "es.clan" in texts
+
+    def test_combo_sin_epg_ofrece_blanco_y_dummy(self, qtbot, dialog):
+        """Sin guía no hay canales que listar, pero 'Dummy 1h' sigue disponible:
+        es la única forma de rescatar un canal en ese estado."""
+        from src.application.services.list_manager.dummy_epg import DUMMY_LABEL
+
+        w = self._widget(qtbot, dialog)
+        w.set_epg(None)
+        w.load_unmatched(self._channels(), {})
+        combo = w.table.cellWidget(0, w.COL_EPG)
+        assert [combo._combo.itemText(i) for i in range(combo._combo.count())] ==             ["", DUMMY_LABEL]
+        assert combo.current_value() == ""
+
+    def test_override_persistido_se_muestra(self, qtbot, dialog):
+        """config.ini guarda el channel-id; lo que se ve es su nombre."""
+        w = self._widget(qtbot, dialog)
+        w.set_epg(self._epg())
+        w.load_unmatched(self._channels(), {"http://s/raro": "es.clan"})
+        combo = w.table.cellWidget(1, w.COL_EPG)
+        assert combo.current_value() == "Clan"
+
+    def test_get_overrides_resuelve_nombre_a_id(self, qtbot, dialog):
+        w = self._widget(qtbot, dialog)
+        w.set_epg(self._epg())
+        w.load_unmatched(self._channels(), {"http://s/raro": "es.clan"})
+        assert w.get_overrides() == {"http://s/raro": "es.clan"}
+
+    def test_nombre_mostrado_se_resuelve_a_su_id(self, qtbot, dialog):
+        w = self._widget(qtbot, dialog)
+        w.set_epg(self._epg())
+        w.load_unmatched(self._channels(), {})
+        combo = w.table.cellWidget(0, w.COL_EPG)
+        combo._combo.setCurrentText("Clan")
+        assert w.get_overrides() == {"http://s/la1": "es.clan"}
+
+    def test_sin_epg_asignado_no_se_desactiva(self, qtbot, dialog):
+        """Un canal sin EPG se sirve con guía de relleno: no se auto-desactiva."""
+        w = self._widget(qtbot, dialog)
+        w.set_epg(self._epg())
+        w.load_unmatched(self._channels(), {})
+        assert w.get_disabled() == ()
+
+    def test_desactivado_persistido_sigue_listado(self, qtbot, dialog):
+        """Un canal desactivado sigue en la tabla para poder reactivarlo."""
+        w = self._widget(qtbot, dialog)
+        w.set_epg(self._epg())
+        w.load_unmatched(self._channels(), {}, disabled=("http://s/raro",))
+        assert w.table.rowCount() == 2
+        assert w.get_disabled() == ("http://s/raro",)

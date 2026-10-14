@@ -28,6 +28,10 @@ def load_config(path: Path) -> dict:
             if "::" in pair:
                 url, cid = pair.split("::", 1)
                 epg_overrides[url] = cid
+        raw_disabled = parser.get(sec, "disabled_channels", fallback="")
+        disabled_channels = tuple(
+            u.strip() for u in raw_disabled.split("||") if u.strip()
+        )
         saved_epg_src = parser.get(sec, "epg_source", fallback="-1")
         targets[j] = {
             "name": parser.get(sec, "name", fallback=f"Target {j+1}"),
@@ -39,6 +43,7 @@ def load_config(path: Path) -> dict:
             "epg_source": int(saved_epg_src) if saved_epg_src.isdigit() else None,
             "rules": rules,
             "epg_overrides": epg_overrides,
+            "disabled_channels": list(disabled_channels),
             "port": parser.getint(sec, "port", fallback=8080),
             "bind": parser.get(sec, "bind", fallback="127.0.0.1"),
             "m3u_refs": list(refs_for_target(parser, sec, "m3u")),
@@ -60,6 +65,10 @@ def save_config(path: Path, config: dict) -> None:
         )
         overrides = tgt.get("epg_overrides", {})
         overrides_str = ";;".join(f"{u}::{c}" for u, c in overrides.items())
+        disabled_list = tgt.get("disabled_channels", []) or []
+        disabled_str = "||".join(
+            u for u in (str(x) for x in disabled_list) if u
+        )
         epg_source = tgt.get("epg_source")
         catalog = read_catalog(parser)
         parser[f"listmanager.target.{idx}"] = {
@@ -69,6 +78,7 @@ def save_config(path: Path, config: dict) -> None:
             "epg_source": str(epg_source if epg_source is not None else -1),
             "rules": rules_str,
             "epg_overrides": overrides_str,
+            "disabled_channels": disabled_str,
             "port": str(tgt.get("port", 8080)),
             "bind": str(tgt.get("bind", "127.0.0.1")),
             "m3u_sources": selection_ids(tgt.get("m3u_refs", []), catalog),

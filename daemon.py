@@ -9,7 +9,7 @@ Comandos:
 
 Arquitectura: TargetSupervisor posee los targets (pipeline + PlaylistServer
 por target). ControlApiServer (puerto [DAEMON] control_port) expone lo
-mínimo para la UI; McpHttpTransport (mcp_port) expone las 12 herramientas
+mínimo para la UI; McpHttpTransport (mcp_port) expone las 23 herramientas
 MCP con CRUD completo. TargetStore comparte config.ini con la UI.
 """
 
@@ -35,27 +35,55 @@ from src.infrastructure.client.daemon_client import DaemonClient
 
 logger = logging.getLogger("weteve.daemon")
 
+# Etiquetas cortas de nivel para el log del daemon: [info], [warn], [error]…
+_LEVEL_TAGS = {
+    logging.DEBUG: "debug",
+    logging.INFO: "info",
+    logging.WARNING: "warn",
+    logging.ERROR: "error",
+    logging.CRITICAL: "critical",
+}
+
 
 def default_log_path() -> Path:
     """Ruta del log del daemon: <repo>/logs/weteve-daemon.log."""
     return Path(__file__).resolve().parent / "logs" / "weteve-daemon.log"
 
 
-def setup_logging(log_path: Path | None = None) -> None:
+class _LevelTagFilter(logging.Filter):
+    """Añade ``record.leveltag`` (``info``/``warn``/``error``…).
+
+    Es un atributo extra, no toca ``levelname``: así los handlers que
+    imprimen ``%(levelname)s`` y las aserciones de los tests siguen viendo
+    ``INFO``/``WARNING``.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.leveltag = _LEVEL_TAGS.get(record.levelno,
+                                          record.levelname.lower())
+        return True
+
+
+def setup_logging(log_path: Path | None = None,
+                  level: int = logging.INFO) -> None:
     """Configura logging dual: consola (stderr) + fichero rotado por tamaño.
 
-    Idempotente: no duplica handlers si se llama más de una vez.
+    Formato ``fecha [nivel] logger: mensaje``, con el nivel entre corchetes
+    y en minúsculas (``[info]``, ``[warn]``). Idempotente: no duplica
+    handlers si se llama más de una vez.
     """
     from logging.handlers import RotatingFileHandler
 
     root = logging.getLogger()
     if any(isinstance(h, RotatingFileHandler) for h in root.handlers):
         return  # ya configurado
-    root.setLevel(logging.INFO)
-    fmt = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+    root.setLevel(level)
+    fmt = logging.Formatter("%(asctime)s [%(leveltag)s] %(name)s: %(message)s")
+    tag_filter = _LevelTagFilter()
 
     console = logging.StreamHandler()
     console.setFormatter(fmt)
+    console.addFilter(tag_filter)
     root.addHandler(console)
 
     path = log_path or default_log_path()
@@ -63,6 +91,7 @@ def setup_logging(log_path: Path | None = None) -> None:
     file_h = RotatingFileHandler(path, maxBytes=1_000_000, backupCount=3,
                                  encoding="utf-8")
     file_h.setFormatter(fmt)
+    file_h.addFilter(tag_filter)
     root.addHandler(file_h)
 
 DEFAULT_CONFIG = Path("config.ini")
@@ -117,6 +146,7 @@ def build_daemon(config_path: Path = DEFAULT_CONFIG) -> dict:
 
 def cmd_run(config_path: Path) -> int:
     setup_logging()
+    logger.info("arrancando daemon weteve (config=%s)", config_path)
     try:
         d = build_daemon(config_path)
     except RuntimeError as e:

@@ -26,3 +26,8 @@ config.ini
 # Tooling artifacts
 .atl/
 logs/
+
+# Sesión/herramientas locales
+.pi/
+.atl/
+*.bak

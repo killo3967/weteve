@@ -7,6 +7,11 @@ DELETE /mcp → cierra sesión (204).
 Sesión por cabecera ``Mcp-Session-Id`` (asignada en initialize). Token
 opcional vía ``Authorization: Bearer``. Mismo patrón de servidor que
 PlaylistServer/ControlApiServer (ThreadingHTTPServer sin SO_REUSEADDR).
+
+Log de comunicaciones (``logs/weteve-daemon.log``): una línea INFO por
+petición —incluido el método JSON-RPC (``initialize``, ``tools/call``…) y el
+cliente— y una WARNING por rechazo (token inválido, ruta desconocida, JSON
+inválido, GET sin SSE).
 """
 
 import json
@@ -15,11 +20,9 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from src.application.services.daemon.mcp_server import McpStreamableServer
+from src.infrastructure.web.http_common import AccessLogMixin, NoReuseServer
 
 logger = logging.getLogger(__name__)
-
-class _NoReuseServer(ThreadingHTTPServer):
-    allow_reuse_address = False
 
 class McpHttpTransport:
     """Expone un McpStreamableServer sobre HTTP en su propio puerto."""
@@ -52,8 +55,8 @@ class McpHttpTransport:
         if self._server is not None:
             return True
         try:
-            self._server = _NoReuseServer((self._host, self._port),
-                                          self._make_handler())
+            self._server = NoReuseServer((self._host, self._port),
+                                         self._make_handler())
         except OSError as e:
             logger.error("MCP: no se pudo enlazar %s:%d: %s", self._host, self._port, e)
             return False
@@ -75,8 +78,9 @@ class McpHttpTransport:
         core = self._core
         token = self._token
 
-        class Handler(BaseHTTPRequestHandler):
+        class Handler(AccessLogMixin, BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+            log_prefix = "mcp"
 
             def _authorized(self) -> bool:
                 if not token:
@@ -85,20 +89,31 @@ class McpHttpTransport:
 
             def do_POST(self) -> None:
                 if self.path != "/mcp":
+                    logger.warning("mcp: ruta desconocida %s desde %s",
+                                   self.path, self.client_address[0])
                     self._json(404, {"error": "ruta desconocida"})
                     return
                 if not self._authorized():
+                    logger.warning("mcp: token inválido o ausente desde %s",
+                                   self.client_address[0])
                     self._json(401, {"error": "token requerido"})
                     return
                 length = int(self.headers.get("Content-Length", 0))
                 try:
                     message = json.loads(self.rfile.read(length).decode("utf-8"))
                 except (ValueError, UnicodeDecodeError):
+                    logger.warning("mcp: cuerpo no-JSON (%d bytes) desde %s",
+                                   length, self.client_address[0])
                     self._json(400, {"jsonrpc": "2.0", "id": None, "error": {
                         "code": -32700, "message": "JSON inválido"}})
                     return
 
                 session_id = self.headers.get("Mcp-Session-Id")
+                logger.info("mcp: %s (%s) desde %s",
+                            message.get("method", "?") if isinstance(message, dict)
+                            else "lote",
+                            f"sesión {session_id}" if session_id else "sin sesión",
+                            self.client_address[0])
                 resp, new_session = core.handle_request(message, session_id)
                 if resp is None:
                     # notificación: 202 sin cuerpo
@@ -110,8 +125,13 @@ class McpHttpTransport:
 
             def do_DELETE(self) -> None:
                 if not self._authorized():
+                    logger.warning("mcp: token inválido o ausente desde %s",
+                                   self.client_address[0])
                     self._json(401, {"error": "token requerido"})
                     return
+                logger.info("mcp: cierre de sesión %s desde %s",
+                            self.headers.get("Mcp-Session-Id") or "?",
+                            self.client_address[0])
                 core.handle_delete(self.headers.get("Mcp-Session-Id"))
                 self.send_response(204)
                 self.send_header("Content-Length", "0")
@@ -119,6 +139,8 @@ class McpHttpTransport:
 
             def do_GET(self) -> None:
                 # Streamable HTTP permite GET para streams SSE; no lo usamos.
+                logger.warning("mcp: GET %s no soportado (sin SSE) desde %s",
+                               self.path, self.client_address[0])
                 self._json(405, {"error": "GET no soportado (sin stream SSE)"})
 
             def _json(self, status: int, body: dict,
@@ -131,8 +153,5 @@ class McpHttpTransport:
                     self.send_header("Mcp-Session-Id", session)
                 self.end_headers()
                 self.wfile.write(data)
-
-            def log_message(self, format: str, *args) -> None:
-                logger.debug("mcp: %s", format % args)
 
         return Handler

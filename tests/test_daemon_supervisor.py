@@ -133,14 +133,21 @@ class TestTargetSupervisor:
         finally:
             sup.stop_all()
 
-    def test_preview_channels(self, tmp_path: Path) -> None:
+    def test_list_tv_channels(self, tmp_path: Path) -> None:
         m3u = _write_m3u(tmp_path / "src.m3u", ["Canal A", "Canal B"])
         sup = TargetSupervisor()
         try:
             sup.reload_target("t0", _target(m3u, 0))
-            preview = sup.preview_channels("t0", limit=1)
-            assert len(preview) == 1
-            assert preview[0]["name"] == "Canal A"
+            # el fixture filtra con {G0}: solo pasa Canal A (G0)
+            page = sup.list_tv_channels("t0", limit=10)
+            assert page["total"] == 1 and page["count"] == 1
+            assert page["channels"][0]["name"] == "Canal A"
+            # unmatched_only: sin EPG cargado, todos sin asignar
+            all_un = sup.list_tv_channels("t0", unmatched_only=True)
+            assert all_un["total"] == 1
+            # list_epg_channels sin EPG cargado: error descriptivo
+            err = sup.list_epg_channels("t0")
+            assert "error" in err
         finally:
             sup.stop_all()
 
@@ -189,8 +196,9 @@ class TestSupervisorMultiFuente:
         try:
             assert sup.start_target("t0", t)
             body = _get(sup.get_status()["targets"]["t0"]["playlist_url"])
-            assert "A.Canal A" in body   # prefijo por lista
-            assert "B.Canal B" in body
+            assert ",Canal A" in body   # sin prefijo por lista
+            assert ",Canal B" in body
+            assert "A.Canal" not in body and "B.Canal" not in body
         finally:
             sup.stop_all()
 

@@ -9,6 +9,10 @@ Endpoints (localhost):
 El resto del control (CRUD de targets incluido) vive en el MCP; esta API es
 solo lo mínimo que la UI necesita sin pasar por MCP. Comparte el patrón de
 servidor con PlaylistServer (ThreadingHTTPServer, sin SO_REUSEADDR).
+
+Cada petición deja una línea INFO en el log (vía ``AccessLogMixin``) y los
+rechazos (401 sin token, 404 de ruta) una línea WARNING: así se ven los
+intentos de conexión en ``logs/weteve-daemon.log``.
 """
 
 import json
@@ -16,10 +20,9 @@ import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-logger = logging.getLogger(__name__)
+from src.infrastructure.web.http_common import AccessLogMixin, NoReuseServer
 
-class _NoReuseServer(ThreadingHTTPServer):
-    allow_reuse_address = False
+logger = logging.getLogger(__name__)
 
 class ControlApiServer:
     """Servidor HTTP de control. ``on_shutdown`` se invoca en POST /shutdown."""
@@ -57,7 +60,7 @@ class ControlApiServer:
         if self._server is not None:
             return True
         try:
-            self._server = _NoReuseServer((self._host, self._port), self._make_handler())
+            self._server = NoReuseServer((self._host, self._port), self._make_handler())
         except OSError as e:
             logger.error("API de control: no se pudo enlazar %s:%d: %s",
                          self._host, self._port, e)
@@ -125,11 +128,17 @@ class ControlApiServer:
     def _make_handler(self) -> type[BaseHTTPRequestHandler]:
         api = self
 
-        class Handler(BaseHTTPRequestHandler):
+        class Handler(AccessLogMixin, BaseHTTPRequestHandler):
+            log_prefix = "control"
+
             def _dispatch(self) -> None:
                 auth = self.headers.get("Authorization", "")
                 auth_ok = bool(api._token) and auth == f"Bearer {api._token}"
                 status, body = api._handle(self.command, self.path, auth_ok)
+                if status >= 400:
+                    logger.warning("control: %s %s -> %d desde %s",
+                                   self.command, self.path, status,
+                                   self.client_address[0])
                 data = json.dumps(body).encode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -139,8 +148,5 @@ class ControlApiServer:
 
             do_GET = _dispatch
             do_POST = _dispatch
-
-            def log_message(self, format: str, *args) -> None:
-                logger.debug("control: %s", format % args)
 
         return Handler

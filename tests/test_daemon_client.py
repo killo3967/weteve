@@ -65,6 +65,47 @@ class TestDaemonClient:
         c = DaemonClient(host="127.0.0.1", port=1)
         assert c.ping() is False
 
+    def test_fallo_de_conexion_queda_en_el_log(self, caplog) -> None:
+        """Antes era silencioso: la UI daba error y el log no decía nada."""
+        import logging
+
+        c = DaemonClient(host="127.0.0.1", port=1, retries=1,
+                         retry_delay=0.01)
+        with caplog.at_level(
+                logging.WARNING,
+                logger="src.infrastructure.client.daemon_client"):
+            assert c.ping() is False
+        assert any("sin respuesta" in rec.getMessage()
+                   for rec in caplog.records), \
+            [rec.getMessage() for rec in caplog.records]
+
+    def test_http_error_queda_en_el_log(self, caplog, server) -> None:
+        import logging
+        import time
+
+        api = ControlApiServer(_StubSupervisor(), host="127.0.0.1", port=0,
+                               token="tk")
+        assert api.start() is True
+        try:
+            c = DaemonClient(host=api.host, port=api.port, retries=5,
+                             retry_delay=0.2)
+            with caplog.at_level(
+                    logging.WARNING,
+                    logger="src.infrastructure.client.daemon_client"):
+                # el primer intento puede caer en un RST de loopback (Windows)
+                for _ in range(8):
+                    caplog.clear()
+                    assert c.ping() is False
+                    if any("HTTP 401" in rec.getMessage()
+                           for rec in caplog.records):
+                        break
+                    time.sleep(0.25)
+            assert any("HTTP 401" in rec.getMessage()
+                       for rec in caplog.records), \
+                [rec.getMessage() for rec in caplog.records]
+        finally:
+            api.stop()
+
     def test_token(self, server) -> None:
         from src.application.services.daemon.control_api import ControlApiServer as C
         sup = _StubSupervisor()

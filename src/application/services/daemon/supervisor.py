@@ -14,6 +14,7 @@ import logging
 import threading
 
 from src.application.services.daemon.scheduler import RefreshScheduler, target_interval_min
+from src.application.services.list_manager.epg_matcher import EpgMatcher
 from src.application.services.list_manager.models import PipelineTarget
 from src.application.services.list_manager.pipeline import ListManagerPipeline
 from src.application.services.list_manager.playlist_builder import (
@@ -45,7 +46,7 @@ class TargetSupervisor:
     def _render(result, epg) -> tuple[str, str]:
         """Convierte un PipelineResult en (playlist, epg_xml) listos para servir."""
         playlist = build_m3u(result.channels)
-        epg_xml = build_xmltv(result.channels, epg) if epg is not None else ""
+        epg_xml = build_xmltv(result.channels, epg)
         return playlist, epg_xml
 
     def _ensure_source(self, target: PipelineTarget, epg_path: str | None) -> None:
@@ -223,21 +224,78 @@ class TargetSupervisor:
                 }
             return {"targets": out}
 
-    def preview_channels(self, target_id: str, limit: int = 20) -> list[dict]:
-        """Primeros ``limit`` canales del último pipeline (requiere reload/start)."""
+    def list_tv_channels(self, target_id: str, limit: int = 50,
+                         offset: int = 0, unmatched_only: bool = False
+                         ) -> dict:
+        """Canales del último pipeline (requiere reload/start/run_pipeline).
+
+        Devuelve una página {'channels': [...], 'total', 'count', 'offset'}.
+        Con ``unmatched_only`` solo los que aún no tienen EPG asignado
+        (matched_epg_id es None ni override).
+        """
         with self._lock:
             result = self._results.get(target_id)
             if result is None:
-                return []
-            return [
+                return {"channels": [], "total": 0, "count": 0,
+                        "offset": int(offset)}
+            rows = [
                 {
                     "name": c.name,
                     "url": c.url,
                     "group": c.group,
                     "tvg_id": c.matched_epg_id,
                 }
-                for c in result.channels[:limit]
+                for c in result.channels
             ]
+        if unmatched_only:
+            rows = [r for r in rows if not r["tvg_id"]]
+        total = len(rows)
+        page = rows[int(offset):int(offset) + int(limit)]
+        return {"channels": page, "total": total, "count": len(page),
+                "offset": int(offset)}
+
+    def list_epg_channels(self, target_id: str, limit: int = 200,
+                          offset: int = 0) -> dict:
+        """Canales del XMLTV del target: [{'id', 'display_name'}, ...].
+
+        Requiere que el target tenga EPG asignado y cargado (reload/
+        run_pipeline previo). Paginado para no volcar catálogos enormes.
+        """
+        epg = None
+        with self._lock:
+            target = self._targets.get(target_id)
+            if target is not None:
+                epg = self._pipeline.get_epg(target.source_index)
+        if epg is None:
+            return {"error": (f"target {target_id} sin EPG cargado: "
+                               "ejecuta reload_target o run_pipeline")}
+        items = sorted(epg.channel_names.items())
+        total = len(items)
+        page = items[int(offset):int(offset) + int(limit)]
+        return {"channels": [{"id": cid, "display_name": name}
+                             for cid, name in page],
+                "total": total, "count": len(page), "offset": int(offset)}
+
+    def suggest_epg_matches(self, target_id: str, channel_name: str,
+                            limit: int = 5) -> dict:
+        """Candidatos EPG para un canal M3U por similitud de nombre.
+
+        Usa EpgMatcher.suggestions() (normalización + difflib). Solo lectura:
+        no asigna nada; la decisión queda para modify_mapping(s).
+        """
+        epg = None
+        with self._lock:
+            target = self._targets.get(target_id)
+            if target is not None:
+                epg = self._pipeline.get_epg(target.source_index)
+        if epg is None:
+            return {"error": (f"target {target_id} sin EPG cargado: "
+                              "ejecuta reload_target o run_pipeline")}
+        matcher = EpgMatcher(epg)
+        suggestions = matcher.suggestions(channel_name, limit=int(limit))
+        return {"suggestions": [{"id": cid, "display_name": name}
+                                for cid, name in suggestions],
+                "channel_name": channel_name}
 
     def run_pipeline(self, target_id: str) -> dict:
         """Ejecuta el pipeline del target y devuelve métricas."""

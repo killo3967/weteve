@@ -103,3 +103,33 @@ class TestSetupLogging:
         p = daemon_mod.default_log_path()
         assert p.parent.name == "logs"
         assert p.name == "weteve-daemon.log"
+
+    def test_etiqueta_de_nivel_en_fichero(self, tmp_path) -> None:
+        """El log del daemon marca el nivel: ``[info]``, ``[warn]``…
+
+        Se aísla de otros tests del módulo quitando los handlers del root
+        (setup_logging es idempotente y no reconfiguraría).
+        """
+        import logging
+
+        root = logging.getLogger()
+        saved_handlers = list(root.handlers)
+        saved_level = root.level
+        log_path = tmp_path / "nivel.log"
+        for h in saved_handlers:
+            root.removeHandler(h)
+        try:
+            daemon_mod.setup_logging(log_path)
+            logging.getLogger("test").info("arrancado")
+            logging.getLogger("test").warning("puerto ocupado")
+            for h in root.handlers:
+                h.flush()
+            contenido = log_path.read_text(encoding="utf-8")
+            assert "[info] test: arrancado" in contenido
+            assert "[warn] test: puerto ocupado" in contenido
+        finally:
+            for h in list(root.handlers):
+                root.removeHandler(h)
+            for h in saved_handlers:
+                root.addHandler(h)
+            root.setLevel(saved_level)

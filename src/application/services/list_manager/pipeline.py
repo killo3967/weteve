@@ -36,10 +36,23 @@ class PipelineResult:
         channels: list[MappedChannel],
         total_input: int,
         unmatched: list[str],
+        excluded_disabled: list[MappedChannel] | None = None,
+        excluded_no_epg: list[MappedChannel] | None = None,
+        require_epg: bool = False,
     ):
         self.channels = channels
         self.total_input = total_input
         self.unmatched = unmatched  # nombres de canales sin EPG
+        # Canales que pasaron los filtros pero están desactivados a mano: no
+        # se sirven, pero la UI los necesita para poder reactivarlos.
+        self.excluded_disabled = list(excluded_disabled or [])
+        # Canales descartados por la regla de servidor (sin guía asignada).
+        # Se conservan a propósito: son la única fuente de filas de la tabla de
+        # mapeo, y sin ellas el usuario no podría asignarles Dummy 1h para
+        # rescatarlos. Nunca se sirven en el M3U.
+        self.excluded_no_epg = list(excluded_no_epg or [])
+        # True si había fuente EPG y, por tanto, la regla se ha aplicado.
+        self.require_epg = require_epg
 
     @property
     def filtered_count(self) -> int:
@@ -265,13 +278,16 @@ class ListManagerPipeline:
     def _finish(self, target: PipelineTarget, kept: list[MappedChannel],
                 total_input: int, epg: EPGData | None) -> PipelineResult:
         """Numeración secuencial + match EPG, común a ambos flujos."""
-        numbered: list[MappedChannel] = []
-        for i, mapped in enumerate(kept, start=target.starting_number):
-            numbered.append(dataclasses_replace(mapped, chno=i))
-        kept = numbered
+        # Canales desactivados manualmente: excluidos antes de numerar.
+        disabled = set(target.disabled_channels)
+        excluded: list[MappedChannel] = []
+        if disabled:
+            excluded = [m for m in kept if m.url in disabled]
+            kept = [m for m in kept if m.url not in disabled]
+        # La numeración va al final, sobre los canales que realmente se
+        # sirven: ver el bloque de la regla de servidor.
 
         # Match EPG
-        unmatched: list[str] = []
         matched: list[MappedChannel] = []
         if epg is not None:
             matcher = EpgMatcher(epg)
@@ -282,18 +298,53 @@ class ListManagerPipeline:
                     continue
                 epg_id = matcher.match(mapped.tvg_id, mapped.name)
                 matched.append(dataclasses_replace(mapped, matched_epg_id=epg_id))
-                if not epg_id:
-                    unmatched.append(mapped.name)
         else:
             matched = kept
-            unmatched = [m.name for m in kept]
-        kept = matched
+
+        # Regla de servidor: un canal sin guía asignada no se sirve.
+        #
+        # Orden: match -> descarte -> numeración. Numerar antes de descartar
+        # dejaría los `chno` con huecos (1, 3, 4...) en la lista que ve el
+        # reproductor.
+        #
+        # El Dummy cuenta como guía asignada: es la vía de rescate que la UI
+        # ofrece para un canal sin EPG real, y si no colara aquí, asignarlo no
+        # serviría de nada.
+        #
+        # ``require_epg`` es derivado, no una opción del usuario: se exige guía
+        # solo cuando hay una guía que exigir. Sin fuente EPG la lista dejaría
+        # de funcionar por un motivo que no es culpa del canal.
+        #
+        # Conocido y aceptado por el usuario (2026-10-14): con una EPG que
+        # empareja mal, esta regla vacía la lista. El recorte se informa en el
+        # log y ``excluded_no_epg`` alimenta la tabla para poder rescatar.
+        require_epg = epg is not None
+        no_epg: list[MappedChannel] = []
+        if require_epg:
+            served: list[MappedChannel] = []
+            for mapped in matched:
+                if mapped.matched_epg_id:
+                    served.append(mapped)
+                else:
+                    no_epg.append(mapped)
+        else:
+            served = matched
+        # ``unmatched`` es siempre el diagnóstico de la EPG: con la regla
+        # activada son los descartados, no los servidos sin guía.
+        unmatched = [m.name for m in (no_epg if require_epg else served)]
+        numbered = [
+            dataclasses_replace(m, chno=i)
+            for i, m in enumerate(served, start=target.starting_number)
+        ]
 
         logger.info(
-            "Pipeline '%s': %d canales entrada -> %d tras filtros, %d sin EPG",
+            "Pipeline '%s': %d canales entrada -> %d tras filtros, "
+            "%d sin guía EPG%s",
             target.name,
             total_input,
-            len(kept),
+            len(numbered),
             len(unmatched),
+            f", {len(no_epg)} descartados" if require_epg else " (sin fuente EPG)",
         )
-        return PipelineResult(kept, total_input, unmatched)
+        return PipelineResult(numbered, total_input, unmatched, excluded,
+                              no_epg, require_epg)

@@ -94,6 +94,39 @@ def _initialize(transport: McpHttpTransport) -> str:
 
 
 class TestMcpHttpTransport:
+    def test_log_de_comunicaciones(self, transport: McpHttpTransport,
+                                   caplog) -> None:
+        """El log muestra el método JSON-RPC y el acceso HTTP (antes, nada)."""
+        import logging
+
+        with caplog.at_level(logging.INFO):
+            _initialize(transport)
+        mensajes = [rec.getMessage() for rec in caplog.records]
+        assert any("mcp: initialize" in m for m in mensajes), mensajes
+        assert any("mcp:" in m and "POST /mcp" in m and "200" in m
+                   for m in mensajes), mensajes
+
+    def test_log_token_invalido_es_warning(self, caplog) -> None:
+        import logging
+
+        core = McpStreamableServer(server_name="weteve-test")
+        core.set_tool_registry(build_tool_registry(_StubSupervisor(),
+                                                   _StubStore()))
+        t = McpHttpTransport(core, host="127.0.0.1", port=0, token="tk1")
+        try:
+            assert t.start() is True
+            with caplog.at_level(
+                    logging.WARNING,
+                    logger="src.application.services.daemon.mcp_transport"):
+                _post(t.url_base + "/mcp", {"jsonrpc": "2.0", "id": 1,
+                                            "method": "initialize",
+                                            "params": {}})
+            assert any("token inválido o ausente" in rec.getMessage()
+                       for rec in caplog.records), \
+                [rec.getMessage() for rec in caplog.records]
+        finally:
+            t.stop()
+
     def test_initialize_and_tools_call(self, transport: McpHttpTransport) -> None:
         url = transport.url_base + "/mcp"
         sid = _initialize(transport)

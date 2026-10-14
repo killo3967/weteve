@@ -107,6 +107,9 @@ class PipelineTarget:
     # selección de la cartera global; vacío = flujo antiguo de fuente única
     source_refs: tuple[SourceRef, ...] = ()
     epg_refs: tuple[SourceRef, ...] = ()
+    # canales desactivados manualmente (clave estable, p. ej. url); el
+    # pipeline los excluye de la lista servida
+    disabled_channels: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -131,14 +134,6 @@ class MappedChannel:
     chno: int | None = None
     # tvg-id asignado tras el matching (None si el canal queda sin EPG)
     matched_epg_id: str | None = None
-    # lista de la cartera que lo aportó; vacío = flujo antiguo sin prefijo
+    # lista de la cartera que lo aportó; alimenta el campo de filtro 'source'.
+    # No se antepone al nombre de salida: el reproductor muestra solo el canal.
     source_name: str = ""
-
-    @property
-    def display_name(self) -> str:
-        """Nombre visible: '<lista>.<canal>' cuando viene de la cartera.
-
-        El prefijo es solo de presentación: filtros y casado con la EPG
-        trabajan con ``name``, que sigue limpio.
-        """
-        return f"{self.source_name}.{self.name}" if self.source_name else self.name

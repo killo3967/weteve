@@ -139,6 +139,20 @@ class TestHttpEndToEnd:
         finally:
             server.stop()
 
+    def test_log_de_acceso_de_clientes_iptv(self, caplog):
+        """Las peticiones de los clientes (playlist/epg) dejan traza INFO."""
+        import logging
+
+        server = self._start(playlist="#EXTM3U\n", epg="<tv/>")
+        try:
+            with caplog.at_level(logging.INFO):
+                _urlopen_retry(self._url(server, PLAYLIST_PATH), timeout=5).read()
+            mensajes = [rec.getMessage() for rec in caplog.records]
+            assert any("web:" in m and "playlist.m3u" in m and "200" in m
+                       for m in mensajes), mensajes
+        finally:
+            server.stop()
+
     def test_ruta_desconocida_devuelve_404(self):
         server = self._start(playlist="x", epg="y")
         try:

@@ -6,21 +6,22 @@ en hilo daemon, bind 127.0.0.1 por defecto.
 
 Nota Windows: ``allow_reuse_address`` se desactiva a propósito. En Windows,
 SO_REUSEADDR permite enlazar dos veces el mismo puerto, lo que impediría
-detectar un puerto ocupado.
+detectar un puerto ocupado (ver ``http_common.NoReuseServer``).
+
+Las peticiones de los clientes IPTV (``playlist.m3u`` y ``epg.xml``) se
+registran a INFO mediante ``http_common.AccessLogMixin``.
 """
 
 import logging
 import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from src.infrastructure.web.http_common import AccessLogMixin, NoReuseServer
+
 logger = logging.getLogger(__name__)
 
 PLAYLIST_PATH = "/playlist.m3u"
 EPG_PATH = "/epg.xml"
-
-
-class _NoReuseServer(ThreadingHTTPServer):
-    allow_reuse_address = False
 
 
 def port_in_use(host: str, port: int) -> bool:
@@ -144,7 +145,7 @@ class PlaylistServer:
     def _make_server(self) -> ThreadingHTTPServer | None:
         handler = self._make_handler()
         try:
-            return _NoReuseServer((self._host, self._port), handler)
+            return NoReuseServer((self._host, self._port), handler)
         except OSError as e:
             logger.error("No se pudo enlazar %s:%d: %s", self._host, self._port, e)
             return None
@@ -152,7 +153,9 @@ class PlaylistServer:
     def _make_handler(self) -> type[BaseHTTPRequestHandler]:
         server = self
 
-        class Handler(BaseHTTPRequestHandler):
+        class Handler(AccessLogMixin, BaseHTTPRequestHandler):
+            log_prefix = "web"
+
             def do_GET(self) -> None:
                 resolved = server.route(self.path)
                 if resolved is None:
@@ -165,8 +168,5 @@ class PlaylistServer:
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
-
-            def log_message(self, format: str, *args) -> None:
-                logger.debug("web: %s", format % args)
 
         return Handler

@@ -58,6 +58,10 @@ class TargetStore:
                 if "::" in pair:
                     url, cid = pair.split("::", 1)
                     overrides[url] = cid
+            raw_disabled = parser.get(sec, "disabled_channels", fallback="")
+            disabled = tuple(
+                u.strip() for u in raw_disabled.split("||") if u.strip()
+            )
             saved_epg_src = parser.get(sec, "epg_source", fallback="-1")
             targets[tid] = PipelineTarget(
                 name=parser.get(sec, "name", fallback=f"Target {tid}"),
@@ -66,6 +70,7 @@ class TargetStore:
                 epg_source_index=(int(saved_epg_src)
                                   if saved_epg_src.isdigit() else None),
                 epg_overrides=overrides,
+                disabled_channels=disabled,
                 port=parser.getint(sec, "port", fallback=8080),
                 source_refs=_refs_for(parser, tid, "m3u"),
                 epg_refs=_refs_for(parser, tid, "epg"),
@@ -114,6 +119,7 @@ class TargetStore:
         overrides_str = ";;".join(
             f"{u}::{c}" for u, c in target.epg_overrides.items()
         )
+        disabled_str = "||".join(target.disabled_channels)
         epg_source = target.epg_source_index
         catalog = read_catalog(parser)
         parser[f"{_TARGET_PREFIX}{target_id}"] = {
@@ -123,6 +129,7 @@ class TargetStore:
             "epg_source": str(epg_source if epg_source is not None else -1),
             "rules": rules_str,
             "epg_overrides": overrides_str,
+            "disabled_channels": disabled_str,
             "port": str(target.port),
             "bind": str(bind or self.get_bind(target_id) or "127.0.0.1"),
             "m3u_sources": selection_ids(target.source_refs, catalog),

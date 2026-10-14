@@ -26,6 +26,7 @@ def _serialize_target(t: PipelineTarget) -> dict:
         "m3u": t.source_index,
         "rules": [r.serialize() for r in t.rules],
         "epg_overrides": dict(t.epg_overrides),
+        "disabled_channels": list(t.disabled_channels),
         "port": t.port,
         "starting_number": t.starting_number,
         "source_refs": [{"id": r.id, "name": r.name, "location": r.location}
@@ -33,6 +34,14 @@ def _serialize_target(t: PipelineTarget) -> dict:
         "epg_refs": [{"id": r.id, "name": r.name, "location": r.location}
                      for r in t.epg_refs],
     }
+
+def _base_pattern(stored: str) -> str:
+    """Patrón sin la envoltura xTeVe: '!{texto}' → 'texto'."""
+    s = stored.strip()
+    if s.startswith("!") and s.endswith("}") and "{" in s:
+        return s[2:-1] if s[1] == "{" else s[1:-1]
+    return s
+
 
 def _parse_rules(raw_rules: list[str]) -> tuple[FilterRule, ...]:
     return tuple(FilterRule.parse(r.strip()) for r in raw_rules if r.strip())
@@ -114,6 +123,11 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
             port=int(port) if port is not None else current.port,
             starting_number=(int(starting_number) if starting_number is not None
                              else current.starting_number),
+            # preservar estado derivado de la cartera y del widget de mapeo:
+            # update_target solo toca campos escalares
+            source_refs=current.source_refs,
+            epg_refs=current.epg_refs,
+            disabled_channels=current.disabled_channels,
         )
         target_store.save(target_id, new, epg_path=epg, bind=bind)
         return {"ok": True, "target_id": target_id}
@@ -126,6 +140,176 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
             return {"error": f"target {target_id} no existe"}
         supervisor.remove_target(target_id)
         return {"ok": True}
+
+    # -- filtros y mapeado (hot-reload si el target está sirviendo) ----------
+
+    def _is_running(target_id: str) -> bool:
+        try:
+            info = supervisor.get_status().get("targets", {}).get(target_id, {})
+            return bool(info.get("running"))
+        except Exception:
+            return False
+
+    def _hot_reload(target_id: str) -> dict | None:
+        """Reejecuta el pipeline si el target está sirviendo. None si no."""
+        if not _is_running(target_id):
+            return None
+        t = _definition(target_id)
+        if t is None:
+            return None
+        epg = target_store.get_epg_path(target_id) if target_store else None
+        ok = supervisor.reload_target(target_id, t, epg_path=epg)
+        return {"reloaded": ok} if ok else {
+            "reloaded": False,
+            **supervisor.get_status()["targets"].get(target_id, {}),
+        }
+
+    def create_filter(target_id: str, field: str, pattern: str,
+                      exclude: bool = False, case_sensitive: bool = False,
+                      operator: str = "or") -> dict:
+        err = _require_store()
+        if err:
+            return {"error": err}
+        t = _definition(target_id)
+        if t is None:
+            return {"error": f"target {target_id} no existe"}
+        if field not in _ALLOWED_FIELDS:
+            return {"error": (f"field inválido: {field} "
+                              f"(permitidos: {', '.join(_ALLOWED_FIELDS)})")}
+        if operator not in ("or", "and"):
+            return {"error": f"operator inválido: {operator} (or|and)"}
+        if not pattern.strip():
+            return {"error": "pattern vacío"}
+        # Convención xTeVe usada por el motor (filter_engine) y por la UI:
+        # la exclusión se codifica DENTRO del patrón como !{texto}; el campo
+        # exclude del dataclass es informativo y el motor lo ignora.
+        clean = pattern.strip()
+        stored = f"!{{{clean}}}" if exclude else clean
+        rule = FilterRule(field=field, pattern=stored,
+                          exclude=bool(exclude),
+                          case_sensitive=bool(case_sensitive),
+                          operator=operator)  # type: ignore[arg-type]
+        if any(r.field == rule.field and _base_pattern(r.pattern) == clean
+               for r in t.rules):
+            return {"error": (f"ya existe una regla {field}:{pattern} "
+                              "en el target")}
+        from dataclasses import replace
+        new = replace(t, rules=t.rules + (rule,))
+        target_store.save(target_id, new,
+                          epg_path=target_store.get_epg_path(target_id))
+        result: dict = {"ok": True, "rule": rule.serialize(),
+                        "rules": [r.serialize() for r in new.rules]}
+        reloaded = _hot_reload(target_id)
+        if reloaded is not None:
+            result.update(reloaded)
+        return result
+
+    def delete_filter(target_id: str, field: str, pattern: str) -> dict:
+        err = _require_store()
+        if err:
+            return {"error": err}
+        t = _definition(target_id)
+        if t is None:
+            return {"error": f"target {target_id} no existe"}
+        remaining = tuple(r for r in t.rules
+                          if not (r.field == field
+                                  and _base_pattern(r.pattern) == pattern.strip()))
+        if len(remaining) == len(t.rules):
+            return {"error": (f"no existe ninguna regla {field}:{pattern} "
+                              "en el target")}
+        removed = [r.serialize() for r in t.rules
+                   if r.field == field
+                   and _base_pattern(r.pattern) == pattern.strip()]
+        from dataclasses import replace
+        new = replace(t, rules=remaining)
+        target_store.save(target_id, new,
+                          epg_path=target_store.get_epg_path(target_id))
+        result: dict = {"ok": True, "removed": removed,
+                        "rules": [r.serialize() for r in new.rules]}
+        reloaded = _hot_reload(target_id)
+        if reloaded is not None:
+            result.update(reloaded)
+        return result
+
+    def modify_mapping(target_id: str, channel_url: str,
+                       epg_id: str | None = None) -> dict:
+        """Fuerza o elimina (epg_id=None) el mapeo EPG de un canal."""
+        err = _require_store()
+        if err:
+            return {"error": err}
+        t = _definition(target_id)
+        if t is None:
+            return {"error": f"target {target_id} no existe"}
+        if not channel_url:
+            return {"error": "channel_url vacío"}
+        overrides = dict(t.epg_overrides)
+        if epg_id:
+            overrides[channel_url] = epg_id
+        else:
+            if channel_url not in overrides:
+                return {"error": (f"el canal {channel_url} no tiene mapeo "
+                                  "manual que eliminar")}
+            del overrides[channel_url]
+        from dataclasses import replace
+        new = replace(t, epg_overrides=overrides)
+        target_store.save(target_id, new,
+                          epg_path=target_store.get_epg_path(target_id))
+        result: dict = {"ok": True, "channel_url": channel_url,
+                        "epg_id": epg_id or "",
+                        "epg_overrides": overrides}
+        reloaded = _hot_reload(target_id)
+        if reloaded is not None:
+            result.update(reloaded)
+        return result
+
+    def modify_mappings(target_id: str,
+                        mappings: list[dict]) -> dict:
+        """Asignación EPG en lote: [{'channel_url', 'epg_id'|None}, ...].
+
+        Un solo guardado y UN solo hot-reload al final (a diferencia de N
+        llamadas a modify_mapping). epg_id=None elimina el mapeo del canal.
+        """
+        err = _require_store()
+        if err:
+            return {"error": err}
+        t = _definition(target_id)
+        if t is None:
+            return {"error": f"target {target_id} no existe"}
+        if not isinstance(mappings, list) or not mappings:
+            return {"error": "mappings debe ser una lista no vacía"}
+        overrides = dict(t.epg_overrides)
+        applied: list[dict] = []
+        errors: list[dict] = []
+        for m in mappings:
+            url = (m or {}).get("channel_url", "")
+            epg_id = (m or {}).get("epg_id")
+            if not url:
+                errors.append({"error": "channel_url vacío",
+                               "mapping": m})
+                continue
+            if epg_id:
+                overrides[url] = str(epg_id)
+            else:
+                if url not in overrides:
+                    errors.append({
+                        "error": (f"el canal {url} no tiene mapeo manual "
+                                  "que eliminar"), "mapping": m})
+                    continue
+                del overrides[url]
+            applied.append({"channel_url": url, "epg_id": epg_id or ""})
+        from dataclasses import replace
+        new = replace(t, epg_overrides=overrides)
+        target_store.save(target_id, new,
+                          epg_path=target_store.get_epg_path(target_id))
+        result: dict = {"ok": True, "applied": applied,
+                        "errors": errors, "count": len(applied),
+                        "epg_overrides": overrides}
+        if errors:
+            result["partial"] = True
+        reloaded = _hot_reload(target_id)
+        if reloaded is not None:
+            result.update(reloaded)
+        return result
 
     # -- ciclo de vida ---------------------------------------------------------
 
@@ -177,17 +361,32 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
             supervisor.reload_target(target_id, t, epg_path=epg)
         return supervisor.run_pipeline(target_id)
 
-    def preview_channels(target_id: str, limit: int = 20) -> dict:
+    def list_tv_channels(target_id: str, limit: int = 50, offset: int = 0,
+                         unmatched_only: bool = False) -> dict:
         t = target_store.get(target_id) if target_store else None
         if t is not None:
             epg = target_store.get_epg_path(target_id) if target_store else None
             supervisor.reload_target(target_id, t, epg_path=epg)
-        channels = supervisor.preview_channels(target_id, limit=int(limit))
-        return {"channels": channels, "count": len(channels)}
+        return supervisor.list_tv_channels(target_id, limit=int(limit),
+                                           offset=int(offset),
+                                           unmatched_only=bool(unmatched_only))
+
+    def list_epg_channels_tool(target_id: str, limit: int = 200,
+                               offset: int = 0) -> dict:
+        return supervisor.list_epg_channels(target_id, limit=int(limit),
+                                            offset=int(offset))
+
+    def suggest_epg_matches_tool(target_id: str, channel_name: str,
+                                 limit: int = 5) -> dict:
+        return supervisor.suggest_epg_matches(target_id,
+                                              channel_name=str(channel_name),
+                                              limit=int(limit))
 
     # -- schemas -------------------------------------------------------------------
 
     STRING = {"type": "string"}
+    _ALLOWED_FIELDS = ("group-title", "custom-filter", "tvg-group", "extgrp",
+                       "source")
     rules_schema = {
         "type": "array",
         "items": {"type": "string"},
@@ -365,6 +564,100 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
             },
             "handler": set_target_sources,
         },
+        "create_filter": {
+            "description": ("Añade una regla de filtro a un target y reejecuta "
+                            "el pipeline si está sirviendo (hot-reload)"),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "target_id": STRING,
+                    "field": {
+                        "type": "string",
+                        "enum": list(_ALLOWED_FIELDS),
+                        "description": "Campo del canal al que aplica la regla",
+                    },
+                    "pattern": STRING,
+                    "exclude": {
+                        "type": "boolean",
+                        "description": "true = excluir canales que cumplan",
+                    },
+                    "case_sensitive": {"type": "boolean"},
+                    "operator": {
+                        "type": "string",
+                        "enum": ["or", "and"],
+                        "description": "Cómo se combina con las reglas previas",
+                    },
+                },
+                "required": ["target_id", "field", "pattern"],
+            },
+            "handler": create_filter,
+        },
+        "delete_filter": {
+            "description": ("Elimina las reglas que coincidan con campo+patrón "
+                            "y reejecuta el pipeline si está sirviendo"),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "target_id": STRING,
+                    "field": {"type": "string", "enum": list(_ALLOWED_FIELDS)},
+                    "pattern": STRING,
+                },
+                "required": ["target_id", "field", "pattern"],
+            },
+            "handler": delete_filter,
+        },
+        "modify_mapping": {
+            "description": ("Fuerza (epg_id) o elimina (epg_id omitido/None) el "
+                            "mapeo EPG manual de un canal; hot-reload si sirve"),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "target_id": STRING,
+                    "channel_url": {
+                        "type": "string",
+                        "description": "URL del canal (clave estable del mapeo)",
+                    },
+                    "epg_id": {
+                        "type": "string",
+                        "description": "channel-id del XMLTV; omitir para quitar",
+                    },
+                },
+                "required": ["target_id", "channel_url"],
+            },
+            "handler": modify_mapping,
+        },
+        "modify_mappings": {
+            "description": ("Asignación EPG en lote: aplica varios mapeos "
+                            "(epg_id) o eliminaciones (epg_id=null) con UN solo "
+                            "guardado y hot-reload final. Devuelve applied/errors"),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "target_id": STRING,
+                    "mappings": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "channel_url": {
+                                    "type": "string",
+                                    "description": "URL del canal M3U",
+                                },
+                                "epg_id": {
+                                    "type": ["string", "null"],
+                                    "description": ("channel-id del XMLTV; "
+                                                    "null para eliminar el mapeo"),
+                                },
+                            },
+                            "required": ["channel_url"],
+                        },
+                        "minItems": 1,
+                    },
+                },
+                "required": ["target_id", "mappings"],
+            },
+            "handler": modify_mappings,
+        },
         "shutdown": {
             "description": "Detiene el daemon weteve",
             "schema": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -475,16 +768,60 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
             },
             "handler": run_pipeline,
         },
-        "preview_channels": {
-            "description": "Primeros N canales filtrados del target (preview sin servir)",
+        "list_tv_channels": {
+            "description": ("Canales del target tras filtros (requiere "
+                            "reload/run_pipeline previo). Paginado; con "
+                            "unmatched_only=true solo los sin EPG asignado"),
             "schema": {
                 "type": "object",
                 "properties": {
                     "target_id": STRING,
-                    "limit": {"type": "integer", "default": 20},
+                    "limit": {"type": "integer", "default": 50,
+                               "minimum": 1, "maximum": 500},
+                    "offset": {"type": "integer", "default": 0,
+                               "minimum": 0},
+                    "unmatched_only": {"type": "boolean", "default": False,
+                                       "description": ("solo canales sin EPG "
+                                                       "asignado")},
                 },
                 "required": ["target_id"],
             },
-            "handler": preview_channels,
+            "handler": list_tv_channels,
+        },
+        "list_epg_channels": {
+            "description": ("Catálogo de canales del XMLTV del target "
+                            "(id + display_name), paginado. Requiere EPG "
+                            "cargado (reload_target/run_pipeline previo)"),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "target_id": STRING,
+                    "limit": {"type": "integer", "default": 200,
+                               "minimum": 1, "maximum": 2000},
+                    "offset": {"type": "integer", "default": 0,
+                               "minimum": 0},
+                },
+                "required": ["target_id"],
+            },
+            "handler": list_epg_channels_tool,
+        },
+        "suggest_epg_matches": {
+            "description": ("Candidatos EPG (hasta 5) para un canal M3U por "
+                            "similitud de nombre. Solo lectura: asignar con "
+                            "modify_mapping/modify_mappings"),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "target_id": STRING,
+                    "channel_name": {
+                        "type": "string",
+                        "description": "Nombre del canal M3U a buscar",
+                    },
+                    "limit": {"type": "integer", "default": 5,
+                               "minimum": 1, "maximum": 20},
+                },
+                "required": ["target_id", "channel_name"],
+            },
+            "handler": suggest_epg_matches_tool,
         },
     }

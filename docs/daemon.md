@@ -54,7 +54,19 @@ escritura (y evita recargar a media escritura).
 - **Consola**: al arrancar en primer plano (`daemon.py run`) o desde la GUI
   (consola propia del proceso).
 - **Fichero**: `logs/weteve-daemon.log` siempre, rota a 1 MB guardando 3
-  backups. Nivel INFO, mismo formato que consola.
+  backups. Nivel INFO, mismo formato que consola:
+  `fecha [nivel] logger: mensaje`, con el nivel corto y en minúsculas
+  (`[info]`, `[warn]`, `[error]`, `[debug]`, `[critical]`).
+- **Log de comunicaciones**: los tres servidores HTTP (playlist/EPG, API de
+  control y MCP) escriben una línea INFO por petición con el cliente, la
+  petición y el código de estado, y una WARNING por rechazo (token inválido,
+  ruta desconocida, JSON inválido, GET sin SSE) o por conexión interrumpida
+  (RST de loopback). En MCP se registra además el método JSON-RPC
+  (`initialize`, `tools/list`, `tools/call`…). Implementado en
+  `src/infrastructure/web/http_common.py` (`AccessLogMixin`, `NoReuseServer`).
+- **Fallos del cliente**: `DaemonClient` registra a WARNING cuando el demonio
+  no responde o devuelve error HTTP; la UI ya no muestra «no responde» sin
+  dejar rastro en `logs/weteve.log`.
 - **El MCP es la superficie de control total** (CRUD incluido); la API de
   control HTTP es lo mínimo que la UI necesita.
 

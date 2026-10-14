@@ -60,10 +60,39 @@ preconfigurado.
 | `custom_epg` | URL o ruta del XMLTV (opcional) |
 | `rules` | Filtros xTeVe separados por `\|` (`campo:patrón:case`) |
 | `epg_overrides` | Asignaciones manuales `url::canal-id` separadas por `;;` |
+| `disabled_channels` | URLs apagadas a mano, separadas por `\|\|` (solo decisión del usuario) |
 | `port` / `bind` | Puerto y dirección del servidor web (8080 / 127.0.0.1) |
 
 Sintaxis de filtros (compatible xTeVe): texto plano = incluir si aparece;
 `{texto}` = incluir canales que cumplan; `!{texto}` = excluir.
+
+### Mapeo EPG y canales sin guía
+
+Si el target tiene fuente EPG, **un canal sin guía asignada no se sirve**: así
+se evita una lista de canales que el reproductor muestra sin programación. La
+regla no se aplica cuando no hay fuente EPG configurada.
+
+En la pestaña «Mapeado EPG» del editor:
+
+- **EPG asignado**: desplegable con los canales de la guía. La etiqueta se
+  muestra sin el sufijo `.TV` (p. ej. `La1`), pero lo que se guarda es el
+  channel-id real (`La1.TV`). También se puede teclear un id que la guía no
+  anuncie.
+- **`Dummy 1h`** (primera opción con nombre, tras la vacía): guía de relleno sintética —
+  bloques de 1 h durante 7 días, con el nombre del canal como título. Genera un
+  id propio por canal (`weteve-dummy-…`), así que se puede rescatar canal a
+  canal.
+- **Activo**: casilla derivada (sin guía asignada o apagado a mano). Apagar un
+  canal lo saca de la lista y lo persiste en `disabled_channels`. Reactivar una
+  fila **sin** guía no es posible: la casilla vuelve sola a su estado real, y
+  primero hay que asignarle `Dummy 1h` o un canal de la guía. Al asignarle guía
+  se limpia también el apagado manual, para que elegir `Dummy 1h` no parezca no
+  hacer nada.
+
+> Los canales que la coincidencia automática no empareja son muchos en listas
+> de proveedor (nombres como «La 1 HD» frente a ids como `La1.TV`). Con la regla
+> activa, la lista servida se reduce hasta que se asignan: usa el desplegable o
+> `Dummy 1h` para recuperarlos.
 
 ## Servidor web
 

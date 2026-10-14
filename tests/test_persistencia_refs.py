@@ -93,3 +93,45 @@ class TestSaveConfigSelecciones:
         parser = configparser.ConfigParser()
         parser.read(path, encoding="utf-8")
         assert parser.get("listmanager.target.0", "m3u_sources", fallback="") == ""
+
+
+class TestOverridesDummy:
+    """El id sintético de 'Dummy 1h' debe sobrevivir el guardado sin
+    reinterprearse: si el round-trip lo altera, el canal vuelve a quedarse sin
+    guía y desaparece de la lista."""
+
+    URL = ("http://proveedor.example:25461/usuario/clave/421"
+           "?h=0123456789ab&z=&i=132511")
+    DUMMY = "weteve-dummy-f7175fa991c8"
+
+    def test_id_dummy_sobrevive_el_round_trip(self, tmp_path):
+        path = tmp_path / "config.ini"
+        _seed(path)
+        cfg = load_config(path)
+        cfg["targets"][0]["epg_overrides"] = {self.URL: self.DUMMY,
+                                              "http://otro/canal": "La1.TV"}
+        cfg["targets"][0]["disabled_channels"] = ["http://apagado/a"]
+        save_config(path, cfg)
+
+        back = load_config(path)["targets"][0]
+        # la url tiene ':', '?' y '&': el separador '::' no debe partirla
+        assert back["epg_overrides"][self.URL] == self.DUMMY
+        assert back["epg_overrides"]["http://otro/canal"] == "La1.TV"
+        assert list(back["disabled_channels"]) == ["http://apagado/a"]
+
+    def test_el_daemon_lee_el_mismo_id_dummy(self, tmp_path):
+        """El agregador usa su propio parser sobre el mismo config.ini: si él
+        no lo lee igual, el Dummy que la UI guardó no se sirve."""
+        from src.application.services.daemon.target_store import TargetStore
+
+        path = tmp_path / "config.ini"
+        _seed(path)
+        cfg = load_config(path)
+        cfg["targets"][0]["epg_overrides"] = {self.URL: self.DUMMY}
+        save_config(path, cfg)
+
+        target = TargetStore(path)
+        target.load()
+        got = target.get("0")
+        assert got is not None
+        assert got.epg_overrides[self.URL] == self.DUMMY

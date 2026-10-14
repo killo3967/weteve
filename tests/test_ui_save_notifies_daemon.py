@@ -14,6 +14,7 @@ class _FakeClient:
         self.reload_ok = reload_ok
         self.reload_calls: list[str] = []
         self.shutdown_calls = 0
+        self.base_url = "http://127.0.0.1:34400"
 
     def ping(self):
         return self.alive

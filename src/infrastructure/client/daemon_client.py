@@ -3,6 +3,10 @@
 Usado por la UI Qt (panel «Demonio») y por la CLI (``daemon.py status``).
 Sin dependencias: urllib. ``ping()`` nunca lanza — devuelve False si no
 hay daemon escuchando (la UI lo usa para decidir si ofrece arranque local).
+
+Los fallos se registran a WARNING (``daemon GET /health: sin respuesta en
+http://127.0.0.1:34400 tras 4 intentos``): antes eran silenciosos y la UI
+mostraba un error sin rastro en ``logs/weteve.log``.
 """
 
 import json
@@ -18,11 +22,18 @@ class DaemonClient:
     def __init__(self, host: str = "127.0.0.1", port: int = 34400,
                  token: str = "", timeout: float = 5.0,
                  retries: int = 3, retry_delay: float = 0.2) -> None:
+        self._host = host
+        self._port = port
         self._base = f"http://{host}:{port}"
         self._token = token
         self._timeout = timeout
         self._retries = retries
         self._retry_delay = retry_delay
+
+    @property
+    def base_url(self) -> str:
+        """URL base de la API de control (para mensajes de log)."""
+        return self._base
 
     # -- helpers ---------------------------------------------------------------
 
@@ -47,12 +58,18 @@ class DaemonClient:
                     raw = r.read().decode("utf-8")
                     return r.status, (json.loads(raw) if raw else None)
             except urllib.error.HTTPError as e:
+                # El demonio responde pero rechaza: token, ruta o target.
+                logger.warning("daemon %s %s -> HTTP %d en %s",
+                               method, path, e.code, self._base)
                 return e.code, None
             except (urllib.error.URLError, OSError) as e:
                 last_err = e
                 if attempt < self._retries:
                     time.sleep(self._retry_delay)
-        logger.debug("daemon %s %s inaccesible: %s", method, path, last_err)
+        # El demonio no está escuchando (o no contesta): dejarlo en el log,
+        # no solo en el mensaje de la UI.
+        logger.warning("daemon %s %s: sin respuesta en %s tras %d intentos: %s",
+                       method, path, self._base, self._retries + 1, last_err)
         return 0, None
 
     # -- API -----------------------------------------------------------------

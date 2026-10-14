@@ -40,21 +40,22 @@ class TestMappedChannelSource:
     def test_source_name_por_defecto_vacio(self):
         ch = MappedChannel(name="La 1", url="http://a")
         assert ch.source_name == ""
-        assert ch.display_name == "La 1"
 
-    def test_display_name_prefijado_cuando_hay_fuente(self):
+    def test_la_fuente_no_se_antepone_al_nombre(self):
+        """El nombre de salida es el del canal: sin '<lista>.' delante."""
         ch = MappedChannel(name="La 1", url="http://a", source_name="platero")
-        assert ch.display_name == "platero.La 1"
+        assert ch.name == "La 1"
+        assert not hasattr(ch, "display_name")
 
     def test_name_interno_sigue_limpiopara_filtros_y_epg(self):
-        """El prefijo no contamina el nombre canónico: es solo de render."""
+        """El nombre canónico es el del canal y no lleva la lista delante."""
         ch = MappedChannel(name="La 1", url="http://a", source_name="platero")
         assert ch.name == "La 1"
         assert ch.url == "http://a"
 
 
-class TestRenderPrefijo:
-    def test_build_m3u_prefija_con_el_nombre_de_lista(self):
+class TestRenderNombreDeCanal:
+    def test_build_m3u_no_prefija_con_el_nombre_de_lista(self):
         chans = [
             MappedChannel(name="La 1", url="http://a", group="Spain",
                           source_name="platero", chno=1),
@@ -62,29 +63,33 @@ class TestRenderPrefijo:
                           source_name="otra", chno=2),
         ]
         out = build_m3u(chans)
-        assert "platero.La 1" in out and "otra.La 1" in out
-        # dos canales homónimos de listas distintas conviven como entries
-        assert out.count(",La 1") + out.count(",platero.La 1") + out.count(",otra.La 1") == 2
+        extinf = [l for l in out.splitlines() if l.startswith("#EXTINF")]
+        assert len(extinf) == 2
+        assert all(l.endswith(",La 1") for l in extinf)
+        assert "platero" not in out and "otra" not in out
         assert out.count("http://") == 2
 
-    def test_build_m3u_sin_fuente_no_inventa_prefijo(self):
-        """El flujo antiguo (una sola fuente, preview) sigue igual."""
+    def test_build_m3u_lleva_group_title(self):
+        out = build_m3u([MappedChannel(name="La 1", url="http://a",
+                                       group="SPAIN", chno=1)])
+        assert 'group-title="SPAIN"' in out
+
+    def test_build_m3u_sin_grupo_usa_otros(self):
         out = build_m3u([MappedChannel(name="La 1", url="http://a", chno=1)])
-        assert ",La 1" in out
-        assert ".." not in out
+        assert 'group-title="Otros"' in out
 
     def test_los_atributos_no_llevan_prefijo(self):
-        """El prefijo es cosmético: va solo en el display name tras la coma."""
+        """La lista de origen nunca aparece en la línea de salida."""
         ch = MappedChannel(name="HBO", url="http://h", source_name="platero",
                            tvg_id="hbo.id", chno=1)
         out = build_m3u([ch])
         extinf = next(l for l in out.splitlines() if l.startswith("#EXTINF"))
-        assert extinf.rstrip().endswith(",platero.HBO")
-        assert 'tvg-id="hbo.id"' in extinf
-        assert "tvg-id=\"platero" not in extinf
+        assert extinf.rstrip().endswith(",HBO")
+        assert 'tvg-id=""' in extinf
+        assert "platero" not in extinf
         assert "platero" not in ch.url
 
-    def test_xmltv_display_name_usa_el_prefijo(self):
+    def test_xmltv_display_name_es_el_del_canal(self):
         ch = MappedChannel(name="La 1", url="http://a", source_name="platero",
                            matched_epg_id="la1.id")
         now = datetime(2026, 1, 1, 12)
@@ -93,7 +98,8 @@ class TestRenderPrefijo:
             channel_names={"la1.id": "La 1"},
         )
         out = build_xmltv([ch], epg)
-        assert "platero.La 1" in out
+        assert "<display-name>La 1</display-name>" in out
+        assert "platero" not in out
 
 
 class TestRefsConLocation:
