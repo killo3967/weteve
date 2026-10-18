@@ -16,3 +16,6 @@ pytest-qt>=4.2
 # Dev tools (lint + type checking)
 ruff>=0.16
 mypy>=2.0
+
+# Depuración (launch.json / "Debug Python File" de la extensión Python)
+debugpy>=1.8

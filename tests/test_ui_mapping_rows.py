@@ -1,125 +1,83 @@
-"""Regresión: la tabla de mapeo debe seguir mostrando los canales descartados.
+"""Tabla de mapeo: la GUI pinta lo que le da el daemon.
 
-Desde 2026-10-14 el servidor descarta todo canal sin guía EPG cuando hay fuente
-(``pipeline`` -> ``excluded_no_epg``). Esos canales **no** están en
-``result.channels``, así que si el diálogo solo leyera los canales servidos, la
-pestaña 'Mapeado EPG' se quedaría vacía justo cuando más la necesitas: el
-usuario no vería qué canales han caído ni podría asignarles un EPG real o
-'Dummy 1h' para rescatarlos.
+El invariante "los canales que necesitan atención siguen listados" (incluidos
+los descartados sin guía y los desactivados) vive ahora en
+``TargetSupervisor.mapping_candidates``; aquí se comprueba que el diálogo lo
+pinta, con su catálogo de guía y su resumen.
 """
-
-from pathlib import Path
 
 import pytest
 
-from src.application.services.list_manager.models import MappedChannel
-from src.application.services.list_manager.pipeline import PipelineResult
 from src.infrastructure.ui.list_manager_dialog import ListManagerDialog
-
-M3U = """#EXTM3U
-#EXTINF:-1 tvg-id="La1.TV",La 1 HD
-http://x/la1.ts
-#EXTINF:-1 tvg-id="otro",Antena 3 Internacional
-http://x/a3int.ts
-"""
 
 
 @pytest.fixture
 def dialog(qtbot, tmp_path):
-    m3u = tmp_path / "lista.m3u"
-    m3u.write_text(M3U, encoding="utf-8")
     cfg = tmp_path / "config.ini"
     cfg.write_text("[DAEMON]\ncontrol_port = 32123\n", encoding="utf-8")
     d = ListManagerDialog(None, config={
         "target_id": "0", "_config_path": cfg, "name": "x",
-        "custom_m3u": str(m3u).replace("\\", "/"), "rules": [], "port": 8080,
-    })
+        "custom_m3u": "C:/lista.m3u", "rules": [], "port": 8080})
     qtbot.addWidget(d)
     return d
 
 
-def _result(**kw) -> PipelineResult:
-    defaults = dict(
-        channels=[MappedChannel("La 1 HD", "http://x/la1.ts",
-                                 matched_epg_id="La1.TV")],
-        total_input=2,
-        unmatched=["Antena 3 Internacional"],
-        excluded_no_epg=[MappedChannel("Antena 3 Internacional",
-                                       "http://x/a3int.ts")],
-        require_epg=True,
-    )
-    defaults.update(kw)
-    return PipelineResult(**defaults)
+def _row(name="Antena 3 Internacional", url="http://x/a3int.ts",
+         tvg_id="", disabled=False, logo=""):
+    return {"name": name, "url": url, "group": "G", "tvg_id": tvg_id,
+            "logo_url": logo, "disabled": disabled}
+
+
+def _rows(dialog):
+    table = dialog.epg_mapping.table
+    return [table.item(r, 0).text() for r in range(table.rowCount())]
 
 
 class TestFilasDeLaTabla:
-    def test_los_descartados_sin_guia_siguen_en_la_tabla(self, dialog, monkeypatch):
-        """Es la vía de rescate: sin fila no hay desplegable que asignar."""
-        monkeypatch.setattr(dialog, "_run_pipeline", lambda: _result())
+    def test_las_filas_son_los_candidatos_del_daemon(self, dialog, fake_api):
+        fake_api.served_channels = [_row()]
         dialog._refresh_mapping()
-        rows = [dialog.epg_mapping.table.item(r, 0).text()
-                for r in range(dialog.epg_mapping.table.rowCount())]
-        assert rows == ["Antena 3 Internacional"]
+        assert _rows(dialog) == ["Antena 3 Internacional"]
 
-    def test_un_canal_desactivado_a_mano_sigue_listado(self, dialog, monkeypatch):
-        """Necesario para poder reactivarlo; no lo cambia la regla de servidor."""
-        monkeypatch.setattr(dialog, "_run_pipeline", lambda: _result(
-            excluded_no_epg=[],
-            excluded_disabled=[MappedChannel("La 1 HD", "http://x/la1.ts",
-                                             matched_epg_id="La1.TV")],
-        ))
+    def test_un_desactivado_sigue_listado(self, dialog, fake_api):
+        fake_api.served_channels = [_row(name="La 1", url="http://x/la1.ts",
+                                         disabled=True)]
         dialog._refresh_mapping()
-        assert dialog.epg_mapping.table.rowCount() == 1
+        assert _rows(dialog) == ["La 1"]
+        assert dialog.epg_mapping.get_disabled() == ("http://x/la1.ts",)
 
-    def test_descartados_y_desactivados_no_se_repiten(self, dialog, monkeypatch):
-        """Un canal puede estar en ambas listas (apagado y sin guía). Ver que
-        no se dupliquen no es cosmético: dos filas para la misma url hacen que
-        get_overrides() guarde la última y el usuario no sepa qué edita."""
-        ch = MappedChannel("Antena 3 Internacional", "http://x/a3int.ts")
-        monkeypatch.setattr(dialog, "_run_pipeline", lambda: _result(
-            excluded_no_epg=[ch], excluded_disabled=[ch],
-        ))
+    def test_el_catalogo_de_guia_llena_el_desplegable(self, dialog, fake_api):
+        fake_api.served_channels = [_row()]
+        fake_api.epg = [{"id": "es.la1", "display_name": "La 1"}]
         dialog._refresh_mapping()
-        urls = [dialog.epg_mapping.table.item(r, 1).text()
-                for r in range(dialog.epg_mapping.table.rowCount())]
-        assert urls == ["http://x/a3int.ts"]
+        combo = dialog.epg_mapping.table.cellWidget(0, dialog.epg_mapping.COL_EPG)
+        assert "La 1" in [combo._combo.itemText(i)
+                          for i in range(combo._combo.count())]
 
-    def test_un_canal_servido_sin_match_real_tambien_se_lista(self, dialog, monkeypatch):
-        """Con fuente EPG esto no debería pasar, pero si el emparejador cambia
-        la tabla no puede dejar fuera un canal sin guía asignada."""
-        monkeypatch.setattr(dialog, "_run_pipeline", lambda: _result(
-            channels=[MappedChannel("Sin Guia", "http://x/sg")],
-            excluded_no_epg=[], require_epg=False, unmatched=["Sin Guia"],
-        ))
+    def test_la_url_del_logo_llega_a_la_fila(self, dialog, fake_api):
+        fake_api.served_channels = [_row(logo="http://x/logo.png")]
         dialog._refresh_mapping()
-        assert dialog.epg_mapping.table.rowCount() == 1
+        item = dialog.epg_mapping.table.item(0, dialog.epg_mapping.COL_LOGO)
+        assert item.data(0x0100) == "http://x/logo.png"  # UserRole
 
 
 class TestResumen:
-    def test_el_resumen_anuncia_los_descartados(self, dialog, monkeypatch):
-        """285 canales -> 1 servido es un cambio brutal: tiene que ser visible
-        y decir por qué, o parece que la lista está rota."""
-        monkeypatch.setattr(dialog, "_run_pipeline", lambda: _result())
+    def test_cuenta_servidos_y_pendientes(self, dialog, fake_api):
+        fake_api.served = 5
+        fake_api.served_channels = [_row(), _row(name="Otra", url="http://y")]
         dialog._refresh_mapping()
         text = dialog.result_label.text()
-        assert "1 sin guía EPG" in text
-        assert "descartados" in text
+        assert "5 canales servidos" in text
+        assert "2 necesitan atención" in text
 
-    def test_sin_fuente_epg_no_se_anuncia_descarte(self, dialog, monkeypatch):
-        """Sin guía no hay regla: decir 'descartados' sería mentira y haría
-        buscar al usuario un problema que no existe."""
-        monkeypatch.setattr(dialog, "_run_pipeline", lambda: _result(
-            channels=[MappedChannel("La 1 HD", "http://x/la1.ts")],
-            excluded_no_epg=[], require_epg=False, unmatched=["La 1 HD"],
-        ))
+    def test_nada_pendiente(self, dialog, fake_api):
         dialog._refresh_mapping()
-        assert "descartados" not in dialog.result_label.text()
+        assert "ninguno necesita atención" in dialog.result_label.text()
 
-    def test_cero_descartados_no_anuncia_descartes(self, dialog, monkeypatch):
-        """Con fuente EPG y todo asignado, '0 descartados' invitaría a buscar un
-        problema que no hay; el resumen solo habla de descartes si los hubo."""
-        monkeypatch.setattr(dialog, "_run_pipeline", lambda: _result(
-            excluded_no_epg=[], unmatched=[],
-        ))
+
+class TestSinDaemon:
+    def test_tabla_vacia_y_aviso(self, dialog, fake_api):
+        fake_api.down = True
         dialog._refresh_mapping()
-        assert "descartados" not in dialog.result_label.text()
+        assert dialog.epg_mapping.table.rowCount() == 0
+        assert "no responde" in dialog.result_label.text()

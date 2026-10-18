@@ -18,7 +18,7 @@ def normalize_spacing(text: str) -> str:
 
 class FileM3URepository(IPlaylistRepository):
     """Adaptador que gestiona la persistencia y carga de canales desde archivos M3U."""
-    
+
     def get_channels(self, source: str) -> list[Channel]:
         """Carga los canales desde una URL o un archivo local."""
         m3u_content = self._get_content(source)
@@ -42,7 +42,7 @@ class FileM3URepository(IPlaylistRepository):
             path = Path(source)
             if not path.exists():
                 return []
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, encoding='utf-8') as f:
                 return f.readlines()
 
     def _parse_m3u(self, lines: list[str]) -> list[Channel]:

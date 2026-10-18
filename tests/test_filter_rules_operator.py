@@ -1,9 +1,9 @@
 """Operador AND/OR entre reglas y campos de grupo dinámicos."""
 
-import pytest
 
 from src.application.services.list_manager.filter_engine import evaluate_channel
 from src.application.services.list_manager.models import FilterRule
+
 
 # campo group-title con múltiples grupos vía Channel.groups
 def _ch_eval(groups, rules):

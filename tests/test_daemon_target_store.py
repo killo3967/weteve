@@ -5,7 +5,6 @@ compartan la misma lectura/escritura sin duplicación.
 """
 
 import configparser
-import dataclasses
 from dataclasses import replace as dataclasses_replace
 from pathlib import Path
 

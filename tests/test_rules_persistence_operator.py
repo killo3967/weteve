@@ -1,9 +1,7 @@
 """Persistencia del operador: config.ini round-trip con back-compat."""
-import configparser
 
-from src.application.services.list_manager.models import FilterRule
 from src.application.services.daemon.target_store import TargetStore
-import os
+from src.application.services.list_manager.models import FilterRule
 
 
 class TestSerializeRoundtrip:

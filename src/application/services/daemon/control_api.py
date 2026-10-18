@@ -97,7 +97,14 @@ class ControlApiServer:
             return None
         return self._store.get_epg_path(target_id)
 
-    # -- handler -------------------------------------------------------------
+    def handle(self, method: str, path: str) -> tuple[int, dict]:
+        """Atiende una ruta sin socket.
+
+        La usa el servidor único del demonio, que ya ha validado el token.
+        """
+        return self._handle(method, path, True)
+
+    # -- handler ---------------------------------------------------------------
 
     def _handle(self, method: str, path: str, auth_ok: bool) -> tuple[int, dict]:
         if self._token and not auth_ok:

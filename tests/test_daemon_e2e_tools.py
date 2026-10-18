@@ -14,7 +14,6 @@ from __future__ import annotations
 import configparser
 import json
 import socket
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -22,11 +21,6 @@ from pathlib import Path
 
 import pytest
 
-from src.application.services.daemon.mcp_server import McpStreamableServer
-from src.application.services.daemon.mcp_tools import build_tool_registry
-from src.application.services.daemon.mcp_transport import McpHttpTransport
-from src.application.services.daemon.supervisor import TargetSupervisor
-from src.application.services.daemon.target_store import TargetStore
 from src.infrastructure.client.sources_store import load_catalog
 
 M3U_FIXTURE = """#EXTM3U
@@ -206,13 +200,12 @@ def daemon(workspace: Path):
     d = mod.build_daemon(workspace / "config.ini")
     yield d
     d["supervisor"].stop_all()
-    d["control_api"].stop()
-    d["mcp_transport"].stop()
+    d["server"].stop()
 
 
 @pytest.fixture()
 def mcp(daemon) -> McpClient:
-    return McpClient(daemon["mcp_transport"].url_base)
+    return McpClient(daemon["server"].url_base)
 
 
 # ---------------------------------------------------------------------- tests
@@ -257,7 +250,8 @@ class TestDaemonE2ETools:
         assert "error" not in r, r
         assert "error" in mcp.call("remove_source", {"id": epg_id})
 
-    def test_ciclo_target_completo(self, mcp: McpClient, workspace: Path):
+    def test_ciclo_target_completo(self, mcp: McpClient, workspace: Path,
+                                   daemon):
         m3u_id = mcp.call("add_source", {"name": "L", "kind": "m3u",
                                          "location": str(workspace / "fixtures" / "lista.m3u")})["id"]
         epg_id = mcp.call("add_source", {"name": "G", "kind": "epg",
@@ -307,13 +301,14 @@ class TestDaemonE2ETools:
         assert r["suggestions"], r
         assert any(s["id"] == "es.la1" for s in r["suggestions"]), r
 
-        # start_target + HTTP real de la playlist y el EPG
+        # start_target + HTTP real de la playlist y el EPG (puerto único)
         r = mcp.call("start_target", {"target_id": "e2e"})
         assert "error" not in r, r
-        url = f"http://127.0.0.1:{port}/playlist.m3u"
+        base = f"http://127.0.0.1:{daemon['server'].port}/weteve/e2e"
+        url = f"{base}/playlist.m3u"
         body = _http_get_retry(url)
         assert body.startswith("#EXTM3U"), body[:100]
-        epg_body = _http_get_retry(f"http://127.0.0.1:{port}/epg.xml")
+        epg_body = _http_get_retry(f"{base}/epg.xml")
         assert "<tv" in epg_body
 
         # create_filter + hot-reload (target corriendo → reloaded True)

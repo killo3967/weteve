@@ -1,6 +1,5 @@
 """Tests de LogoCacheService (sin red: índice, prune, extensión)."""
 
-import json
 import time
 from pathlib import Path
 

@@ -35,14 +35,14 @@ class EPGData:
         self._channel_id_to_normalized_name = {
             cid: normalize_name(name) for cid, name in (channel_names or {}).items()
         }
-        
+
         # Mapeo rápido de channel_id -> lista de programas
         self._programs_by_channel: dict[str, list[Program]] = {}
         for p in self._programs:
             if p.channel_id not in self._programs_by_channel:
                 self._programs_by_channel[p.channel_id] = []
             self._programs_by_channel[p.channel_id].append(p)
-            
+
         # Mapeo por nombre normalizado (para fallback)
         self._programs_by_normalized_name: dict[str, list[Program]] = {}
         if channel_names:

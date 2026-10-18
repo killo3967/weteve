@@ -4,7 +4,7 @@ import pytest
 
 from src.application.services.daemon.mcp_tools import build_tool_registry
 from src.application.services.daemon.supervisor import TargetSupervisor
-from src.application.services.list_manager.models import FilterRule, PipelineTarget
+from src.application.services.list_manager.models import PipelineTarget
 
 
 class _StubSupervisor(TargetSupervisor):
@@ -15,6 +15,12 @@ class _StubSupervisor(TargetSupervisor):
 
     def run_pipeline(self, target_id: str) -> dict:  # type: ignore[override]
         return {"total_input": 10, "filtered_count": 5, "unmatched_count": 0}
+
+    def metrics(self, target_id: str) -> dict:  # type: ignore[override]
+        return {"total_input": 10, "filtered_count": 5, "unmatched_count": 0}
+
+    def has_snapshot(self, target_id: str) -> bool:  # type: ignore[override]
+        return True
 
     def list_tv_channels(self, target_id: str, limit: int = 50,
                          offset: int = 0, unmatched_only: bool = False

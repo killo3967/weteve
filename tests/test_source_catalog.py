@@ -1,6 +1,5 @@
 """Pruebas de la cartera global de fuentes (SourceCatalog)."""
 
-import pytest
 
 from src.application.services.list_manager.source_catalog import (
     SourceCatalog,

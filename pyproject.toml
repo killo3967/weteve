@@ -1,0 +1,55 @@
+# Configuración de herramientas de weteve.
+#
+# No hay metadatos de paquete (`[project]`/`[build-system]`) a propósito: el
+# código se importa como `src.*` desde la raíz y no se instala. Añadirlos obliga
+# a mover el árbol a `src/weteve/` y cambiar todos los imports: es un refactor
+# aparte, no una config.
+
+[tool.pytest.ini_options]
+# Los tests marcados `network` salen a internet y leen las fuentes URL de
+# config.ini: fuera por defecto (`pytest -m network` para lanzarlos).
+addopts = "-m 'not network'"
+markers = [
+    "network: requiere acceso a internet y fuentes URL en config.ini (excluido por defecto)",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [".venv", "logs", ".ruff_cache"]
+
+[tool.ruff.lint]
+# Base que se exige en verde. Las reglas de estilo más agresivas quedan fuera a
+# propósito; al añadirlas, arreglar primero la deuda (ver `ignore`).
+select = ["E", "F", "W", "I", "UP"]
+ignore = [
+    "E501",  # longitud de línea: hay código con líneas largas y f-strings
+    "E741",  # variables `l`/`O` heredadas del parser M3U
+    "E402",  # imports al principio de función en adaptadores
+    "F841",  # locales sin usar en tests/legacy
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "tests"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "scripts", "main.py", "daemon.py"]
+# El layout importa `src.*` desde la raíz y no hay metadatos de paquete: sin
+# esto mypy no arranca ("source file found twice under different module names").
+explicit_package_bases = true
+mypy_path = "."
+check_untyped_defs = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
+
+# Deuda conocida de tipos: dos widgets Qt heredados que abusan de
+# `findChildren`/`header()` (devuelven Optional). Quitarlos de esta lista es el
+# siguiente paso para subir el listón.
+[[tool.mypy.overrides]]
+module = [
+    "src.infrastructure.ui.source_catalog_widget",
+    "src.infrastructure.ui.log_tail_widget",
+]
+ignore_errors = true

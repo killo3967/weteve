@@ -1,7 +1,7 @@
 """DaemonClient: cliente HTTP de la API de control del daemon.
 
 Usado por la UI Qt (panel «Demonio») y por la CLI (``daemon.py status``).
-Sin dependencias: urllib. ``ping()`` nunca lanza — devuelve False si no
+Sin dependencias: ``http.client``. ``ping()`` nunca lanza — devuelve False si no
 hay daemon escuchando (la UI lo usa para decidir si ofrece arranque local).
 
 Los fallos se registran a WARNING (``daemon GET /health: sin respuesta en
@@ -9,10 +9,9 @@ http://127.0.0.1:34400 tras 4 intentos``): antes eran silenciosos y la UI
 mostraba un error sin rastro en ``logs/weteve.log``.
 """
 
+import http.client
 import json
 import logging
-import urllib.error
-import urllib.request
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +28,10 @@ class DaemonClient:
         self._timeout = timeout
         self._retries = retries
         self._retry_delay = retry_delay
+        # Un rechazo/timeout de loopback cuesta ~2 s: tras un fallo no se
+        # reintenta durante unos segundos (la UI debe abrir con el demonio parado).
+        self._down_until = 0.0
+        self._down_seconds = 5.0
 
     @property
     def base_url(self) -> str:
@@ -41,38 +44,50 @@ class DaemonClient:
                  body: dict | None = None) -> tuple[int, dict | None]:
         """Devuelve (status, body). status 0 = daemon no accesible.
 
-        Reintenta en errores de conexión (no en respuestas HTTP): el loopback
-        de Windows puede devolver RST esporádico en conexiones inmediatas.
+        ``http.client`` en vez de ``urllib``: urllib resuelve la configuración
+        de proxy de Windows en cada intento (~2 s con el daemon caído, que es
+        lo que congelaba la UI). Reintenta en errores de conexión (RST
+        esporádico del loopback en Windows), no en respuestas HTTP.
         """
         import time
+
+        if time.monotonic() < self._down_until:
+            return 0, None
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        headers = {"Content-Type": "application/json"}
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
         last_err: Exception | None = None
+        attempts = 0
         for attempt in range(self._retries + 1):
-            data = json.dumps(body).encode("utf-8") if body is not None else None
-            req = urllib.request.Request(self._base + path, data=data,
-                                         method=method)
-            req.add_header("Content-Type", "application/json")
-            if self._token:
-                req.add_header("Authorization", f"Bearer {self._token}")
+            attempts = attempt + 1
+            conn = http.client.HTTPConnection(self._host, self._port,
+                                              timeout=self._timeout)
             try:
-                with urllib.request.urlopen(req, timeout=self._timeout) as r:
-                    raw = r.read().decode("utf-8")
-                    return r.status, (json.loads(raw) if raw else None)
-            except urllib.error.HTTPError as e:
-                # El demonio responde pero rechaza: token, ruta o target.
-                logger.warning("daemon %s %s -> HTTP %d en %s",
-                               method, path, e.code, self._base)
-                return e.code, None
-            except (urllib.error.URLError, OSError) as e:
+                conn.request(method, path, body=data, headers=headers)
+                resp = conn.getresponse()
+                raw = resp.read().decode("utf-8")
+                self._down_until = 0.0  # responde otra vez
+                if resp.status >= 400:
+                    # el demonio responde pero rechaza: token, ruta o target
+                    logger.warning("daemon %s %s -> HTTP %d en %s",
+                                   method, path, resp.status, self._base)
+                return resp.status, (json.loads(raw) if raw else None)
+            except (ConnectionRefusedError, TimeoutError) as e:
+                # nada escuchando o sin respuesta: reintentar no cambia nada (y
+                # en Windows cada intento a loopback tarda ~2 s)
+                last_err = e
+                self._down_until = time.monotonic() + self._down_seconds
+                break
+            except (ConnectionError, OSError) as e:
                 last_err = e
                 if attempt < self._retries:
                     time.sleep(self._retry_delay)
-        # El demonio no está escuchando (o no contesta): dejarlo en el log,
-        # no solo en el mensaje de la UI.
-        logger.warning("daemon %s %s: sin respuesta en %s tras %d intentos: %s",
-                       method, path, self._base, self._retries + 1, last_err)
+            finally:
+                conn.close()
+        logger.warning("daemon %s %s: sin respuesta en %s tras %d intento(s): %s",
+                       method, path, self._base, attempts, last_err)
         return 0, None
-
-    # -- API -----------------------------------------------------------------
 
     def ping(self) -> bool:
         """True si hay un daemon con API de control respondiendo."""

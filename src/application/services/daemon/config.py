@@ -13,6 +13,12 @@ from pathlib import Path
 
 DAEMON_SECTION = "DAEMON"
 
+_TRUE = ("1", "true", "yes", "on", "si", "sí")
+
+
+def _parse_bool(raw: str) -> bool:
+    return (raw or "").strip().lower() in _TRUE
+
 @dataclass(frozen=True)
 class DaemonConfig:
     """Parámetros del demonio: API de control + endpoint MCP."""
@@ -21,6 +27,10 @@ class DaemonConfig:
     control_port: int = 34400
     mcp_port: int = 34401
     mcp_token: str = ""
+    # Arrancar el demonio al abrir la interfaz y pararlo al cerrarla (solo si
+    # lo arrancó ella: un demonio del Programador de tareas no se toca).
+    autostart: bool = False
+    stop_on_exit: bool = False
 
 def load_daemon_config(path: Path) -> DaemonConfig:
     """Lee la sección [DAEMON] de config.ini; defaults si no existe."""
@@ -32,18 +42,14 @@ def load_daemon_config(path: Path) -> DaemonConfig:
         control_port=parser.getint(DAEMON_SECTION, "control_port", fallback=34400),
         mcp_port=parser.getint(DAEMON_SECTION, "mcp_port", fallback=34401),
         mcp_token=parser.get(DAEMON_SECTION, "mcp_token", fallback=""),
+        autostart=_parse_bool(parser.get(DAEMON_SECTION, "autostart",
+                                         fallback="0")),
+        stop_on_exit=_parse_bool(parser.get(DAEMON_SECTION, "stop_on_exit",
+                                            fallback="0")),
     )
 
 def save_daemon_config(path: Path, cfg: DaemonConfig) -> None:
     """Escribe [DAEMON] preservando el resto del fichero (targets, etc.)."""
-    parser = configparser.ConfigParser()
-    if path.exists():
-        parser.read(path, encoding="utf-8")
-    parser[DAEMON_SECTION] = {
-        "control_host": cfg.control_host,
-        "control_port": str(cfg.control_port),
-        "mcp_port": str(cfg.mcp_port),
-        "mcp_token": cfg.mcp_token,
-    }
-    with open(path, "w", encoding="utf-8") as f:
-        parser.write(f)
+    from src.infrastructure.client.config_store import update, write_daemon
+
+    update(path, lambda parser: write_daemon(parser, cfg))

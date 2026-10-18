@@ -7,52 +7,61 @@ y un endpoint **MCP** completo para que agentes (Claude, etc.) lo gobiernen.
 ## Arquitectura
 
 ```
-config.ini  ←── TargetStore ──→ TargetSupervisor ──→ PlaylistServer por target
-                   ↑                  ↑                     (playlist.m3u + epg.xml)
-                   │                  │
-        UI Qt (DaemonPanel)   ┌──────┴───────┐
-                              │ ControlApi   │  puerto [DAEMON] control_port (34400)
-        CLI (daemon.py)  ───→ │ (health,     │  → UI y CLI
-                              │  status,     │
-                              │  reload,     │
-                              │  shutdown)   │
-                              ├──────────────┤
-                              │ MCP Streamable│ puerto [DAEMON] mcp_port (34401)
-                              │ HTTP /mcp     │  → agentes (control total)
-                              └──────────────┘
+config.ini  ←── config_store ──→ TargetStore ──→ TargetService ──→ TargetSupervisor
+ (serializador único)                                  │                 │
+                                                       │                 └→ PlaylistServer por target
+                                                       │                    (playlist.m3u + epg.xml)
+        UI Qt (frontend) ── REST /api/v1 ─┐            │
+        CLI (daemon.py)  ── control ──────┤            │
+        Agentes          ── MCP —─────────┤            │
+                                          ▼            ▼
+                                    ┌──────────────────────────┐
+                                    │ McpHttpTransport          │ puerto [DAEMON] mcp_port (34401)
+                                    │  /api/v1  (REST v1)       │  REST → UI/web
+                                    │  /mcp     (JSON-RPC)      │  MCP → agentes
+                                    ├──────────────────────────┤
+                                    │ ControlApiServer          │ puerto [DAEMON] control_port (34400)
+                                    │  health/status/reload/    │  → UI y CLI
+                                    │  shutdown                 │
+                                    └──────────────────────────┘
 ```
 
-- **Qt es UI-only**: el diálogo guarda la config en `config.ini` y puede
-  **arrancar/parar/reiniciar el demonio** (botones del panel «Demonio»). Arrancar
-  desde la GUI abre una **consola propia con los logs en vivo**; el demonio también
-  escribe `logs/weteve-daemon.log` (rotación 1 MB × 3). El demonio puede vivir sin
-  UI abierta.
+La lógica de dominio vive en **`TargetService`** (`src/application/services/daemon/service.py`);
+REST y MCP son adaptadores finos sobre ella: no hay reglas de negocio duplicadas.
+Las lecturas salen del snapshot del supervisor y **no reejecutan** el pipeline.
 
-## Quién tiene la config: flujo de Guardar → demonio
+- **Qt es un frontend**: no ejecuta el pipeline ni sirve playlists. Pinta lo que
+  le da `GET /api/v1/...` y manda órdenes con `PUT/POST`. Puede
+  **arrancar/parar/reiniciar el demonio** (panel «Demonio») y, si las casillas
+  `autostart`/`stop_on_exit` están marcadas, lo hace al abrir/cerrar; solo para el
+  demonio que arrancó ella. Arrancar desde la GUI lo lanza **oculto, sin ventana
+  de cmd** (`pythonw.exe` + `DETACHED_PROCESS`); los logs van a
+  `logs/weteve-daemon.log` (rotación 1 MB × 3). `python.exe` no sirve aunque se
+  pase `DETACHED_PROCESS`: el redirector del venv recrea el proceso y Windows le
+  asigna una consola nueva, que se ve como una ventana de cmd. El demonio puede
+  vivir sin UI abierta.
 
-`config.ini` es el único estado compartido, pero **ninguno de los dos procesos es
-su dueño**: hay que reconciliarlo de forma explícita.
+## Quién escribe la config: flujo de Guardar
 
-1. **Guardar** (diálogo) escribe `config.ini` y, si el demonio responde al
-   `/health`, hace `POST /targets/{id}/reload`. El `result_label` dice si el
-   demonio fue avisado o si no respondió (en ese caso el servicio sigue con la
-   config anterior hasta que lo arranques o pulses «Aplicar»).
-2. **El reload relee el fichero**: `TargetStore.reload(target_id)` vuelve a parsear
-   `config.ini` y devuelve la definición fresca, que `ControlApiServer` pasa a
-   `supervisor.reload_target(...)` como `target`. Sin store (o para targets nunca
-   arrancados) se conserva el comportamiento antiguo: recargar lo que el supervisor
-   ya tenía en memoria.
-3. **MCP** usa la misma definición fresca en `start_target`, `reload_target` y
-   `run_pipeline`; lo que otro proceso haya escrito en el fichero se ve sin
-   reiniciar el demonio.
+El **demonio es el único escritor** de `config.ini` (`TargetStore` y la cartera),
+con un único serializador (`src/infrastructure/client/config_store.py`). La UI no
+toca el fichero (salvo `[DAEMON]`, que el demonio solo lee al arrancar):
 
-No hay file watcher: un reload provocado es más predecible que reaccionar a cada
-escritura (y evita recargar a media escritura).
+1. **Guardar** (diálogo) manda un lote por REST con `reload: false`:
+   `PUT /sources`, `PUT /targets/{id}/sources`, `/settings`, `/rules`,
+   `/mappings`, `/disabled`.
+2. Si una escritura falla, el diálogo avisa y **no escribe nada más**: no hay
+   guardados a medias. Sin demonio, Guardar no hace nada y lo dice.
+3. El lote termina con **una sola** ejecución: `POST /targets/{id}/run`. El
+   demonio relee la definición del fichero (`TargetStore.reload`), ejecuta el
+   pipeline y actualiza el contenido servido.
+4. **MCP** opera sobre el mismo `TargetService`; cualquier cambio hecho por un
+   agente se ve en la UI en cuanto se refresca (la UI no tiene copia del motor).
 
 ## Logs
 
-- **Consola**: al arrancar en primer plano (`daemon.py run`) o desde la GUI
-  (consola propia del proceso).
+- **Consola**: solo si arrancas `daemon.py run` en primer plano. Desde la GUI el
+  proceso va oculto (`pythonw.exe`) y no abre ninguna ventana de cmd.
 - **Fichero**: `logs/weteve-daemon.log` siempre, rota a 1 MB guardando 3
   backups. Nivel INFO, mismo formato que consola:
   `fecha [nivel] logger: mensaje`, con el nivel corto y en minúsculas
@@ -75,9 +84,14 @@ escritura (y evita recargar a media escritura).
 | Clave | Default | Descripción |
 |---|---|---|
 | `control_host` | `127.0.0.1` | Bind de ambas APIs |
-| `control_port` | `34400` | API de control (UI/CLI) |
-| `mcp_port` | `34401` | Endpoint MCP Streamable HTTP |
-| `mcp_token` | *(vacío)* | Si se define: `Authorization: Bearer` obligatorio en MCP y API de control |
+| `control_port` | `34400` | **único** puerto: control, REST (`/api/v1`), MCP (`/mcp`) y playlists (`/weteve/{id}/…`) |
+| `mcp_port` | *(ignorado)* | legado; el demonio avisa si difiere de `control_port` |
+| `mcp_token` | *(vacío)* | Si se define: `Authorization: Bearer` obligatorio en MCP, API de control y REST |
+| `autostart` | `0` | La interfaz arranca el demonio al abrirse si no responde |
+| `stop_on_exit` | `0` | La interfaz para el demonio al cerrarse **solo si lo arrancó ella** |
+
+Con `control_host` distinto de loopback y `mcp_token` vacío el demonio **no
+arranca**: la API no distingue usuarios y quedaría expuesta a la red.
 
 ## Uso
 
@@ -95,7 +109,7 @@ escritura (y evita recargar a media escritura).
 .venv\Scripts\python.exe daemon.py install-task
 ```
 
-## Herramientas MCP (17)
+## Herramientas MCP (23)
 
 Transporte: JSON-RPC 2.0 Streamable HTTP (`POST /mcp`), sesión vía cabecera
 `Mcp-Session-Id` asignada en `initialize`. Sin dependencias del SDK oficial
@@ -107,8 +121,28 @@ Transporte: JSON-RPC 2.0 Streamable HTTP (`POST /mcp`), sesión vía cabecera
 | Lectura | `list_targets`, `get_target` |
 | CRUD targets | `create_target`, `update_target`, `delete_target` |
 | Ciclo de vida | `start_target`, `stop_target`, `reload_target` |
-| Pipeline | `run_pipeline`, `preview_channels` |
+| Filtros y mapeo | `create_filter`, `delete_filter`, `modify_mapping`, `modify_mappings` |
+| Pipeline | `run_pipeline`, `list_tv_channels`, `list_epg_channels`, `suggest_epg_matches` |
 | Cartera de fuentes | `add_source`, `list_sources`, `update_source`, `remove_source`, `set_target_sources` |
+
+## API REST v1
+
+Mismo puerto que MCP (`[DAEMON] mcp_port`), prefijo `/api/v1`, misma
+autenticación. Es el contrato de los frontends (Qt hoy, web mañana).
+
+| Método | Ruta | Para qué |
+|---|---|---|
+| GET | `/health`, `/status`, `/targets`, `/targets/{id}`, `/targets/{id}/status` | estado |
+| GET | `/targets/{id}/channels?limit&offset&unmatched_only` | canales servidos |
+| GET | `/targets/{id}/mapping-candidates` | canales que necesitan atención (sin guía / desactivados) |
+| GET | `/targets/{id}/epg-channels`, `/groups`, `/group-fields` | catálogo y combos |
+| POST | `/targets/{id}/preview` | vista previa de filtros (no persiste) |
+| POST | `/targets/{id}/run`, `/targets/{id}/service` | ejecutar pipeline / arrancar-parar el servicio |
+| PUT | `/targets/{id}/settings`, `/rules`, `/mappings`, `/disabled` | escrituras en lote |
+
+Las escrituras aceptan `"reload": false` para agrupar varios cambios y ejecutar el
+pipeline una sola vez al final con `POST .../run`. Códigos: 200, 400 (cuerpo o
+cambio inválido), 404, 405. CORS solo para orígenes de loopback.
 
 Las reglas de filtro viajan en sintaxis xTeVe textual (`campo:{patrón}:case`,
 `!{...}` para exclusiones), igual que en `config.ini`.

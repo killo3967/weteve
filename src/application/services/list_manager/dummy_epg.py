@@ -40,7 +40,7 @@ def is_dummy_label(value: str) -> bool:
 
 def is_dummy_id(channel_id: str | None) -> bool:
     """True si un channel-id es un id de relleno generado por nosotros."""
-    return bool(channel_id) and channel_id.startswith(DUMMY_ID_PREFIX)
+    return bool(channel_id and channel_id.startswith(DUMMY_ID_PREFIX))
 
 
 def make_dummy_id(url: str, name: str) -> str:

@@ -11,7 +11,7 @@ Comportamiento:
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QHBoxLayout,
@@ -55,10 +55,14 @@ class LogTailWidget(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(POLL_MS)
         self._timer.timeout.connect(self._poll)
+        # Primer volcado (hasta 200 KB de historia) con un temporizador hijo:
+        # si el widget se destruye antes, Qt lo cancela y no toca widgets muertos.
+        self._initial_timer = QTimer(self)
+        self._initial_timer.setSingleShot(True)
+        self._initial_timer.timeout.connect(lambda: self._poll(initial=True))
         if self._path is not None:
             self._timer.start()
-            # Primer volcado: hasta 200 KB de historia, sin autoscroll forzado.
-            QTimer.singleShot(0, lambda: self._poll(initial=True))
+            self._initial_timer.start(0)
 
     # ------------------------------------------------------------------
     def set_log_path(self, path: Path | None) -> None:
@@ -70,7 +74,7 @@ class LogTailWidget(QWidget):
         if self._path is not None and not self._timer.isActive():
             self._timer.start()
         if self._path is not None:
-            QTimer.singleShot(0, lambda: self._poll(initial=True))
+            self._initial_timer.start(0)
 
     def resume_follow(self) -> None:
         """Baja al final y reactiva el autoscroll."""
@@ -88,6 +92,10 @@ class LogTailWidget(QWidget):
         return sb.value() >= sb.maximum() - 4
 
     def _poll(self, initial: bool = False) -> None:
+        from PyQt6 import sip
+
+        if sip.isdeleted(self) or sip.isdeleted(self.view):
+            return  # el temporizador puede llegar tras cerrar la ventana
         if self._path is None:
             return
         try:

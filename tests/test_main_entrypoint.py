@@ -38,3 +38,36 @@ def test_main_importa_el_dialogo():
     root = pathlib.Path(__file__).resolve().parents[1]
     src = (root / "main.py").read_text(encoding="utf-8")
     assert "from src.infrastructure.ui.list_manager_dialog import ListManagerDialog" in src
+
+
+def test_main_py_arranca_como_script():
+    """Regresión: sin el guard `__main__`, `python main.py` importa y sale con 0.
+
+    Pasó al recortar el fichero en la migración a la API: la suite seguía verde
+    porque los tests llaman a ``main()`` directamente. Aquí se lanza como lo
+    hace el usuario y se comprueba que sigue vivo (la ventana está abierta).
+    """
+    import os
+    import subprocess
+    import sys
+    import time
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    proc = subprocess.Popen(
+        [sys.executable, "main.py"], cwd=root, env=env,
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            time.sleep(0.2)
+        assert proc.poll() is None, (
+            "main.py terminó solo: falta el guard `if __name__ == '__main__'`")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:  # pragma: no cover
+            proc.kill()

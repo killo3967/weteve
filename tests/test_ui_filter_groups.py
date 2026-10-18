@@ -6,11 +6,11 @@ seleccionada. Evita teclear grupos a mano.
 """
 
 import pytest
-
-from src.domain.entities.channel import Channel
-from src.application.services.list_manager.pipeline import ListManagerPipeline
-from src.application.services.list_manager.models import FilterRule
 from PyQt6.QtWidgets import QComboBox
+
+from src.application.services.list_manager.models import FilterRule
+from src.application.services.list_manager.pipeline import ListManagerPipeline
+from src.domain.entities.channel import Channel
 from src.infrastructure.ui.list_manager_dialog import FilterRulesWidget
 
 
@@ -328,7 +328,6 @@ class TestCampoLista:
         rules_widget._fill_field_combo(rules_widget._field_combo) \
             if hasattr(rules_widget, "_field_combo") else None
         # localiza el combo de campo de la primera fila
-        from src.infrastructure.ui.list_manager_dialog import FilterRulesWidget
         combo = rules_widget.findChildren(QComboBox)[0]
         rules_widget._fill_field_combo(combo)
         data = [combo.itemData(i) for i in range(combo.count())]

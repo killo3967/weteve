@@ -8,15 +8,12 @@ el filtro 'Lista' y el prefijo de render. La EPG se fusiona de las epg_refs.
 from datetime import datetime, timedelta
 
 from src.application.services.list_manager.models import (
-    MappedChannel,
     PipelineTarget,
     SourceRef,
 )
 from src.application.services.list_manager.pipeline import ListManagerPipeline
 from src.domain.entities.channel import Channel
 from src.domain.entities.epg import EPGData, Program
-
-from tests.test_list_manager_pipeline import _FakeEpgRepo, _FakeM3URepo
 
 
 def _epg(canal: str, cid: str) -> EPGData:
@@ -167,3 +164,30 @@ class TestEpgFusionada:
                            epg_overrides={"http://a/1": "mi.id"})
         res = p.run(t)
         assert res.channels[0].matched_epg_id == "mi.id"
+
+    def test_cada_id_epg_sabe_de_que_guia_viene(self):
+        """La tabla de mapeo necesita la lista: la unión no puede perderla."""
+        p = _pipeline(
+            {"C:/a.m3u": [Channel("La 1", "http://a/1", "General", tvg_id="es.la1"),
+                          Channel("A3", "http://a/2", "General", tvg_id="es.a3")]},
+            {"C:/g1.xml": _epg("La 1", "es.la1"),
+             "C:/g2.xml": _epg("Antena 3", "es.a3")},
+        )
+        refs = (SourceRef("s1", "platero", "C:/a.m3u"),)
+        epg_refs = (SourceRef("e1", "Doble_M", "C:/g1.xml"),
+                    SourceRef("e2", "Koala", "C:/g2.xml"))
+        p.register_merged("merged", refs, epg_refs)
+        assert p.epg_lists("merged") == {"es.la1": ("Doble_M",),
+                                        "es.a3": ("Koala",)}
+
+    def test_id_anunciado_por_dos_guias_lista_las_dos(self):
+        p = _pipeline(
+            {"C:/a.m3u": [Channel("La 1", "http://a/1", "General", tvg_id="es.la1")]},
+            {"C:/g1.xml": _epg("La 1", "es.la1"),
+             "C:/g2.xml": _epg("La 1 HD", "es.la1")},
+        )
+        refs = (SourceRef("s1", "platero", "C:/a.m3u"),)
+        epg_refs = (SourceRef("e1", "Doble_M", "C:/g1.xml"),
+                    SourceRef("e2", "Koala", "C:/g2.xml"))
+        p.register_merged("merged", refs, epg_refs)
+        assert p.epg_lists("merged")["es.la1"] == ("Doble_M", "Koala")

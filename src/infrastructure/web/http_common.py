@@ -16,6 +16,7 @@ comparten dos preocupaciones:
 from __future__ import annotations
 
 import logging
+import sys
 from http.server import ThreadingHTTPServer
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,16 @@ class NoReuseServer(ThreadingHTTPServer):
 
         Por defecto la librería imprime la traza en stderr, que el demonio
         lanzado por Task Scheduler no conserva. Se registra en el log.
+
+        Un reset o un cierre abortado del cliente es rutina en el loopback de
+        Windows (el cliente cierra mientras el servidor lee la petición
+        siguiente): se anota en INFO y sin traza, que si no llena el log.
         """
+        error = sys.exc_info()[1]
+        if isinstance(error, (ConnectionResetError, ConnectionAbortedError)):
+            logger.info("conexión con %s cerrada por el cliente (%s)",
+                        client_address, type(error).__name__)
+            return
         logger.warning("conexión con %s interrumpida", client_address,
                        exc_info=True)
 
@@ -45,6 +55,8 @@ class AccessLogMixin:
     """
 
     log_prefix = "http"
+    # Lo aporta BaseHTTPRequestHandler en las tres subclases.
+    client_address: tuple[str, int]
 
     def log_message(self, format: str, *args) -> None:
         logger.info("%s: %s - %s", self.log_prefix, self.client_address[0],

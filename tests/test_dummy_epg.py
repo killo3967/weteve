@@ -2,8 +2,6 @@
 
 from datetime import datetime
 
-import pytest
-
 from src.application.services.list_manager.dummy_epg import (
     DUMMY_HOURS,
     DUMMY_LABEL,
@@ -12,6 +10,7 @@ from src.application.services.list_manager.dummy_epg import (
     is_dummy_label,
     make_dummy_id,
 )
+
 
 class TestIdentificacion:
     def test_la_etiqueta_es_dummy_1h(self):

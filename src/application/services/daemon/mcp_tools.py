@@ -9,54 +9,43 @@ Sintaxis de reglas en argumentos MCP: la textual de xTeVe usada en config.ini
 """
 
 import logging
-from pathlib import Path
+from typing import cast
 
+# Serialización y parseo de reglas viven en la capa de servicio: MCP y REST
+# comparten una única implementación.
+from src.application.services.daemon.service import (
+    TargetService,
+)
+from src.application.services.daemon.service import (
+    base_pattern as _base_pattern,
+)
+from src.application.services.daemon.service import (
+    parse_rules as _parse_rules,
+)
 from src.application.services.list_manager.models import (
+    FilterField,
     FilterRule,
     PipelineTarget,
 )
-from src.infrastructure.client.sources_store import load_catalog, save_catalog
 
 logger = logging.getLogger(__name__)
-
-def _serialize_target(t: PipelineTarget) -> dict:
-    """PipelineTarget → dict JSON con reglas en sintaxis xteve textual."""
-    return {
-        "name": t.name,
-        "m3u": t.source_index,
-        "rules": [r.serialize() for r in t.rules],
-        "epg_overrides": dict(t.epg_overrides),
-        "disabled_channels": list(t.disabled_channels),
-        "port": t.port,
-        "starting_number": t.starting_number,
-        "source_refs": [{"id": r.id, "name": r.name, "location": r.location}
-                        for r in t.source_refs],
-        "epg_refs": [{"id": r.id, "name": r.name, "location": r.location}
-                     for r in t.epg_refs],
-    }
-
-def _base_pattern(stored: str) -> str:
-    """Patrón sin la envoltura xTeVe: '!{texto}' → 'texto'."""
-    s = stored.strip()
-    if s.startswith("!") and s.endswith("}") and "{" in s:
-        return s[2:-1] if s[1] == "{" else s[1:-1]
-    return s
-
-
-def _parse_rules(raw_rules: list[str]) -> tuple[FilterRule, ...]:
-    return tuple(FilterRule.parse(r.strip()) for r in raw_rules if r.strip())
 
 def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
     """Construye el registro completo de herramientas MCP.
 
     ``target_store`` es obligatorio para create/update/delete; los handlers
     devuelven {"error": ...} si falta (registro de solo lectura).
+
+    La lógica de dominio vive en ``TargetService``: este registro solo traduce
+    JSON-RPC a sus operaciones. Quedan aquí el CRUD de targets y la cartera de
+    fuentes, que el servicio aún no cubre.
     """
+    service = TargetService(supervisor, target_store)
 
     # -- estado ---------------------------------------------------------------
 
     def get_status() -> dict:
-        return supervisor.get_status()
+        return service.status()
 
     def shutdown() -> dict:
         if on_shutdown is not None:
@@ -66,14 +55,13 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
     # -- lectura de targets ------------------------------------------------------
 
     def list_targets() -> dict:
-        defs = target_store.list() if target_store else {}
-        return {"targets": {tid: _serialize_target(t) for tid, t in defs.items()}}
+        return service.list_targets()
 
     def get_target(target_id: str) -> dict:
-        t = target_store.get(target_id) if target_store else None
-        if t is None:
+        found = service.get_target(target_id)
+        if found is None:
             return {"error": f"target {target_id} no existe"}
-        return {"target": _serialize_target(t)}
+        return found
 
     # -- CRUD ---------------------------------------------------------------------
 
@@ -143,36 +131,16 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
 
     # -- filtros y mapeado (hot-reload si el target está sirviendo) ----------
 
-    def _is_running(target_id: str) -> bool:
-        try:
-            info = supervisor.get_status().get("targets", {}).get(target_id, {})
-            return bool(info.get("running"))
-        except Exception:
-            return False
-
-    def _hot_reload(target_id: str) -> dict | None:
-        """Reejecuta el pipeline si el target está sirviendo. None si no."""
-        if not _is_running(target_id):
-            return None
-        t = _definition(target_id)
-        if t is None:
-            return None
-        epg = target_store.get_epg_path(target_id) if target_store else None
-        ok = supervisor.reload_target(target_id, t, epg_path=epg)
-        return {"reloaded": ok} if ok else {
-            "reloaded": False,
-            **supervisor.get_status()["targets"].get(target_id, {}),
-        }
-
     def create_filter(target_id: str, field: str, pattern: str,
                       exclude: bool = False, case_sensitive: bool = False,
                       operator: str = "or") -> dict:
         err = _require_store()
         if err:
             return {"error": err}
-        t = _definition(target_id)
-        if t is None:
+        found = service.get_target(target_id)
+        if found is None:
             return {"error": f"target {target_id} no existe"}
+        rules = list(_parse_rules(found["target"]["rules"]))
         if field not in _ALLOWED_FIELDS:
             return {"error": (f"field inválido: {field} "
                               f"(permitidos: {', '.join(_ALLOWED_FIELDS)})")}
@@ -185,51 +153,43 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
         # exclude del dataclass es informativo y el motor lo ignora.
         clean = pattern.strip()
         stored = f"!{{{clean}}}" if exclude else clean
-        rule = FilterRule(field=field, pattern=stored,
+        rule = FilterRule(field=cast(FilterField, field), pattern=stored,
                           exclude=bool(exclude),
                           case_sensitive=bool(case_sensitive),
                           operator=operator)  # type: ignore[arg-type]
         if any(r.field == rule.field and _base_pattern(r.pattern) == clean
-               for r in t.rules):
+               for r in rules):
             return {"error": (f"ya existe una regla {field}:{pattern} "
                               "en el target")}
-        from dataclasses import replace
-        new = replace(t, rules=t.rules + (rule,))
-        target_store.save(target_id, new,
-                          epg_path=target_store.get_epg_path(target_id))
-        result: dict = {"ok": True, "rule": rule.serialize(),
-                        "rules": [r.serialize() for r in new.rules]}
-        reloaded = _hot_reload(target_id)
-        if reloaded is not None:
-            result.update(reloaded)
-        return result
+        rules.append(rule)
+        out = service.set_rules(target_id, [r.serialize() for r in rules])
+        if "error" in out:
+            return out
+        return {"ok": True, "rule": rule.serialize(),
+                "rules": [r.serialize() for r in rules],
+                "reloaded": out["reloaded"]}
 
     def delete_filter(target_id: str, field: str, pattern: str) -> dict:
         err = _require_store()
         if err:
             return {"error": err}
-        t = _definition(target_id)
-        if t is None:
+        found = service.get_target(target_id)
+        if found is None:
             return {"error": f"target {target_id} no existe"}
-        remaining = tuple(r for r in t.rules
-                          if not (r.field == field
-                                  and _base_pattern(r.pattern) == pattern.strip()))
-        if len(remaining) == len(t.rules):
+        rules = list(_parse_rules(found["target"]["rules"]))
+        remaining = [r for r in rules
+                     if not (r.field == field
+                             and _base_pattern(r.pattern) == pattern.strip())]
+        if len(remaining) == len(rules):
             return {"error": (f"no existe ninguna regla {field}:{pattern} "
                               "en el target")}
-        removed = [r.serialize() for r in t.rules
-                   if r.field == field
-                   and _base_pattern(r.pattern) == pattern.strip()]
-        from dataclasses import replace
-        new = replace(t, rules=remaining)
-        target_store.save(target_id, new,
-                          epg_path=target_store.get_epg_path(target_id))
-        result: dict = {"ok": True, "removed": removed,
-                        "rules": [r.serialize() for r in new.rules]}
-        reloaded = _hot_reload(target_id)
-        if reloaded is not None:
-            result.update(reloaded)
-        return result
+        removed = [r.serialize() for r in rules if r not in remaining]
+        out = service.set_rules(target_id, [r.serialize() for r in remaining])
+        if "error" in out:
+            return out
+        return {"ok": True, "removed": removed,
+                "rules": [r.serialize() for r in remaining],
+                "reloaded": out["reloaded"]}
 
     def modify_mapping(target_id: str, channel_url: str,
                        epg_id: str | None = None) -> dict:
@@ -237,150 +197,79 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
         err = _require_store()
         if err:
             return {"error": err}
-        t = _definition(target_id)
-        if t is None:
-            return {"error": f"target {target_id} no existe"}
         if not channel_url:
             return {"error": "channel_url vacío"}
-        overrides = dict(t.epg_overrides)
-        if epg_id:
-            overrides[channel_url] = epg_id
-        else:
-            if channel_url not in overrides:
-                return {"error": (f"el canal {channel_url} no tiene mapeo "
-                                  "manual que eliminar")}
-            del overrides[channel_url]
-        from dataclasses import replace
-        new = replace(t, epg_overrides=overrides)
-        target_store.save(target_id, new,
-                          epg_path=target_store.get_epg_path(target_id))
-        result: dict = {"ok": True, "channel_url": channel_url,
-                        "epg_id": epg_id or "",
-                        "epg_overrides": overrides}
-        reloaded = _hot_reload(target_id)
-        if reloaded is not None:
-            result.update(reloaded)
-        return result
+        out = service.set_mappings(
+            target_id, [{"channel_url": channel_url, "epg_id": epg_id}])
+        if "error" in out:
+            return out
+        if out.get("errors"):
+            return {"error": out["errors"][0].get("error", "mapeo rechazado")}
+        return {"ok": True, "channel_url": channel_url,
+                "epg_id": epg_id or "",
+                "epg_overrides": out["target"]["epg_overrides"],
+                "reloaded": out["reloaded"]}
 
     def modify_mappings(target_id: str,
                         mappings: list[dict]) -> dict:
         """Asignación EPG en lote: [{'channel_url', 'epg_id'|None}, ...].
 
-        Un solo guardado y UN solo hot-reload al final (a diferencia de N
-        llamadas a modify_mapping). epg_id=None elimina el mapeo del canal.
+        Un solo guardado y una sola recarga (a diferencia de N llamadas a
+        modify_mapping). epg_id=None elimina el mapeo del canal.
         """
-        err = _require_store()
-        if err:
-            return {"error": err}
-        t = _definition(target_id)
-        if t is None:
-            return {"error": f"target {target_id} no existe"}
         if not isinstance(mappings, list) or not mappings:
             return {"error": "mappings debe ser una lista no vacía"}
-        overrides = dict(t.epg_overrides)
-        applied: list[dict] = []
-        errors: list[dict] = []
-        for m in mappings:
-            url = (m or {}).get("channel_url", "")
-            epg_id = (m or {}).get("epg_id")
-            if not url:
-                errors.append({"error": "channel_url vacío",
-                               "mapping": m})
-                continue
-            if epg_id:
-                overrides[url] = str(epg_id)
-            else:
-                if url not in overrides:
-                    errors.append({
-                        "error": (f"el canal {url} no tiene mapeo manual "
-                                  "que eliminar"), "mapping": m})
-                    continue
-                del overrides[url]
-            applied.append({"channel_url": url, "epg_id": epg_id or ""})
-        from dataclasses import replace
-        new = replace(t, epg_overrides=overrides)
-        target_store.save(target_id, new,
-                          epg_path=target_store.get_epg_path(target_id))
-        result: dict = {"ok": True, "applied": applied,
-                        "errors": errors, "count": len(applied),
-                        "epg_overrides": overrides}
-        if errors:
+        out = service.set_mappings(target_id, mappings)
+        if "error" in out:
+            return out
+        result: dict = {"ok": True, "applied": out["applied"],
+                        "errors": out["errors"],
+                        "count": len(out["applied"]),
+                        "epg_overrides": out["target"]["epg_overrides"],
+                        "reloaded": out["reloaded"]}
+        if out.get("partial"):
             result["partial"] = True
-        reloaded = _hot_reload(target_id)
-        if reloaded is not None:
-            result.update(reloaded)
         return result
 
-    # -- ciclo de vida ---------------------------------------------------------
-
-    def _definition(target_id: str):
-        """Definición actual de config.ini, no la cacheada al arrancar.
-
-        config.ini lo escribe también la GUI, así que una herramienta de
-        arranque/recarga que lea la cache serviría filtros obsoletos. Stores
-        antiguos sin reload() siguen usando get().
-        """
-        if target_store is None:
-            return None
-        reloader = getattr(target_store, "reload", None)
-        if reloader is not None:
-            return reloader(target_id)
-        return target_store.get(target_id)
-
     def start_target(target_id: str) -> dict:
-        t = _definition(target_id)
-        if t is None:
-            return {"error": f"target {target_id} no existe"}
-        epg = target_store.get_epg_path(target_id) if target_store else None
-        ok = supervisor.start_target(target_id, t, epg_path=epg)
-        return {"ok": ok} if ok else {
+        out = service.start_service(target_id)
+        if "error" in out:
+            return out
+        return {"ok": out["ok"]} if out["ok"] else {
             "ok": False, **supervisor.get_status()["targets"].get(target_id, {}),
         }
 
     def stop_target(target_id: str) -> dict:
-        ok = supervisor.stop_target(target_id)
-        return {"ok": ok}
+        return {"ok": service.stop_service(target_id)["ok"]}
 
     def reload_target(target_id: str) -> dict:
-        t = _definition(target_id)
-        if t is None:
-            return {"error": f"target {target_id} no existe"}
-        epg = target_store.get_epg_path(target_id) if target_store else None
-        ok = supervisor.reload_target(target_id, t, epg_path=epg)
-        return {"ok": ok} if ok else {
-            "ok": False, **supervisor.get_status()["targets"].get(target_id, {}),
-        }
+        out = service.run(target_id)
+        if "error" in out:
+            return {"ok": False,
+                    **supervisor.get_status().get("targets", {}).get(target_id, {}),
+                    "error": out["error"]}
+        return {"ok": True}
 
     # -- pipeline -----------------------------------------------------------------
 
     def run_pipeline(target_id: str) -> dict:
-        # garantiza definición registrada en supervisor aunque nunca se haya arrancado
-        t = _definition(target_id)
-        if t is not None:
-            epg = target_store.get_epg_path(target_id) if target_store else None
-            supervisor.reload_target(target_id, t, epg_path=epg)
-        return supervisor.run_pipeline(target_id)
+        # una sola ejecución; la lógica vive en TargetService
+        return service.run(target_id)
 
     def list_tv_channels(target_id: str, limit: int = 50, offset: int = 0,
                          unmatched_only: bool = False) -> dict:
-        t = target_store.get(target_id) if target_store else None
-        if t is not None:
-            epg = target_store.get_epg_path(target_id) if target_store else None
-            supervisor.reload_target(target_id, t, epg_path=epg)
-        return supervisor.list_tv_channels(target_id, limit=int(limit),
-                                           offset=int(offset),
-                                           unmatched_only=bool(unmatched_only))
+        return service.channels(target_id, limit=int(limit), offset=int(offset),
+                                unmatched_only=bool(unmatched_only))
 
     def list_epg_channels_tool(target_id: str, limit: int = 200,
                                offset: int = 0) -> dict:
-        return supervisor.list_epg_channels(target_id, limit=int(limit),
-                                            offset=int(offset))
+        return service.epg_channels(target_id, limit=int(limit),
+                                    offset=int(offset))
 
     def suggest_epg_matches_tool(target_id: str, channel_name: str,
                                  limit: int = 5) -> dict:
-        return supervisor.suggest_epg_matches(target_id,
-                                              channel_name=str(channel_name),
-                                              limit=int(limit))
+        return service.suggest_epg_matches(target_id, channel_name,
+                                           limit=int(limit))
 
     # -- schemas -------------------------------------------------------------------
 
@@ -398,105 +287,41 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
 
     # -- cartera de fuentes ---------------------------------------------------
 
-    def _catalog_path() -> Path | None:
-        if target_store is None:
-            return None
-        return Path(getattr(target_store, "_path"))
-
     def add_source(name: str, kind: str, location: str,
                    refresh_min: int = 0) -> dict:
-        path = _catalog_path()
-        if path is None:
-            return {"error": "configuracion de targets no disponible"}
-        if kind not in ("m3u", "epg"):
-            return {"error": f"kind inválido: {kind} (m3u|epg)"}
-        catalog = load_catalog(path)
-        entry = catalog.add_new(name, kind, "url" if location.lower().startswith(("http://", "https://")) else "file", location, refresh_min)
-        save_catalog(path, catalog)
-        return {"id": entry.id, "name": entry.name, "kind": entry.kind,
-                "location": entry.location, "refresh_min": entry.refresh_min}
+        return service.add_source(name, kind, location, refresh_min)
 
     def list_sources(kind: str | None = None) -> dict:
-        path = _catalog_path()
-        if path is None:
-            return {"error": "configuracion de targets no disponible"}
-        catalog = load_catalog(path)
-        entries = catalog.all() if not kind else catalog.of_kind(kind)
-        return {"sources": [
-            {"id": e.id, "name": e.name, "kind": e.kind,
-             "source_type": e.source_type, "location": e.location,
-             "refresh_min": e.refresh_min, "enabled": e.enabled}
-            for e in entries
-        ]}
+        return service.sources(kind)
 
     def update_source(id: str, name: str | None = None,
                       location: str | None = None,
-                      refresh_min: int | None = None) -> dict:
-        path = _catalog_path()
-        if path is None:
-            return {"error": "configuracion de targets no disponible"}
-        catalog = load_catalog(path)
-        entry = catalog.get(id)
-        if entry is None:
-            return {"error": f"fuente {id} no existe"}
-        updates = {}
-        if name is not None:
-            updates["name"] = name
-        if location is not None:
-            updates["location"] = location
-            updates["source_type"] = ("url" if location.lower().startswith(("http://", "https://")) else "file")
-        if refresh_min is not None:
-            updates["refresh_min"] = max(0, int(refresh_min))
-        updated = catalog.update(id, **updates)
-        save_catalog(path, catalog)
-        return {"ok": True, "source": {
-            "id": updated.id, "name": updated.name, "kind": updated.kind,
-            "source_type": updated.source_type, "location": updated.location,
-            "refresh_min": updated.refresh_min, "enabled": updated.enabled}}
+                      refresh_min: int | None = None,
+                      enabled: bool | None = None) -> dict:
+        return service.update_source(id, name=name, location=location,
+                                     refresh_min=refresh_min, enabled=enabled)
 
     def remove_source(id: str) -> dict:
-        path = _catalog_path()
-        if path is None:
-            return {"error": "configuracion de targets no disponible"}
-        catalog = load_catalog(path)
-        if catalog.get(id) is None:
-            return {"error": f"fuente {id} no existe"}
-        catalog.remove(id)
-        save_catalog(path, catalog)
-        return {"ok": True}
+        return service.remove_source(id)
 
     def set_target_sources(target_id: str, m3u_ids: list[str] | None = None,
                            epg_ids: list[str] | None = None) -> dict:
-        path = _catalog_path()
-        if path is None:
-            return {"error": "configuracion de targets no disponible"}
-        catalog = load_catalog(path)
-        for sid in (m3u_ids or []) + (epg_ids or []):
-            if catalog.get(sid) is None:
-                return {"error": f"fuente {sid} no existe"}
-        t = target_store.reload(target_id) if hasattr(target_store, "reload") \
-            else target_store.get(target_id)
-        if t is None:
+        if m3u_ids is None and epg_ids is None:
+            return {"error": "indica m3u_sources y/o epg_sources"}
+        current = service.get_target(target_id)
+        if current is None:
             return {"error": f"target {target_id} no existe"}
-        from dataclasses import replace
-
-        from src.application.services.list_manager.models import SourceRef
-
-        def _refs(ids: list[str]) -> tuple:
-            return tuple(
-                SourceRef(e.id, e.name, e.location)
-                for e in (catalog.get(sid) for sid in ids) if e
-            )
-
-        if m3u_ids is not None:
-            t = replace(t, source_refs=_refs(m3u_ids))
-        if epg_ids is not None:
-            t = replace(t, epg_refs=_refs(epg_ids))
-        target_store.save(target_id, t,
-                          epg_path=target_store.get_epg_path(target_id))
+        target = current["target"]
+        m3u = ([r["id"] for r in target["source_refs"]]
+               if m3u_ids is None else list(m3u_ids))
+        epg = ([r["id"] for r in target["epg_refs"]]
+               if epg_ids is None else list(epg_ids))
+        out = service.set_target_sources(target_id, m3u, epg)
+        if "error" in out:
+            return out
         return {"ok": True, "target_id": target_id,
-                "m3u_ids": [r.id for r in t.source_refs],
-                "epg_ids": [r.id for r in t.epg_refs]}
+                "m3u_ids": [r["id"] for r in out["target"]["source_refs"]],
+                "epg_ids": [r["id"] for r in out["target"]["epg_refs"]]}
 
     return {
         "get_status": {

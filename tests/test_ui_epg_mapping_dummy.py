@@ -180,7 +180,7 @@ class TestDummyPrimero:
         dummy_id = build_dummy_epg_id("http://s/la1", "La 1 HD")
         widget.set_epg(_epg({"otro.TV": DUMMY_LABEL}))
         widget.load_unmatched(_channels(), {"http://s/la1": dummy_id})
-        # la etiqueta mostrada sigue siendo 'Dummy 1h' (es un id dummy)... 
+        # la etiqueta mostrada sigue siendo 'Dummy 1h' (es un id dummy)...
         assert widget._display_label(dummy_id) == DUMMY_LABEL
         # ...pero al guardar se resuelve contra el catálogo real
         assert widget.get_overrides() == {"http://s/la1": "otro.TV"}

@@ -6,9 +6,8 @@ Usa un cliente falso (no hay sockets): valida estados, refresco y aplicar.
 import pytest
 
 pytest.importorskip("PyQt6")
-from PyQt6.QtWidgets import QLabel  # noqa: E402
 
-from src.infrastructure.ui.daemon_panel import DaemonPanel  # noqa: E402
+from src.infrastructure.ui.daemon_panel import DaemonPanel
 
 
 class _FakeClient:
@@ -38,14 +37,6 @@ class _FakeClient:
         return self.alive
 
 
-class _FakeStore:
-    def __init__(self) -> None:
-        self.saved: dict = {}
-
-    def save(self, target_id: str, target, epg_path=None, bind=None) -> None:
-        self.saved[target_id] = target
-
-
 class _FakeLauncher:
     def __init__(self) -> None:
         self.launched = 0
@@ -58,9 +49,8 @@ class _FakeLauncher:
 @pytest.fixture()
 def panel(qtbot):
     client = _FakeClient()
-    store = _FakeStore()
-    p = DaemonPanel(client=client, target_store=store, target_id="0",
-                    get_target_config=lambda: {"name": "Mi lista"})
+    store = {}
+    p = DaemonPanel(client=client, target_id="0")
     qtbot.addWidget(p)
     return p, client, store
 
@@ -136,30 +126,20 @@ class TestDaemonPanel:
 
     def test_daemon_parado(self, qtbot) -> None:
         client = _FakeClient(alive=False)
-        p = DaemonPanel(client=client, target_store=_FakeStore(),
-                        target_id="0", get_target_config=lambda: {})
+        p = DaemonPanel(client=client, target_id="0")
         qtbot.addWidget(p)
         p.refresh_status()
         assert "no responde" in p.status_label.text().lower()
 
-    def test_apply_guarda_y_recarga(self, panel) -> None:
-        p, client, store = panel
+    def test_apply_solo_recarga(self, panel) -> None:
+        """Aplicar no escribe: el fichero lo escribe la API (Guardar)."""
+        p, client, _store = panel
         p.apply_to_daemon()
-        assert "0" in store.saved
         assert client.reload_calls == ["0"]
 
-    def test_apply_sin_daemon_no_recarga(self, qtbot) -> None:
+    def test_apply_sin_daemon_avisa(self, qtbot) -> None:
         client = _FakeClient(alive=False)
-        store = _FakeStore()
-        p = DaemonPanel(client=client, target_store=store, target_id="0",
-                        get_target_config=lambda: {})
+        p = DaemonPanel(client=client, target_id="0")
         qtbot.addWidget(p)
         p.apply_to_daemon()
-        assert "0" in store.saved  # se guarda igualmente
         assert "no responde" in p.status_label.text().lower()
-
-    def test_apply_sin_store_solo_recarga(self, panel) -> None:
-        p, client, _store = panel
-        p._store = None
-        p.apply_to_daemon()
-        assert client.reload_calls == ["0"]

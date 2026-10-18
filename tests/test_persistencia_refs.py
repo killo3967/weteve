@@ -1,14 +1,20 @@
-"""Persistencia de targets vía load_config/save_config (formato main.py/UI).
+"""Persistencia de targets: el escritor es ``TargetStore`` (``config_store``).
 
-Comprueba que las selecciones de cartera (m3u_refs/epg_refs) sobreviven al
-guardado y que las configs antiguas de fuente única siguen cargando.
+Comprueba que las selecciones de cartera y los mapeos sobreviven al guardado y
+que las configs antiguas de fuente única siguen cargando con ``load_config``
+(lector que usa la UI para los campos heredados).
 """
 
 import configparser
 from pathlib import Path
 
-from src.application.services.list_manager.models import SourceRef
-from src.infrastructure.client.persistencia import load_config, save_config
+from src.application.services.daemon.target_store import TargetStore
+from src.application.services.list_manager.models import (
+    FilterRule,
+    PipelineTarget,
+    SourceRef,
+)
+from src.infrastructure.client.persistencia import load_config
 
 
 def _seed(path: Path) -> None:
@@ -25,6 +31,24 @@ def _seed(path: Path) -> None:
     }
     with open(path, "w", encoding="utf-8") as f:
         parser.write(f)
+
+
+def _save(path: Path, **kw) -> None:
+    """Guardado real: ``TargetStore.save`` (el único escritor del fichero)."""
+    store = TargetStore(path)
+    store.load()
+    target = PipelineTarget(
+        name=kw.get("name", "test"),
+        source_index=kw.get("m3u", "C:/l/platero.m3u"),
+        rules=kw.get("rules", ()),
+        epg_overrides=dict(kw.get("overrides", {})),
+        disabled_channels=tuple(kw.get("disabled", ())),
+        port=kw.get("port", 8080),
+        source_refs=tuple(kw.get("refs", ())),
+        starting_number=kw.get("starting_number", 1),
+    )
+    store.save("0", target, epg_path=kw.get("epg", "C:/e/TV.xml"),
+               bind=kw.get("bind", "127.0.0.1"))
 
 
 class TestLoadConfigLegacy:
@@ -53,7 +77,7 @@ class TestLoadConfigLegacy:
         ]
 
 
-class TestSaveConfigSelecciones:
+class TestGuardadoSelecciones:
     def test_save_persiste_y_conserva(self, tmp_path):
         path = tmp_path / "config.ini"
         _seed(path)
@@ -68,17 +92,16 @@ class TestSaveConfigSelecciones:
         with open(path, "w", encoding="utf-8") as f:
             parser.write(f)
 
-        cfg = load_config(path)
-        cfg["targets"][0]["m3u_refs"] = [
-            SourceRef("aa", "platero", "C:/l.m3u"),
-            SourceRef("bb", "secunda", "C:/s.m3u"),
-        ]
-        save_config(path, cfg)
+        _save(path, refs=(SourceRef("aa", "platero", "C:/l.m3u"),
+                          SourceRef("bb", "secunda", "C:/s.m3u")),
+              rules=(FilterRule.parse("group-title:Spain:0:and"),))
+
         parser = configparser.ConfigParser()
         parser.read(path, encoding="utf-8")
         assert parser.get("listmanager.target.0", "m3u_sources") == "aa,bb"
-        # reglas y puerto intactos tras el round-trip
-        assert "group-title:Spain:0:and" in parser.get("listmanager.target.0", "rules")
+        # reglas y puerto se conservan (se guarda la definición completa)
+        assert "group-title:Spain:0:and" in parser.get(
+            "listmanager.target.0", "rules")
         assert parser.getint("listmanager.target.0", "port") == 8080
 
     def test_save_sin_refs_limpia_selecciones(self, tmp_path):
@@ -89,10 +112,13 @@ class TestSaveConfigSelecciones:
         parser["listmanager.target.0"]["m3u_sources"] = "aa"
         with open(path, "w", encoding="utf-8") as f:
             parser.write(f)
-        save_config(path, load_config(path))
+
+        _save(path)  # sin refs
+
         parser = configparser.ConfigParser()
         parser.read(path, encoding="utf-8")
-        assert parser.get("listmanager.target.0", "m3u_sources", fallback="") == ""
+        assert parser.get("listmanager.target.0", "m3u_sources",
+                          fallback="") == ""
 
 
 class TestOverridesDummy:
@@ -107,11 +133,9 @@ class TestOverridesDummy:
     def test_id_dummy_sobrevive_el_round_trip(self, tmp_path):
         path = tmp_path / "config.ini"
         _seed(path)
-        cfg = load_config(path)
-        cfg["targets"][0]["epg_overrides"] = {self.URL: self.DUMMY,
-                                              "http://otro/canal": "La1.TV"}
-        cfg["targets"][0]["disabled_channels"] = ["http://apagado/a"]
-        save_config(path, cfg)
+        _save(path,
+              overrides={self.URL: self.DUMMY, "http://otro/canal": "La1.TV"},
+              disabled=["http://apagado/a"])
 
         back = load_config(path)["targets"][0]
         # la url tiene ':', '?' y '&': el separador '::' no debe partirla
@@ -122,13 +146,9 @@ class TestOverridesDummy:
     def test_el_daemon_lee_el_mismo_id_dummy(self, tmp_path):
         """El agregador usa su propio parser sobre el mismo config.ini: si él
         no lo lee igual, el Dummy que la UI guardó no se sirve."""
-        from src.application.services.daemon.target_store import TargetStore
-
         path = tmp_path / "config.ini"
         _seed(path)
-        cfg = load_config(path)
-        cfg["targets"][0]["epg_overrides"] = {self.URL: self.DUMMY}
-        save_config(path, cfg)
+        _save(path, overrides={self.URL: self.DUMMY})
 
         target = TargetStore(path)
         target.load()

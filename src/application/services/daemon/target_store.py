@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 
 from src.application.services.list_manager.models import FilterRule, PipelineTarget, SourceRef
-from src.infrastructure.client.sources_store import read_catalog, refs_for_target, selection_ids
+from src.infrastructure.client.sources_store import read_catalog, refs_for_target
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,8 @@ class TargetStore:
                 epg_overrides=overrides,
                 disabled_channels=disabled,
                 port=parser.getint(sec, "port", fallback=8080),
+                starting_number=parser.getint(sec, "starting_number",
+                                              fallback=1),
                 source_refs=_refs_for(parser, tid, "m3u"),
                 epg_refs=_refs_for(parser, tid, "epg"),
             )
@@ -80,6 +82,11 @@ class TargetStore:
         self._targets = targets
         self._epg_paths = epg_paths
         self._binds = binds
+
+    @property
+    def path(self) -> Path:
+        """Ruta de config.ini (el servicio la necesita para la cartera)."""
+        return self._path
 
     # -- acceso -------------------------------------------------------------------
 
@@ -110,37 +117,38 @@ class TargetStore:
 
     def save(self, target_id: str, target: PipelineTarget,
              epg_path: str | None = None, bind: str | None = None) -> None:
-        """Inserta o actualiza el target y persiste el fichero."""
-        parser = configparser.ConfigParser()
-        if self._path.exists():
-            parser.read(self._path, encoding="utf-8")
+        """Inserta o actualiza el target y persiste el fichero.
 
-        rules_str = "|".join(r.serialize() for r in target.rules)
-        overrides_str = ";;".join(
-            f"{u}::{c}" for u, c in target.epg_overrides.items()
-        )
-        disabled_str = "||".join(target.disabled_channels)
-        epg_source = target.epg_source_index
-        catalog = read_catalog(parser)
-        parser[f"{_TARGET_PREFIX}{target_id}"] = {
-            "name": target.name,
-            "custom_m3u": str(target.source_index),
-            "custom_epg": str(epg_path or ""),
-            "epg_source": str(epg_source if epg_source is not None else -1),
-            "rules": rules_str,
-            "epg_overrides": overrides_str,
-            "disabled_channels": disabled_str,
-            "port": str(target.port),
-            "bind": str(bind or self.get_bind(target_id) or "127.0.0.1"),
-            "m3u_sources": selection_ids(target.source_refs, catalog),
-            "epg_sources": selection_ids(target.epg_refs, catalog),
-        }
-        with open(self._path, "w", encoding="utf-8") as f:
-            parser.write(f)
+        El formato vive en ``config_store``: aquí solo se adapta el
+        ``PipelineTarget`` a sus primitivos.
+        """
+        from src.infrastructure.client.config_store import update, write_target
+
+        effective_bind = str(bind or self.get_bind(target_id) or "127.0.0.1")
+
+        def mutate(parser) -> None:
+            write_target(
+                parser, target_id,
+                name=target.name,
+                m3u=str(target.source_index),
+                epg_path=str(epg_path or ""),
+                epg_source=target.epg_source_index,
+                rules=target.rules,
+                overrides=target.epg_overrides,
+                disabled=target.disabled_channels,
+                port=target.port,
+                starting_number=target.starting_number,
+                bind=effective_bind,
+                m3u_refs=target.source_refs,
+                epg_refs=target.epg_refs,
+                catalog=read_catalog(parser),
+            )
+
+        update(self._path, mutate)
 
         self._targets[target_id] = target
         self._epg_paths[target_id] = epg_path
-        self._binds[target_id] = str(bind or self.get_bind(target_id) or "127.0.0.1")
+        self._binds[target_id] = effective_bind
 
     def delete(self, target_id: str) -> bool:
         """Elimina el target (cache + sección en fichero). False si no existía."""

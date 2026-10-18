@@ -16,13 +16,22 @@ que una config existente sigue funcionando sin tocarla el usuario.
 import configparser
 import logging
 from pathlib import Path
+from typing import cast
 
+from src.application.services.list_manager.models import SourceRef
 from src.application.services.list_manager.source_catalog import (
     SourceCatalog,
     SourceEntry,
-    new_source_id,
+    SourceKind,
+    SourceType,
 )
-from src.application.services.list_manager.models import SourceRef
+from src.infrastructure.client.config_store import (
+    dump as _dump,
+)
+from src.infrastructure.client.config_store import (
+    update,
+    write_sources,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +80,8 @@ def _read_entry(parser: configparser.ConfigParser, sec: str, sid: str) -> Source
     return SourceEntry(
         id=sid,
         name=parser.get(sec, "name", fallback="").strip() or _name_from_location(location),
-        kind=kind,
-        source_type=source_type,
+        kind=cast(SourceKind, kind),
+        source_type=cast(SourceType, source_type),
         location=location,
         refresh_min=refresh,
         enabled=_parse_bool(parser.get(sec, "enabled", fallback="1")),
@@ -111,16 +120,6 @@ def refs_for_target(parser: configparser.ConfigParser, sec: str,
     return tuple(refs)
 
 
-def selection_ids(refs, catalog: SourceCatalog) -> str:
-    """Serializa refs como ids separados por coma, validando contra la cartera."""
-    ids = []
-    for ref in refs:
-        if catalog.get(ref.id) is not None:
-            ids.append(ref.id)
-        else:
-            logger.warning("Ref %s (%s) sin fila en la cartera: no se persiste",
-                           ref.id, ref.name)
-    return ",".join(ids)
 
 
 def load_catalog(path: Path) -> SourceCatalog:
@@ -142,16 +141,9 @@ def save_catalog(path: Path, catalog: SourceCatalog) -> None:
     """Escribe la cartera, reemplazando por completo las secciones previas.
 
     Las demás secciones (SETTINGS, [DAEMON], listmanager.target.*) se
-    conservan intactas: se lee el fichero, se quitan solo ``source.*`` y se
-    vuelven a escribir las entradas actuales en orden de tabla.
+    conservan intactas: el formato y la escritura viven en ``config_store``.
     """
-    parser = configparser.ConfigParser()
-    if path.exists():
-        parser.read(path, encoding="utf-8")
-    for sec in [s for s in parser.sections() if s.startswith(_SOURCE_PREFIX)]:
-        parser.remove_section(sec)
-    _write_sections(parser, catalog)
-    _dump(parser, path)
+    update(path, lambda parser: write_sources(parser, catalog))
 
 
 def load_target_selections(path: Path) -> dict[str, dict[str, list[str]]]:
@@ -175,25 +167,6 @@ def _split_ids(raw: str) -> list[str]:
     return [p.strip() for p in (raw or "").split(",") if p.strip()]
 
 
-def _write_sections(parser: configparser.ConfigParser, catalog: SourceCatalog) -> None:
-    """Sincroniza las secciones ``source.*`` del parser con la cartera."""
-    for sec in [s for s in parser.sections() if s.startswith(_SOURCE_PREFIX)]:
-        parser.remove_section(sec)
-    for entry in catalog.all():
-        sec = f"{_SOURCE_PREFIX}{entry.id}"
-        parser.add_section(sec)
-        parser.set(sec, "name", entry.name)
-        parser.set(sec, "kind", entry.kind)
-        parser.set(sec, "source_type", entry.source_type)
-        parser.set(sec, "location", entry.location)
-        parser.set(sec, "refresh_min", str(entry.refresh_min))
-        parser.set(sec, "enabled", "1" if entry.enabled else "0")
-
-
-def _dump(parser: configparser.ConfigParser, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        parser.write(fh)
 
 
 def _ensure_source(catalog: SourceCatalog, kind: str, location: str) -> str:
@@ -207,9 +180,10 @@ def _ensure_source(catalog: SourceCatalog, kind: str, location: str) -> str:
     if existing is not None:
         return existing.id
     source_type = "url" if _looks_like_url(location) else "file"
-    entry = catalog.add_new(name=_name_from_location(location), kind=kind,
-                            source_type=source_type, location=location,
-                            refresh_min=0)
+    entry = catalog.add_new(
+        name=_name_from_location(location), kind=cast(SourceKind, kind),
+        source_type=cast(SourceType, source_type), location=location,
+        refresh_min=0)
     return entry.id
 
 
@@ -248,6 +222,6 @@ def migrate_legacy_sources(path: Path) -> SourceCatalog:
                         field, sec, sid)
 
     if changed:
-        _write_sections(parser, catalog)
+        write_sources(parser, catalog)
         _dump(parser, path)
     return catalog

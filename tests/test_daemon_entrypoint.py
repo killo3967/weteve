@@ -11,12 +11,17 @@ from src.application.services.daemon.config import DaemonConfig
 
 
 class _FakeServer:
-    """Sustituto de ControlApiServer / McpHttpTransport para tests."""
+    """Sustituto del servidor único del demonio para tests."""
 
     def __init__(self, *args, **kwargs) -> None:
         self.started = False
         self.stopped = False
+        self.port = 34400
         self.url_base = "http://fake"
+
+    @property
+    def is_running(self) -> bool:
+        return self.started
 
     def start(self) -> bool:
         self.started = True
@@ -42,8 +47,8 @@ class TestBuildDaemon:
         d = wired
         assert d["supervisor"] is not None
         assert d["store"] is not None
-        assert d["control_api"].started is True
-        assert d["mcp_transport"].started is True
+        assert d["server"].is_running is True
+        assert d["control_api"] is not None  # handler sin socket
         assert d["running"]["flag"] is True
 
     def test_tools_registered(self, wired) -> None:
@@ -77,7 +82,6 @@ class TestSetupLogging:
 
     def test_configura_console_y_file(self, tmp_path) -> None:
         import logging
-        from logging.handlers import RotatingFileHandler
 
         log_path = tmp_path / "weteve-daemon.log"
         daemon_mod.setup_logging(log_path)
@@ -133,3 +137,31 @@ class TestSetupLogging:
             for h in saved_handlers:
                 root.addHandler(h)
             root.setLevel(saved_level)
+
+
+class TestTokenObligatorioFueraDeLoopback:
+    def test_sin_token_y_bind_publico_no_arranca(self, tmp_path):
+        import pytest as _pytest
+
+        import daemon
+
+        cfg = tmp_path / "config.ini"
+        cfg.write_text("[DAEMON]\ncontrol_host = 0.0.0.0\n"
+                       "control_port = 0\nmcp_port = 0\nmcp_token = \n",
+                       encoding="utf-8")
+        with _pytest.raises(RuntimeError, match="mcp_token obligatorio"):
+            daemon.build_daemon(cfg)
+
+    def test_con_token_si_arranca(self, tmp_path):
+        import daemon
+
+        cfg = tmp_path / "config.ini"
+        cfg.write_text("[DAEMON]\ncontrol_host = 0.0.0.0\n"
+                       "control_port = 0\nmcp_port = 0\nmcp_token = tk\n",
+                       encoding="utf-8")
+        d = daemon.build_daemon(cfg)
+        try:
+            assert d["server"].is_running
+        finally:
+            d["supervisor"].stop_all()
+            d["server"].stop()

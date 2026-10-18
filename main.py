@@ -10,9 +10,9 @@ import logging
 import sys
 from pathlib import Path
 
-from PyQt6.QtWidgets import QApplication, QDialog
+from PyQt6.QtWidgets import QApplication
 
-from src.infrastructure.client.persistencia import load_config, save_config
+from src.infrastructure.client.persistencia import load_config
 from src.infrastructure.ui.list_manager_dialog import ListManagerDialog
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -52,20 +52,10 @@ def main() -> int:
     target_cfg.setdefault("target_id", "0")
     dialog = ListManagerDialog(None, config=target_cfg)
     dialog.setWindowTitle("weteve — Gestor de listas")
-    result = dialog.exec()
-
-    if result == QDialog.DialogCode.Accepted:
-        new_config = dialog.get_target_config()
-        if not new_config["name"]:
-            new_config["name"] = f"Target {len(targets) + 1}"
-        # get_target_config() devuelve la config del target, con rules ya
-        # serializables. Se persiste en config.ini para la próxima ejecución.
-        logger.info("Target guardado: %s (puerto %s)", new_config["name"], new_config.get("port"))
-        # El panel «Demonio» ya persiste vía TargetStore; aquí solo se
-        # mantiene el formato legacy por compatibilidad.
-        targets[0] = new_config
-        save_config(CONFIG_FILE, {"targets": targets})
-
+    dialog.exec()
+    # Persistencia: la hace el diálogo contra la API del demonio (escritor
+    # único). Aquí no se reescribe config.ini para no pisar lo que escribió el
+    # demonio ni los cambios hechos por MCP mientras la ventana estaba abierta.
     logger.info("weteve finalizado")
     return 0
 

@@ -1,4 +1,5 @@
-"""Pestañas del diálogo: Listas IPTV / Listas EPG / Filtros / Mapeado / Configuración / Logs."""
+"""Pestañas del diálogo: Estado / Listas IPTV / Filtros iptv / Listas EPG /
+Mapeado IPTV <-> EPG / Configuración / Logs."""
 from pathlib import Path
 
 import pytest
@@ -16,13 +17,13 @@ def dialog(qtbot):
 class TestTabs:
     def test_tab_widget_existe(self, dialog):
         assert dialog.tabs is not None
-        assert dialog.tabs.count() == 6
+        assert dialog.tabs.count() == 7
 
     def test_titulos_de_pestanas(self, dialog):
         titles = [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())]
         assert titles == [
-            "Listas IPTV", "Listas EPG", "Filtros", "Mapeado EPG",
-            "Configuración", "Logs",
+            "Estado", "Listas IPTV", "Filtros iptv", "Listas EPG",
+            "Mapeado IPTV <-> EPG", "Configuración", "Logs",
         ]
 
     def test_widgets_dentro_de_pestanas(self, dialog):
@@ -35,7 +36,7 @@ class TestTabs:
                 p = p.parent()
             return False
 
-        assert _ancestor(dialog.name_edit, dialog.tab_sources)
+        assert _ancestor(dialog.name_edit, dialog.tab_config)
         assert _ancestor(dialog.rules_widget, dialog.tab_filters)
         assert _ancestor(dialog.epg_mapping, dialog.tab_mapping)
 
@@ -117,6 +118,48 @@ class TestEpgMappingTable:
         w.set_epg(self._epg())
         w.load_unmatched(self._channels(), {})
         assert w.get_disabled() == ()
+
+    @staticmethod
+    def _epg_con_listas():
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            channel_names={"es.la1": "La 1", "es.clan": "Clan"},
+            epg_lists={"es.la1": ["Doble_M"], "es.clan": ["Doble_M", "Koala"]})
+
+    def test_desplegable_dice_de_que_guia_viene_cada_canal(self, qtbot, dialog):
+        """Con varias guías el nombre del canal solo no identifica la fuente."""
+        w = self._widget(qtbot, dialog)
+        w.set_epg(self._epg_con_listas())
+        w.load_unmatched(self._channels(), {})
+        combo = w.table.cellWidget(0, w.COL_EPG)
+        texts = [combo._combo.itemText(i) for i in range(combo._combo.count())]
+        assert "La 1 · Doble_M" in texts
+        assert "Clan · Doble_M + Koala" in texts
+
+    def test_override_persistido_se_ve_con_su_lista(self, qtbot, dialog):
+        w = self._widget(qtbot, dialog)
+        w.set_epg(self._epg_con_listas())
+        w.load_unmatched(self._channels(), {"http://s/raro": "es.clan"})
+        combo = w.table.cellWidget(1, w.COL_EPG)
+        assert combo.current_value() == "Clan · Doble_M + Koala"
+
+    def test_el_sufijo_no_rompe_la_asignacion(self, qtbot, dialog):
+        """La etiqueta visible lleva sufijo; el fichero guarda el channel-id."""
+        w = self._widget(qtbot, dialog)
+        w.set_epg(self._epg_con_listas())
+        w.load_unmatched(self._channels(), {})
+        combo = w.table.cellWidget(0, w.COL_EPG)
+        combo._combo.setCurrentText("Clan · Doble_M + Koala")
+        assert w.get_overrides() == {"http://s/la1": "es.clan"}
+
+    def test_sin_datos_de_lista_no_hay_sufijo(self, qtbot, dialog):
+        """Fuente de una sola guía sin nombre: etiqueta limpia como antes."""
+        w = self._widget(qtbot, dialog)
+        w.set_epg(self._epg())
+        w.load_unmatched(self._channels(), {})
+        combo = w.table.cellWidget(0, w.COL_EPG)
+        texts = [combo._combo.itemText(i) for i in range(combo._combo.count())]
+        assert not any(" · " in t for t in texts)
 
     def test_desactivado_persistido_sigue_listado(self, qtbot, dialog):
         """Un canal desactivado sigue en la tabla para poder reactivarlo."""

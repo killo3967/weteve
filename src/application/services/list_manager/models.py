@@ -96,7 +96,7 @@ class PipelineTarget:
     """Un objetivo de pipeline: fuente + filtros + EPG + servicio."""
 
     name: str
-    source_index: int
+    source_index: int | str = 0
     rules: tuple[FilterRule, ...] = ()
     epg_source_index: int | None = None
     # canal (clave estable, p. ej. url) -> tvg-id del XMLTV (override manual)

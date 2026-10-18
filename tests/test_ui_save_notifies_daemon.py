@@ -1,34 +1,8 @@
-"""Guardar notifica al daemon: si no se le avisa sigue sirviendo filtros viejos."""
+"""Guardar escribe por la API del demonio (un solo lote + un run)."""
 import pytest
 
-from src.application.services.daemon.supervisor import TargetSupervisor
-from src.application.services.daemon.target_store import TargetStore
 from src.application.services.list_manager.models import FilterRule
-from src.infrastructure.ui.daemon_panel import DaemonPanel
 from src.infrastructure.ui.list_manager_dialog import ListManagerDialog
-
-
-class _FakeClient:
-    def __init__(self, alive=True, reload_ok=True):
-        self.alive = alive
-        self.reload_ok = reload_ok
-        self.reload_calls: list[str] = []
-        self.shutdown_calls = 0
-        self.base_url = "http://127.0.0.1:34400"
-
-    def ping(self):
-        return self.alive
-
-    def status(self):
-        return None if not self.alive else {"targets": {}}
-
-    def reload_target(self, target_id):
-        self.reload_calls.append(target_id)
-        return self.reload_ok
-
-    def shutdown(self):
-        self.shutdown_calls += 1
-        return self.alive
 
 
 @pytest.fixture()
@@ -41,24 +15,7 @@ def cfg_file(tmp_path):
     return cfg
 
 
-class TestPanelNotify:
-    def test_notifica_un_daemon_vivo(self, qtbot, cfg_file):
-        client = _FakeClient()
-        panel = DaemonPanel(client=client, target_store=TargetStore(cfg_file),
-                            config_path=cfg_file)
-        qtbot.addWidget(panel)
-        assert panel.notify_daemon() is True
-        assert client.reload_calls == ["0"]
-
-    def test_sin_daemon_no_notifica(self, qtbot, cfg_file):
-        client = _FakeClient(alive=False)
-        panel = DaemonPanel(client=client, config_path=cfg_file)
-        qtbot.addWidget(panel)
-        assert panel.notify_daemon() is False
-        assert client.reload_calls == []
-
-
-class TestDialogSaveNotifies:
+class TestDialogSaveViaApi:
     @pytest.fixture()
     def dialog_with_daemon(self, qtbot, cfg_file):
         d = ListManagerDialog(None, config={
@@ -66,28 +23,32 @@ class TestDialogSaveNotifies:
             "rules": [FilterRule.parse("group-title:Spain:0")], "port": 8080,
         })
         qtbot.addWidget(d)
-        client = _FakeClient()
-        d.daemon_panel._client = client
-        return d, client
+        d._config_watch.stop()
+        return d
 
-    def test_guardar_pide_reload(self, dialog_with_daemon, qtbot):
+    def test_guardar_ejecuta_el_pipeline_una_vez(self, dialog_with_daemon,
+                                                 fake_api, wait_save):
         from PyQt6.QtWidgets import QDialogButtonBox
-        d, client = dialog_with_daemon
+
+        d = dialog_with_daemon
         d.name_edit.setText("renovada")
         bb = d.findChildren(QDialogButtonBox)[0]
         bb.button(QDialogButtonBox.StandardButton.Save).click()
-        # el aviso al demonio va en segundo plano: esperar su callback
-        qtbot.waitUntil(lambda: client.reload_calls == ["0"], timeout=3000)
-        qtbot.waitUntil(
-            lambda: "demonio" in d.result_label.text().lower(), timeout=3000)
+        wait_save(d)
+        assert [c[0] for c in fake_api.calls].count("run") == 1
+        assert "Guardado" in d.result_label.text()
 
-    def test_guardar_funciona_sin_daemon(self, dialog_with_daemon, qtbot):
-        from PyQt6.QtWidgets import QDialogButtonBox
-        d, client = dialog_with_daemon
-        client.alive = False
+    def test_sin_daemon_no_se_guarda_nada(self, dialog_with_daemon, fake_api,
+                                          monkeypatch, wait_save):
+        from PyQt6.QtWidgets import QDialogButtonBox, QMessageBox
+
+        avisos: list = []
+        monkeypatch.setattr(QMessageBox, "warning",
+                            lambda *a, **k: avisos.append(a))
+        d = dialog_with_daemon
+        fake_api.down = True
         bb = d.findChildren(QDialogButtonBox)[0]
         bb.button(QDialogButtonBox.StandardButton.Save).click()
-        qtbot.waitUntil(
-            lambda: "No se notificó al demonio" in d.result_label.text(),
-            timeout=3000)
-        assert client.reload_calls == []
+        wait_save(d)
+        assert avisos
+        assert not any(c[0] == "run" for c in fake_api.calls)

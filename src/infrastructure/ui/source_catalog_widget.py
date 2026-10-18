@@ -6,7 +6,7 @@ cada una solo muestra las filas de su tipo (m3u / epg).
 
 import logging
 
-from PyQt6.QtCore import QDir, QObject, Qt
+from PyQt6.QtCore import QDir, QObject, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtCore import pyqtSignal
 
 from src.application.services.list_manager.source_catalog import (
     SourceCatalog,
@@ -165,6 +164,16 @@ class SourceCatalogWidget(QWidget):
         self.table.setRowCount(len(entries))
         for row, e in enumerate(entries):
             self._fill_row(row, e)
+
+    def set_catalog(self, catalog: SourceCatalog) -> None:
+        """Reemplaza la cartera y repuebla la tabla.
+
+        Lo usa el diálogo cuando config.ini cambia por fuera (daemon o sus
+        herramientas MCP): las filas que se ven son las del fichero, no las
+        que la ventana leyó al abrirse.
+        """
+        self._catalog = catalog
+        self.reload()
 
     def _fill_row(self, row: int, e) -> None:
         self.table.setItem(row, 0, QTableWidgetItem(e.name))

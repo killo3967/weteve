@@ -10,6 +10,7 @@ from src.infrastructure.adapters.file_m3u_repository import (
     normalize_spacing,
 )
 
+
 def _channels(m3u_text: str):
     repo = FileM3URepository()
     lines = m3u_text.splitlines()

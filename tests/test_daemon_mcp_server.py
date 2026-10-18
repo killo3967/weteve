@@ -4,7 +4,6 @@ Protocolo testeado directamente sobre ``handle_request`` (determinista); un
 único test de humo HTTP valida transporte y cabeceras de sesión.
 """
 
-import json
 
 import pytest
 

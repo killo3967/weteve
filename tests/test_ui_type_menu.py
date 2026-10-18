@@ -12,7 +12,6 @@ from src.infrastructure.ui.source_catalog_widget import SourceCatalogWidget
 
 pytest.importorskip("PyQt6")
 
-from PyQt6.QtWidgets import QMenu  # noqa: E402
 
 
 @pytest.fixture

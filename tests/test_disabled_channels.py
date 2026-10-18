@@ -1,14 +1,10 @@
 """Tests: disabled_channels en modelo, pipeline y persistencia."""
 
-import tempfile
 from pathlib import Path
-
-import pytest
 
 from src.application.services.daemon.target_store import TargetStore
 from src.application.services.list_manager.models import (
     PipelineTarget,
-    SourceRef,
 )
 
 

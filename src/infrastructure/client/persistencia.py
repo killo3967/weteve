@@ -1,11 +1,15 @@
-"""Persistencia de config.ini para weteve (carga y guardado de targets)."""
+"""Lectura de config.ini para weteve (``load_config``).
+
+La escritura vive en ``config_store`` y la usa el demonio: la UI ya no
+reescribe el fichero (solo ``[DAEMON]``, que el demonio lee al arrancar).
+"""
 
 import configparser
 import logging
 from pathlib import Path
 
-from src.application.services.list_manager.models import FilterRule, SourceRef
-from src.infrastructure.client.sources_store import refs_for_target, selection_ids, read_catalog
+from src.application.services.list_manager.models import FilterRule
+from src.infrastructure.client.sources_store import refs_for_target
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +49,8 @@ def load_config(path: Path) -> dict:
             "epg_overrides": epg_overrides,
             "disabled_channels": list(disabled_channels),
             "port": parser.getint(sec, "port", fallback=8080),
+            "starting_number": parser.getint(sec, "starting_number",
+                                             fallback=1),
             "bind": parser.get(sec, "bind", fallback="127.0.0.1"),
             "m3u_refs": list(refs_for_target(parser, sec, "m3u")),
             "epg_refs": list(refs_for_target(parser, sec, "epg")),
@@ -53,40 +59,5 @@ def load_config(path: Path) -> dict:
     return {"targets": targets}
 
 
-def save_config(path: Path, config: dict) -> None:
-    parser = configparser.ConfigParser()
-    if path.exists():
-        parser.read(path, encoding="utf-8")
-
-    for idx, tgt in config.get("targets", {}).items():
-        rules = tgt.get("rules", [])
-        rules_str = "|".join(
-            r.serialize() if isinstance(r, FilterRule) else str(r) for r in rules
-        )
-        overrides = tgt.get("epg_overrides", {})
-        overrides_str = ";;".join(f"{u}::{c}" for u, c in overrides.items())
-        disabled_list = tgt.get("disabled_channels", []) or []
-        disabled_str = "||".join(
-            u for u in (str(x) for x in disabled_list) if u
-        )
-        epg_source = tgt.get("epg_source")
-        catalog = read_catalog(parser)
-        parser[f"listmanager.target.{idx}"] = {
-            "name": tgt.get("name", f"Target {idx + 1}"),
-            "custom_m3u": str(tgt.get("custom_m3u", "")),
-            "custom_epg": str(tgt.get("custom_epg", "")),
-            "epg_source": str(epg_source if epg_source is not None else -1),
-            "rules": rules_str,
-            "epg_overrides": overrides_str,
-            "disabled_channels": disabled_str,
-            "port": str(tgt.get("port", 8080)),
-            "bind": str(tgt.get("bind", "127.0.0.1")),
-            "m3u_sources": selection_ids(tgt.get("m3u_refs", []), catalog),
-            "epg_sources": selection_ids(tgt.get("epg_refs", []), catalog),
-        }
-
-    with open(path, "w", encoding="utf-8") as f:
-        parser.write(f)
-    logger.info("Configuración guardada en %s", path)
 
 

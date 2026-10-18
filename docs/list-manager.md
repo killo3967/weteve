@@ -4,6 +4,24 @@
 > Espejo de recuperación en Engram: topic `odd/list-manager/tasks`.
 > Estado: **IMPLEMENTADO** (2026-10-08). Pasos 1-7 del plan completos; smoke test HTTP verificado en subproceso (m3u 200, epg 200, 404 en rutas desconocidas). Pendiente: validación manual del usuario con una lista real y VLC.
 
+## Estado actual (post-migración)
+
+La arquitectura cambió: **el demonio es el motor y la UI es un frontend**.
+
+- El pipeline, la cartera de fuentes y el servidor de playlist viven en el
+  demonio (`TargetService` + `TargetSupervisor`); la UI no ejecuta nada de eso.
+- La UI habla por **REST v1** (`/api/v1`, mismo puerto que MCP) y escribe por
+  ahí: `PUT /sources`, `PUT /targets/{id}/sources|settings|rules|mappings|disabled`
+  y un único `POST /targets/{id}/run` al final del lote.
+- Un solo serializador de `config.ini` (`config_store`); el fichero lo escribe
+  el demonio. `[DAEMON]` (puertos, token, arranque/parada) se escribe desde la UI
+  porque el demonio solo lo lee al arrancar.
+- Detalle operativo y de protocolo: `docs/daemon.md`.
+
+Lo que sigue es la especificación original (2026-10-08) y conserva valor como
+contrato funcional (filtros, matching EPG, mini-web); las partes que hablaban de
+un "asistente de pipeline" dentro del diálogo están superadas.
+
 ## Objective
 
 Nuevo submenú **"Gestor de listas"** bajo "Mis Listas" que integra la funcionalidad
@@ -38,9 +56,9 @@ qué guía.
 ## Scope
 
 **Incluye:**
-- Submenú "Gestor de listas" con: editor de canal/objetivo (nuevo/editar/eliminar),
-  asistente de pipeline en 3 pasos (Fuente → Filtros → EPG) y diálogo "Iniciar/Parar
-  servicio web".
+- Diálogo "Gestor de listas" con pestañas: Listas IPTV, Listas EPG, Filtros (+ vista
+  previa), Mapeado EPG, Configuración y Logs. El servicio web se arranca y se para
+  desde Configuración, pero **lo sirve el demonio**.
 - Pipeline de procesamiento (Qt-free, testeable): parseo M3U → filtros → asociación
   EPG → generación de salida.
 - Motor de filtros: la **UI** expone reglas simples (incluir/excluir por texto sobre
@@ -89,7 +107,7 @@ src/application/services/list_manager/
 
 src/infrastructure/
 ├── web/playlist_server.py   # http.server en hilo daemon, localhost-only
-└── ui/list_manager_dialog.py# wizard 3 pasos + editor EPG + control servicio
+└── ui/list_manager_dialog.py# frontend: pestañas + cliente de la API del demonio
 ```
 
 Reutiliza sin modificar: `FileM3URepository._parse_m3u`, `XMLTVRepository.load_epg`,

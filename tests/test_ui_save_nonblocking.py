@@ -1,12 +1,9 @@
-"""Guardar no debe bloquear la UI esperando al demonio.
+"""El guardado es un lote: recargas diferidas y UNA sola ejecución.
 
-notify_daemon hace ping HTTP con timeout de 5 s; en el hilo de la UI
-congela el diálogo cuando el demonio no está. La notificación es
-best-effort: se ejecuta en segundo plano y el mensaje de resultado se
-actualiza al terminar.
+Antes cada cambio del diálogo reejecutaba el pipeline (3-8 s con listas
+grandes). Ahora todas las escrituras van con ``reload: false`` y el pipeline se
+ejecuta una vez al final con ``POST /run``.
 """
-
-import time
 
 import pytest
 
@@ -20,58 +17,101 @@ def dialog(qtbot, tmp_path):
     cfg = tmp_path / "config.ini"
     cfg.write_text(
         "[DAEMON]\ncontrol_port = 32123\n\n[listmanager.target.0]\n"
-        "name = x\nport = 8080\n",
-        encoding="utf-8",
-    )
+        "name = x\nport = 8080\n", encoding="utf-8")
     d = ListManagerDialog(None, config={
-        "target_id": "0", "_config_path": cfg, "name": "x", "port": 8080,
-    })
+        "target_id": "0", "_config_path": cfg, "name": "x", "port": 8080})
     qtbot.addWidget(d)
+    d._config_watch.stop()
     return d
 
 
-def _save(dialog):
+def _save(dialog) -> None:
     from PyQt6.QtWidgets import QDialogButtonBox
     bb = dialog.findChildren(QDialogButtonBox)[0]
     bb.button(QDialogButtonBox.StandardButton.Save).click()
 
 
-class TestGuardarSinBloquear:
-    def test_guardar_no_llama_notify_daemon_en_el_hilo_de_ui(
-            self, dialog, monkeypatch):
-        """notify_daemon debe ejecutarse fuera del hilo de la UI."""
-        calls = []
-
-        def slow_notify():
-            calls.append(("thread", __import__("threading").current_thread()))
-            time.sleep(0.05)
-            return False
-
-        monkeypatch.setattr(dialog.daemon_panel, "notify_daemon", slow_notify)
+class TestGuardarEnLote:
+    def test_una_sola_ejecucion_del_pipeline(self, dialog, fake_api,
+                                             wait_save):
         _save(dialog)
-        # click() retorna sin haber esperado al notify (o ya terminó);
-        # en cualquier caso el notify no corrió en el hilo principal
-        main = __import__("threading").current_thread()
-        if calls:
-            assert calls[0][1] is not main
+        wait_save(dialog)
+        assert [c[0] for c in fake_api.calls].count("run") == 1
 
-    def test_guardar_actualiza_mensaje_tras_notificar(
-            self, dialog, qtbot, monkeypatch):
-        monkeypatch.setattr(dialog.daemon_panel, "notify_daemon",
-                            lambda: True)
+    def test_todas_las_escrituras_difieren_la_recarga(self, dialog, fake_api,
+                                                      wait_save):
         _save(dialog)
-        qtbot.waitUntil(
-            lambda: "aviso" in dialog.result_label.text().lower()
-            or "avisado" in dialog.result_label.text().lower(), timeout=3000)
-        assert "recargando" in dialog.result_label.text().lower()
+        wait_save(dialog)
+        puts = [c[2] for c in fake_api.calls if c[0] == "put"]
+        assert puts and all(p.get("reload") is False for p in puts)
 
-    def test_guardar_persiste_igual_con_notificacion_en_segundo_plano(
-            self, dialog, qtbot, monkeypatch):
-        monkeypatch.setattr(dialog.daemon_panel, "notify_daemon",
-                            lambda: False)
+    def test_mensaje_final_con_los_canales_servidos(self, dialog, fake_api,
+                                                    wait_save):
+        fake_api.served = 7
         _save(dialog)
-        qtbot.waitUntil(
-            lambda: "guardada" in dialog.result_label.text().lower(),
-            timeout=3000)
-        texto = dialog._config["_config_path"].read_text(encoding="utf-8")
-        assert "name = x" in texto
+        wait_save(dialog)
+        assert "7 canales servidos" in dialog.result_label.text()
+
+    def test_sin_demonio_avisa_y_no_escribe(self, dialog, fake_api,
+                                            monkeypatch, wait_save):
+        from PyQt6.QtWidgets import QMessageBox
+
+        avisos = []
+        monkeypatch.setattr(QMessageBox, "warning",
+                            lambda *a, **k: avisos.append(a))
+        fake_api.down = True
+        _save(dialog)
+        wait_save(dialog)
+        assert avisos
+        assert not any(c[0] in ("put", "sources", "target_sources")
+                       for c in fake_api.calls)
+
+
+class TestGuardadoNoBloqueaLaVentana:
+    """El lote HTTP y el pipeline van en un hilo: la GUI no se congela."""
+
+    def test_guardar_retorna_antes_del_pipeline(self, dialog, fake_api,
+                                                wait_save):
+        import time
+
+        from PyQt6.QtWidgets import QDialogButtonBox
+
+        lento = fake_api.run
+
+        def run_lento(target_id):
+            time.sleep(0.4)          # simula el pipeline de varios segundos
+            return lento(target_id)
+
+        fake_api.run = run_lento
+        bb = dialog.findChildren(QDialogButtonBox)[0]
+        t0 = time.monotonic()
+        bb.button(QDialogButtonBox.StandardButton.Save).click()
+        transcurrido = time.monotonic() - t0
+        assert transcurrido < 0.2                 # no esperó al pipeline
+        assert dialog.save_in_progress()
+        assert dialog._save_button.isEnabled() is False
+        assert "Guardando" in dialog.result_label.text()
+
+        wait_save(dialog)
+        assert dialog._save_button.isEnabled() is True
+        assert "Guardado" in dialog.result_label.text()
+
+    def test_doble_click_no_encola_dos_guardados(self, dialog, fake_api,
+                                                 wait_save):
+        import time
+
+        from PyQt6.QtWidgets import QDialogButtonBox
+
+        lento = fake_api.run
+
+        def run_lento(target_id):
+            time.sleep(0.2)
+            return lento(target_id)
+
+        fake_api.run = run_lento
+        bb = dialog.findChildren(QDialogButtonBox)[0]
+        boton = bb.button(QDialogButtonBox.StandardButton.Save)
+        boton.click()
+        boton.click()
+        wait_save(dialog)
+        assert [c[0] for c in fake_api.calls].count("run") == 1

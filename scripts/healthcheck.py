@@ -7,7 +7,8 @@ Uso:
 
 Comprobaciones (cada una OK / FAIL / SKIP, nunca lanza excepción):
   1. Daemon: API de control responde /health y MCP responde initialize.
-  2. MCP: tools/list devuelve las 23 herramientas esperadas.
+  2. MCP: tools/list contiene todas las herramientas de EXPECTED_TOOLS
+     (las extra se informan, no fallan).
   3. Targets: get_status de cada target (sirviendo / error / puerto).
   4. Puertos: el puerto de cada target sirviendo acepta conexiones y sirve
      /playlist.m3u con cabecera #EXTM3U (y /epg.xml con <tv> si hay EPG).
@@ -43,7 +44,7 @@ EXPECTED_TOOLS = {
     "suggest_epg_matches",
     "add_source", "list_sources", "update_source", "remove_source",
     "set_target_sources",
-    "create_filter", "delete_filter", "modify_mapping",
+    "create_filter", "delete_filter", "modify_mapping", "modify_mappings",
 }
 
 _results: list[tuple[str, str, str]] = []  # (estado, sección, detalle)
@@ -175,14 +176,19 @@ def _mcp_call(host: str, port: int, method: str, params: dict | None,
 
 
 def check_daemon(cfg_path: Path) -> dict:
-    """Devuelve {'mcp': (host, port, session), 'targets': {...}} o {}."""
-    section("Daemon (control + MCP)")
+    """Devuelve {'host', 'port', 'session', 'targets'} del daemon vivo."""
+    section("Daemon (un solo puerto)")
     parser = configparser.ConfigParser()
     parser.read(cfg_path, encoding="utf-8")
     host = parser.get("DAEMON", "control_host", fallback="127.0.0.1")
+    # Todo (control, REST, MCP y playlists) se sirve en control_port.
     cport = parser.getint("DAEMON", "control_port", fallback=34400)
-    mport = parser.getint("DAEMON", "mcp_port", fallback=34401)
+    mport = cport
     token = parser.get("DAEMON", "mcp_token", fallback="")
+    legacy = parser.getint("DAEMON", "mcp_port", fallback=cport)
+    if legacy != cport:
+        report("WARN" if False else "OK", "puerto MCP",
+               f"mcp_port={legacy} se ignora: todo va por {cport}")
 
     status: dict = {}
     try:
@@ -255,23 +261,24 @@ def check_daemon(cfg_path: Path) -> dict:
         except (OSError, KeyError, json.JSONDecodeError) as e:
             report("FAIL", "targets", f"get_status: {e}")
 
-    return {"host": host, "mcp_port": mport, "session": session,
+    return {"host": host, "port": cport, "session": session,
             "token": token, "targets": status.get("targets", {}),
             "tools_ok": tools_ok}
 
 
 def check_serving(info: dict) -> None:
-    """Puertos de targets sirviendo: playlist y EPG por HTTP real."""
+    """Playlist y EPG de cada target por HTTP real (todo en el puerto único)."""
     section("Servicio (playlist/EPG servidos)")
     serving = {tid: t for tid, t in info.get("targets", {}).items()
-               if t.get("running") and t.get("port")}
+               if t.get("running")}
     if not serving:
         report("SKIP", "servicio", "ningún target sirviendo")
         return
     host = info.get("host", "127.0.0.1")
+    port = info.get("port") or 0
     for tid, t in serving.items():
-        port = t["port"]
         name = t.get("name", tid)
+        base = f"http://{host}:{port}/weteve/{tid}"
         # puerto abierto
         s = socket.socket()
         s.settimeout(3)
@@ -288,7 +295,7 @@ def check_serving(info: dict) -> None:
         report("OK", f"puerto {name}", f":{port} abierto")
         # playlist
         try:
-            code, body = http_get(f"http://{host}:{port}/playlist.m3u")
+            code, body = http_get(f"{base}/playlist.m3u")
             reason = check_m3u_bytes(body, name) if code == 200 else f"HTTP {code}"
             if reason:
                 report("FAIL", f"playlist {name}", reason)
@@ -296,12 +303,12 @@ def check_serving(info: dict) -> None:
                 n = sum(1 for l in body.decode("utf-8", "replace").splitlines()
                         if l.startswith("#EXTINF"))
                 report("OK", f"playlist {name}",
-                       f"http://{host}:{port}/playlist.m3u ({n} canales)")
+                       f"{base}/playlist.m3u ({n} canales)")
         except OSError as e:
             report("FAIL", f"playlist {name}", str(e))
         # epg (el daemon expone /epg.xml aunque esté vacío)
         try:
-            code, body = http_get(f"http://{host}:{port}/epg.xml")
+            code, body = http_get(f"{base}/epg.xml")
             if code != 200:
                 report("SKIP", f"epg {name}", f"HTTP {code} (target sin EPG)")
             elif not body.strip():
@@ -311,8 +318,7 @@ def check_serving(info: dict) -> None:
                 if reason:
                     report("FAIL", f"epg {name}", reason)
                 else:
-                    report("OK", f"epg {name}",
-                           f"http://{host}:{port}/epg.xml válido")
+                    report("OK", f"epg {name}", f"{base}/epg.xml válido")
         except OSError as e:
             report("SKIP", f"epg {name}", f"no accesible: {e}")
 

@@ -101,17 +101,28 @@ Una vez aceptado el wizard, el servidor sirve en `http://127.0.0.1:<port>`:
 - `/playlist.m3u` — la lista filtrada y mapeada
 - `/epg.xml` — la guía EPG asociada
 
-## Tests
+## Calidad
+
+La configuración de las herramientas vive en `pyproject.toml` (ruff, mypy y
+pytest; no quedan `pytest.ini` ni `setup.cfg`):
 
 ```powershell
-.venv\Scripts\activate
-pytest tests/ -q
+.venv\Scriptsctivate
+ruff check .          # lint (ruleset fijado en [tool.ruff])
+mypy                  # tipos ([tool.mypy]: files, explicit_package_bases)
+pytest -q             # suite completa (excluye los marcados network)
+pytest -m network -q  # los 6 que salen a internet y leen las fuentes URL
 ```
 
-Nota: los tests E2E HTTP (`test_list_manager_server.py::TestHttpEndToEnd`)
-pueden fallar con `WinError 10054` si un filtro de red (Adguard/WFP) está
-inyectando resets en loopback. Es ambiental, no de código: los tests unitarios
-(route + sockets crudos) y el resto de la suite son estables.
+Los e2e del daemon (`tests/test_daemon_e2e_*.py`) arrancan un daemon real con
+puertos efímeros y las fixtures M3U/XMLTV: no tocan tu `config.ini` ni necesitan
+red. `.github/workflows/ci.yml` ejecuta ruff, mypy, compileall y pytest en
+Windows/Python 3.11.
+
+## Documentación
+
+- `docs/diataxis/` — **documentación canónica**: puesta en marcha, API,
+  configuración, arquitectura y cómo trabajar en el proyecto.
 
 ## Documentación heredada
 

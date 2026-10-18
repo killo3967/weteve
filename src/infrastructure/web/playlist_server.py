@@ -14,6 +14,7 @@ registran a INFO mediante ``http_common.AccessLogMixin``.
 
 import logging
 import socket
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from src.infrastructure.web.http_common import AccessLogMixin, NoReuseServer
@@ -168,5 +169,9 @@ class PlaylistServer:
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
+                # Cerrar con datos recién escritos da RST intermitente en el
+                # loopback de Windows (~50% medido): el reproductor vería
+                # ConnectionResetError. 20 ms de margen lo eliminan.
+                time.sleep(0.02)
 
         return Handler

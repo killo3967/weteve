@@ -40,9 +40,12 @@ class _RecordingSupervisor(TargetSupervisor):
         self.calls.append((target_id, target, epg_path))
         return True
 
-    def start_target(self, target_id, target, epg_path=None):
+    def start_target(self, target_id, target, epg_path=None, bind=None):
         self.calls.append((target_id, target, epg_path))
         return True
+
+    def metrics(self, target_id):
+        return {"total_input": 1, "filtered_count": 1, "unmatched_count": 0}
 
     def stop_target(self, target_id):
         return True

@@ -126,7 +126,7 @@ class XMLTVRepository(IEPGRepository):
         channel_names = {}
         try:
             root = ET.fromstring(content)
-            
+
             # 1. Mapear IDs de canales a nombres
             for chan_elem in root.findall('channel'):
                 chan_id = chan_elem.get('id')
@@ -139,16 +139,16 @@ class XMLTVRepository(IEPGRepository):
                 channel_id = prog_elem.get('channel')
                 start_str = prog_elem.get('start')
                 end_str = prog_elem.get('stop')
-                
+
                 if not channel_id or not start_str or not end_str:
                     continue
 
                 title_elem = prog_elem.find('title')
                 title = (title_elem.text or "Sin título") if title_elem is not None else "Sin título"
-                
+
                 desc_elem = prog_elem.find('desc')
                 description = desc_elem.text if desc_elem is not None else ""
-                
+
                 cat_elem = prog_elem.find('category')
                 category = cat_elem.text if cat_elem is not None else "Otros"
 
@@ -160,7 +160,7 @@ class XMLTVRepository(IEPGRepository):
                     description=description,
                     category=category
                 ))
-            
+
             logging.info(f"EPG parseada: {len(programs)} programas y {len(channel_names)} canales mapeados.")
             return EPGData(programs, channel_names)
         except Exception as e:

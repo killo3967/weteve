@@ -1,14 +1,12 @@
-"""Regresión: al abrir el diálogo la fuente ya debe estar resuelta.
+"""Al abrir el diálogo, la tabla y los combos ya salen del daemon.
 
-Se perdió la llamada final a _update_source_mode() en el __init__ y con ella
-_refresh_mapping(): el pipeline nunca cargaba la lista y el desplegable de
-grupos de las reglas salía vacío.
+La GUI es un frontend: al arrancar pide estado/candidatos y puebla la tabla de
+mapeo y el desplegable de grupos de las reglas (``fake_api`` de conftest).
 """
 import pytest
 
-from src.infrastructure.ui.list_manager_dialog import ListManagerDialog
 from src.application.services.list_manager.models import FilterRule
-from pathlib import Path
+from src.infrastructure.ui.list_manager_dialog import ListManagerDialog
 
 M3U = """#EXTM3U
 #EXTINF:-1 tvg-id="a" group-title="DEPORTES",Canal Deporte
@@ -35,12 +33,6 @@ def dialog(qtbot, tmp_path):
 
 
 class TestArranqueConFuente:
-    def test_fuente_resuelta_al_abrir(self, dialog):
-        assert dialog._resolve_source_path() is not None
-
-    def test_pipeline_registra_la_fuente(self, dialog):
-        assert list(dialog._pipeline._sources) == [dialog._resolve_source_path()]
-
     def test_groups_disponibles_al_abrir(self, dialog):
         assert dialog.available_groups() == ["CINE", "DEPORTES", "INFANTIL"]
 
@@ -113,43 +105,6 @@ class TestArranqueConReglaDeGrupo:
         assert dialog_con_regla_grupo.rules_widget.get_rules()[0].pattern == "CINE"
 
 
-class TestCambioDeOrigenRefrescaGrupos:
-    """Cambiar la ruta del M3U debe volver a poblar los desplegables."""
-
-    @pytest.fixture
-    def dialog_vacio(self, qtbot, tmp_path):
-        cfg = tmp_path / "config.ini"
-        cfg.write_text("[DAEMON]\ncontrol_port = 32123\n", encoding="utf-8")
-        d = ListManagerDialog(None, config={
-            "target_id": "0", "_config_path": cfg, "name": "x",
-            "rules": [], "port": 8080})
-        qtbot.addWidget(d)
-        return d
-
-    def test_sin_fuente_los_grupos_de_fila_estan_vacios(self, dialog_vacio):
-        dialog_vacio.rules_widget._add_row(field="group-title", text="")
-        assert dialog_vacio.rules_widget.table.cellWidget(0, 2).count() == 0
-
-    def test_al_indicar_la_ruta_se_pueblan(self, dialog_vacio, tmp_path):
-        m3u = tmp_path / "otra.m3u"
-        m3u.write_text(M3U, encoding="utf-8")
-        dialog_vacio.rules_widget._add_row(field="group-title", text="")
-        dialog_vacio.custom_m3u_edit.setText(str(m3u).replace("\\", "/"))
-        dialog_vacio.custom_m3u_edit.editingFinished.emit()
-        cell = dialog_vacio.rules_widget.table.cellWidget(0, 2)
-        assert [cell.itemText(i) for i in range(cell.count())] == \
-               ["CINE", "DEPORTES", "INFANTIL"]
-
-    def test_repoblado_no_pierde_la_seleccion(self, dialog_vacio, tmp_path):
-        m3u = tmp_path / "otra.m3u"
-        m3u.write_text(M3U, encoding="utf-8")
-        dialog_vacio.rules_widget._add_row(field="group-title", text="CINE",
-                                           exclude=False, operator="or")
-        dialog_vacio.custom_m3u_edit.setText(str(m3u).replace("\\", "/"))
-        dialog_vacio.custom_m3u_edit.editingFinished.emit()
-        assert dialog_vacio.rules_widget.get_rules()[0].pattern == "CINE"
-
-
 class TestGruposDisponiblesEnUI:
     """El síntoma del usuario: "selecciono Grupo y no sale la lista"."""
 
@@ -172,3 +127,28 @@ class TestGruposDisponiblesEnUI:
         dialog.rules_widget._pick_group()
         assert pedidos.get("warned") is None
         assert pedidos["groups"] == ["CINE", "DEPORTES", "INFANTIL"]
+
+
+class TestArranqueNoBloquea:
+    """Con el demonio caído la ventana debe abrir igual (no 90 s con 20 reglas).
+
+    Cada regla preguntaba grupos/campos al daemon, y cada consulta pagaba el
+    rechazo de conexión (~2 s en Windows): 20 reglas = ~40 llamadas.
+    """
+
+    def test_grupos_y_campos_se_piden_una_sola_vez(self, qtbot, tmp_path,
+                                                   fake_api):
+        reglas = "|".join(["group-title:SPAIN:0:and"]
+                          + [f"custom-filter:!{{N{i}}}:0:and" for i in range(19)])
+        cfg = tmp_path / "config.ini"
+        cfg.write_text(
+            "[DAEMON]\ncontrol_port = 32123\n\n[listmanager.target.0]\n"
+            f"name = x\ncustom_m3u = C:/x.m3u\nport = 8080\nrules = {reglas}\n",
+            encoding="utf-8")
+        d = ListManagerDialog(None, config={
+            "target_id": "0", "_config_path": cfg, "name": "x", "port": 8080})
+        qtbot.addWidget(d)
+        d._config_watch.stop()
+
+        peticiones = [c for c in fake_api.calls if c[0] in ("groups", "fields")]
+        assert len(peticiones) <= 2, peticiones

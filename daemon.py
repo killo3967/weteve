@@ -20,18 +20,20 @@ import sys
 import threading
 from pathlib import Path
 
-from src.application.services.daemon.config import (
-    DaemonConfig,
-    load_daemon_config,
-)
+from src.application.services.daemon.config import load_daemon_config
 from src.application.services.daemon.control_api import ControlApiServer
 from src.application.services.daemon.mcp_server import McpStreamableServer
 from src.application.services.daemon.mcp_tools import build_tool_registry
 from src.application.services.daemon.mcp_transport import McpHttpTransport
-from src.infrastructure.client.sources_store import load_catalog
+from src.application.services.daemon.service import TargetService
 from src.application.services.daemon.supervisor import TargetSupervisor
 from src.application.services.daemon.target_store import TargetStore
 from src.infrastructure.client.daemon_client import DaemonClient
+from src.infrastructure.client.sources_store import (
+    load_catalog,
+    migrate_legacy_sources,
+)
+from src.infrastructure.web.rest_api import RestApi
 
 logger = logging.getLogger("weteve.daemon")
 
@@ -97,12 +99,30 @@ def setup_logging(log_path: Path | None = None,
 DEFAULT_CONFIG = Path("config.ini")
 
 def build_daemon(config_path: Path = DEFAULT_CONFIG) -> dict:
-    """Construye y arranca todos los componentes del daemon.
+    """Construye y arranca el daemon.
 
-    Devuelve {"supervisor", "store", "control_api", "mcp_transport",
+    Todo se sirve en **un solo puerto** (``[DAEMON] control_port``): control,
+    REST (``/api/v1``), MCP (``/mcp``) y las playlists del supervisor
+    (``/weteve/{id}/playlist.m3u`` y ``/epg.xml``).
+
+    Devuelve {"supervisor", "store", "service", "control_api", "server",
     "shutdown", "running"}.
     """
     cfg = load_daemon_config(config_path)
+    if cfg.control_host not in ("127.0.0.1", "localhost") and not cfg.mcp_token:
+        # La API y el MCP no distinguen usuarios: expuestos a la red sin token
+        # cualquiera con acceso al puerto puede reescribir la configuración.
+        raise RuntimeError(
+            "mcp_token obligatorio cuando control_host no es loopback "
+            f"(control_host={cfg.control_host})")
+    # Configs antiguas de fuente única → cartera, antes de leer los targets.
+    # Idempotente y solo escribe si hay algo que migrar; el demonio es el
+    # único escritor del fichero.
+    try:
+        migrate_legacy_sources(config_path)
+    except Exception:  # fichero a medio escribir: se sigue
+        logger.warning("no se pudo migrar la cartera de %s", config_path,
+                       exc_info=True)
     store = TargetStore(config_path)
     store.load()
 
@@ -114,31 +134,43 @@ def build_daemon(config_path: Path = DEFAULT_CONFIG) -> dict:
     def shutdown() -> None:
         running["flag"] = False
 
+    # La API de control ya no abre socket: el servidor único enruta sus rutas.
     control_api = ControlApiServer(
         supervisor, host=cfg.control_host, port=cfg.control_port,
         token=cfg.mcp_token, on_shutdown=shutdown, target_store=store,
     )
-    if not control_api.start():
-        raise RuntimeError(
-            f"puerto de control {cfg.control_port} ocupado ¿hay otro daemon?")
 
     mcp_core = McpStreamableServer(server_name="weteve")
     mcp_core.set_tool_registry(
         build_tool_registry(supervisor, store, on_shutdown=shutdown))
-    mcp_transport = McpHttpTransport(
-        mcp_core, host=cfg.control_host, port=cfg.mcp_port, token=cfg.mcp_token)
-    if not mcp_transport.start():
-        control_api.stop()
-        raise RuntimeError(
-            f"puerto MCP {cfg.mcp_port} ocupado ¿hay otro daemon?")
+    service = TargetService(supervisor, store)
 
-    logger.info("daemon weteve listo: control=%s mcp=%s/mcp targets=%d",
-                control_api.url_base, mcp_transport.url_base, len(store.list()))
+    if cfg.mcp_port and cfg.mcp_port != cfg.control_port:
+        logger.warning("[DAEMON] mcp_port=%d se ignora: todo se sirve en "
+                       "control_port=%d", cfg.mcp_port, cfg.control_port)
+
+    server = McpHttpTransport(
+        mcp_core, host=cfg.control_host, port=cfg.control_port,
+        token=cfg.mcp_token,
+        rest_api=RestApi(service),
+        control_api=control_api,
+        playlist=supervisor.playlist_route,
+    )
+    if not server.start():
+        raise RuntimeError(
+            f"puerto {cfg.control_port} ocupado ¿hay otro daemon?")
+    base = f"http://{cfg.control_host}:{server.port}"
+    supervisor.set_base_url(base, server.port)
+
+    logger.info("daemon weteve listo en %s (/mcp, /api/v1, "
+                "/weteve/{id}/playlist.m3u) targets=%d",
+                base, len(store.list()))
     return {
         "supervisor": supervisor,
         "store": store,
+        "service": service,
         "control_api": control_api,
-        "mcp_transport": mcp_transport,
+        "server": server,
         "shutdown": shutdown,
         "running": running,
     }
@@ -158,7 +190,7 @@ def cmd_run(config_path: Path) -> int:
         try:
             d["supervisor"].start_target(
                 tid, target, epg_path=d["store"].get_epg_path(tid))
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("target %s no arrancó", tid)
 
     try:
@@ -169,8 +201,7 @@ def cmd_run(config_path: Path) -> int:
     finally:
         logger.info("apagando daemon…")
         d["supervisor"].stop_all()
-        d["control_api"].stop()
-        d["mcp_transport"].stop()
+        d["server"].stop()
     return 0
 
 

@@ -12,8 +12,8 @@ from src.infrastructure.client.daemon_launcher import DaemonLauncher
 
 
 class TestDaemonLauncher:
-    def test_launch_new_console_flags(self, monkeypatch) -> None:
-        """Por defecto abre consola propia (logs visibles)."""
+    def test_launch_oculto_por_defecto(self, monkeypatch) -> None:
+        """Por defecto NO abre ventana de cmd (logs al fichero)."""
         recorded = {}
 
         def fake_popen(cmd, **kwargs):
@@ -31,20 +31,52 @@ class TestDaemonLauncher:
         ok = launcher.launch()
         assert ok is True
         cmd = recorded["cmd"]
-        # python + daemon.py run
+        # intérprete sin consola + daemon.py run
         assert cmd[-1] == "run"
-        assert cmd[0] == sys.executable
-        assert Path(cmd[1]).name == "daemon.py"
-        kwargs = recorded["kwargs"]
-        assert kwargs["stdout"] is not None  # DEVNULL: la consola muestra los logs
         if sys.platform == "win32":
-            assert kwargs["creationflags"] == subprocess.CREATE_NEW_CONSOLE
+            # python.exe vuelve a abrir la ventana de cmd: el redirector del
+            # venv recrea el proceso y le asigna consola nueva.
+            assert Path(cmd[0]).name.lower() == "pythonw.exe"
+        else:
+            assert cmd[0] == sys.executable
+        assert Path(cmd[1]).name == "daemon.py"
+        launch_kwargs = recorded["kwargs"]
+        assert launch_kwargs["stdout"] is subprocess.DEVNULL
+        if sys.platform == "win32":
+            flags = launch_kwargs["creationflags"]
+            assert flags & subprocess.DETACHED_PROCESS
+            assert not flags & subprocess.CREATE_NEW_CONSOLE
 
-    def test_launch_detached_when_no_console(self, monkeypatch) -> None:
-        """new_console=False: proceso oculto (arranque automático, sin ventana)."""
+    def test_launch_oculto_sin_pythonw(self, monkeypatch) -> None:
+        """Sin pythonw.exe: consola oculta (DETACHED_PROCESS sí abre ventana)."""
         recorded = {}
 
         def fake_popen(cmd, **kwargs):
+            recorded["cmd"] = cmd
+            recorded["kwargs"] = kwargs
+
+            class P:
+                pid = 7
+
+            return P()
+
+        monkeypatch.setattr("src.infrastructure.client.daemon_launcher.subprocess.Popen",
+                            fake_popen)
+        monkeypatch.setattr(DaemonLauncher, "_pythonw", lambda self: None)
+        assert DaemonLauncher().launch() is True
+        assert recorded["cmd"][0] == sys.executable
+        if sys.platform == "win32":
+            flags = recorded["kwargs"]["creationflags"]
+            assert flags & subprocess.CREATE_NO_WINDOW
+            assert not flags & subprocess.DETACHED_PROCESS
+            assert not flags & subprocess.CREATE_NEW_CONSOLE
+
+    def test_launch_con_consola_explicita(self, monkeypatch) -> None:
+        """new_console=True: consola propia con los logs en vivo (opt-in)."""
+        recorded = {}
+
+        def fake_popen(cmd, **kwargs):
+            recorded["cmd"] = cmd
             recorded["kwargs"] = kwargs
 
             class P:
@@ -54,11 +86,12 @@ class TestDaemonLauncher:
 
         monkeypatch.setattr("src.infrastructure.client.daemon_launcher.subprocess.Popen",
                             fake_popen)
-        DaemonLauncher().launch(new_console=False)
+        DaemonLauncher().launch(new_console=True)
         if sys.platform == "win32":
-            flags = recorded["kwargs"]["creationflags"]
-            assert flags & subprocess.DETACHED_PROCESS
-            assert flags & subprocess.CREATE_NEW_PROCESS_GROUP
+            # la consola exige python.exe: pythonw no tiene consola
+            assert Path(recorded["cmd"][0]).name.lower() == "python.exe"
+            assert (recorded["kwargs"]["creationflags"]
+                    == subprocess.CREATE_NEW_CONSOLE)
 
     def test_launch_custom_python(self, monkeypatch) -> None:
         recorded = {}
