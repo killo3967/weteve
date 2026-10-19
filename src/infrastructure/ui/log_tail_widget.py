@@ -130,6 +130,11 @@ class LogTailWidget(QWidget):
                     if self._offset >= size:
                         break
                     data = f.read(MAX_READ_CHUNK)
+                    if not data:
+                        # EOF antes del tamaño anunciado (rotación o fichero
+                        # creciendo): sin esto el bucle no avanza nunca y la
+                        # GUI se queda colgada.
+                        break
         except OSError:
             # Fichero bloqueado por el escritor en Windows: se reintenta.
             return
