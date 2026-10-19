@@ -58,7 +58,10 @@ def widget(qtbot, tmp_path):
 
 
 def _texts(w: EpgMappingWidget, row: int = 0) -> list[str]:
-    combo = w.table.cellWidget(row, w.COL_EPG)._combo
+    # el combo carga sus opciones al desplegarse: aquí se fuerza
+    widget = w.table.cellWidget(row, w.COL_EPG)
+    widget.ensure_items()
+    combo = widget._combo
     return [combo.itemText(i) for i in range(combo.count())]
 
 

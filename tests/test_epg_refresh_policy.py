@@ -95,3 +95,65 @@ class TestRegistroDeGuias:
         p.register_source("0", "C:/l.m3u", "https://x/una.xml")
         p.register_source("0", "C:/l.m3u", "https://x/otra.xml")
         assert len(epg.llamadas) == 2
+
+
+class TestCacheDeEmparejamiento:
+    """Emparejar canal→guía no depende de las reglas: se cachea."""
+
+    def _pipeline_con_contador(self, monkeypatch):
+        from src.application.services.list_manager import pipeline as mod
+
+        p, epg = _pipeline()
+        llamadas = {"n": 0}
+        original = mod.EpgMatcher
+
+        class _Contador(original):
+            def match(self, tvg_id, name):
+                llamadas["n"] += 1
+                return super().match(tvg_id, name)
+
+        monkeypatch.setattr(mod, "EpgMatcher", _Contador)
+        return p, epg, llamadas
+
+    def _canales(self, p, n=5):
+        p._m3u_repo._channels = [
+            Channel(f"Canal {i}", f"http://x/{i}", "General", tvg_id="es.la1")
+            for i in range(n)]
+
+    def test_dos_recargas_emparejan_una_vez(self, monkeypatch):
+        p, _epg, llamadas = self._pipeline_con_contador(monkeypatch)
+        self._canales(p)
+        t = _target()
+        p.register_merged("0", t.source_refs, t.epg_refs)
+        p.run(t)
+        primero = llamadas["n"]
+        assert primero == 5
+        p.register_merged("0", t.source_refs, t.epg_refs)
+        p.run(t)
+        assert llamadas["n"] == primero       # la segunda recarga no reempareja
+
+    def test_cambiar_un_override_reempareja(self, monkeypatch):
+        p, _epg, llamadas = self._pipeline_con_contador(monkeypatch)
+        self._canales(p)
+        t = _target()
+        p.register_merged("0", t.source_refs, t.epg_refs)
+        p.run(t)
+        primero = llamadas["n"]
+        t2 = _target(epg_overrides={"http://x/0": "otro.id"})
+        p.run(t2)
+        assert llamadas["n"] == primero + 4   # el del override no se empareja
+
+    def test_cambiar_el_tvg_id_del_canal_reempareja(self, monkeypatch):
+        p, _epg, llamadas = self._pipeline_con_contador(monkeypatch)
+        self._canales(p)
+        t = _target()
+        p.register_merged("0", t.source_refs, t.epg_refs)
+        p.run(t)
+        primero = llamadas["n"]
+        # la lista cambia: mismo url, otro tvg-id (una recarga real vuelve a
+        # registrar las fuentes, que invalida la cache de canales)
+        p._m3u_repo._channels[0] = Channel("Canal 0", "http://x/0", "General",
+                                           tvg_id="es.otro")
+        p.register_merged("0", t.source_refs, t.epg_refs)
+        p.run(t)
+        assert llamadas["n"] == primero + 1

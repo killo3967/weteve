@@ -514,6 +514,50 @@ class QualityPriorityWidget(QWidget):
         self.changed.emit()
 
 
+class _LazyEpgCombo(QComboBox):
+    """QComboBox que rellena sus opciones la primera vez que se despliega.
+
+    Con ~1.700 etiquetas de guía y ~280 filas, poblar todos los combos al
+    repintar la tabla costaba ~1,1 s (481.000 ítems) y nadie abre más de dos.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._pendientes: list[str] | None = None
+
+    def set_items_later(self, names: list[str]) -> None:
+        """Deja las opciones preparadas para cuando haga falta."""
+        self._pendientes = names
+
+    def ensure_items(self) -> None:
+        """Carga las opciones pendientes conservando el texto actual."""
+        if self._pendientes is None:
+            return
+        names, self._pendientes = self._pendientes, None
+        current = self.currentText()
+        bloqueado = self.blockSignals(True)
+        try:
+            self.clear()
+            self.addItem(BLANK_LABEL)
+            self.addItems(names)
+            if current:
+                index = self.findText(current, Qt.MatchFlag.MatchExactly)
+                if index != -1:
+                    self.setCurrentIndex(index)
+                else:
+                    # texto persistido fuera del catálogo: se conserva editable
+                    self.setCurrentIndex(0)
+                    self.setEditText(current)
+            else:
+                self.setEditText(BLANK_LABEL)
+        finally:
+            self.blockSignals(bloqueado)
+
+    def showPopup(self) -> None:  # noqa: N802 - API de Qt
+        self.ensure_items()
+        super().showPopup()
+
+
 class _EpgComboWidget(QWidget):
     """Widget con un QComboBox editable para elegir canal EPG.
 
@@ -527,7 +571,7 @@ class _EpgComboWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._combo = QComboBox(self)
+        self._combo = _LazyEpgCombo(self)
         self._combo.setEditable(True)
         self._combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self._combo.setFixedHeight(24)
@@ -564,8 +608,12 @@ class _EpgComboWidget(QWidget):
             self._combo.setEditText(current)
 
     def set_items(self, names: list[str]) -> None:
-        """Carga las opciones del EPG."""
-        self._populate(names)
+        """Deja las opciones preparadas: se cargan al desplegar el combo."""
+        self._combo.set_items_later(names)
+
+    def ensure_items(self) -> None:
+        """Fuerza la carga de las opciones (pruebas y despliegue)."""
+        self._combo.ensure_items()
 
     def set_current(self, value: str) -> None:
         """Muestra el valor actual asignado sin borrar las opciones."""

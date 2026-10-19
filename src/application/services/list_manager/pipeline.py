@@ -94,6 +94,9 @@ class ListManagerPipeline:
         self._channel_cache: dict[int | str, list] = {}
         # ruta de guía registrada por fuente (fuente única): detecta cambios
         self._source_epg_path: dict[int | str, str] = {}
+        # cache canal→guía: no depende de las reglas, así que sobrevive a las
+        # recargas (se invalida si cambia la guía o los overrides)
+        self._match_cache: dict[int | str, tuple[tuple, dict[tuple, str]]] = {}
 
     def register_source(self, index: int | str, m3u_path: str,
                         epg_path: str | None,
@@ -368,6 +371,20 @@ class ListManagerPipeline:
 
         return self._finish(target, kept, total_input, epg)
 
+    def _match_cache_for(self, index: int | str, epg: EPGData,
+                         overrides: dict[str, str]) -> dict[tuple, str]:
+        """Cache de emparejamiento por canal, invalidada por guía u overrides.
+
+        La clave incluye ``tvg_id`` y nombre, así que si la lista cambia el
+        canal se vuelve a emparejar solo.
+        """
+        signature = (id(epg), frozenset(overrides.items()))
+        cached = self._match_cache.get(index)
+        if cached is None or cached[0] != signature:
+            cached = (signature, {})
+            self._match_cache[index] = cached
+        return cached[1]
+
     def _finish(self, target: PipelineTarget, kept: list[MappedChannel],
                 total_input: int, epg: EPGData | None) -> PipelineResult:
         """Numeración secuencial + match EPG, común a ambos flujos."""
@@ -380,16 +397,23 @@ class ListManagerPipeline:
         # La numeración va al final, sobre los canales que realmente se
         # sirven: ver el bloque de la regla de servidor.
 
-        # Match EPG
+        # Match EPG (con cache: emparejar no depende de las reglas)
         matched: list[MappedChannel] = []
         if epg is not None:
             matcher = EpgMatcher(epg)
+            cache = self._match_cache_for(target.source_index, epg,
+                                          target.epg_overrides)
             for mapped in kept:
                 override = target.epg_overrides.get(mapped.url)
                 if override:
                     matched.append(dataclasses_replace(mapped, matched_epg_id=override))
                     continue
-                epg_id = matcher.match(mapped.tvg_id, mapped.name)
+                clave = (mapped.url, mapped.tvg_id or "", mapped.name)
+                if clave in cache:
+                    epg_id = cache[clave] or None
+                else:
+                    epg_id = matcher.match(mapped.tvg_id, mapped.name)
+                    cache[clave] = epg_id or ""
                 matched.append(dataclasses_replace(mapped, matched_epg_id=epg_id))
         else:
             matched = kept

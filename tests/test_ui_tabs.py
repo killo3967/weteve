@@ -74,7 +74,8 @@ class TestEpgMappingTable:
         w.set_epg(self._epg())
         w.load_unmatched(self._channels(), {})
         combo = w.table.cellWidget(0, w.COL_EPG)
-        texts = [combo._combo.itemText(i) for i in range(combo._combo.count())]
+        texts = combo._combo.ensure_items() or [combo._combo.itemText(i)
+                                               for i in range(combo._combo.count())]
         assert "La 1" in texts and "es.la1" in texts
         assert "Clan" in texts and "es.clan" in texts
 
@@ -87,7 +88,8 @@ class TestEpgMappingTable:
         w.set_epg(None)
         w.load_unmatched(self._channels(), {})
         combo = w.table.cellWidget(0, w.COL_EPG)
-        assert [combo._combo.itemText(i) for i in range(combo._combo.count())] ==             ["", DUMMY_LABEL]
+        assert combo._combo.ensure_items() or [combo._combo.itemText(i)
+                                               for i in range(combo._combo.count())] ==             ["", DUMMY_LABEL]
         assert combo.current_value() == ""
 
     def test_override_persistido_se_muestra(self, qtbot, dialog):
@@ -132,7 +134,8 @@ class TestEpgMappingTable:
         w.set_epg(self._epg_con_listas())
         w.load_unmatched(self._channels(), {})
         combo = w.table.cellWidget(0, w.COL_EPG)
-        texts = [combo._combo.itemText(i) for i in range(combo._combo.count())]
+        texts = combo._combo.ensure_items() or [combo._combo.itemText(i)
+                                               for i in range(combo._combo.count())]
         assert "La 1 · Doble_M" in texts
         assert "Clan · Doble_M + Koala" in texts
 
@@ -158,7 +161,8 @@ class TestEpgMappingTable:
         w.set_epg(self._epg())
         w.load_unmatched(self._channels(), {})
         combo = w.table.cellWidget(0, w.COL_EPG)
-        texts = [combo._combo.itemText(i) for i in range(combo._combo.count())]
+        texts = combo._combo.ensure_items() or [combo._combo.itemText(i)
+                                               for i in range(combo._combo.count())]
         assert not any(" · " in t for t in texts)
 
     def test_desactivado_persistido_sigue_listado(self, qtbot, dialog):

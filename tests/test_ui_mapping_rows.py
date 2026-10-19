@@ -53,6 +53,7 @@ class TestFilasDeLaTabla:
         fake_api.epg = [{"id": "es.la1", "display_name": "La 1"}]
         dialog._refresh_mapping()
         combo = dialog.epg_mapping.table.cellWidget(0, dialog.epg_mapping.COL_EPG)
+        combo.ensure_items()
         assert "La 1" in [combo._combo.itemText(i)
                           for i in range(combo._combo.count())]
 

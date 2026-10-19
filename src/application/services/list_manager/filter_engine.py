@@ -14,6 +14,7 @@ Semántica equivalente a ``filterThisStream`` de xTeVe (src/m3u.go):
 """
 
 import re
+from functools import lru_cache
 
 from src.application.services.list_manager.models import FilterRule
 
@@ -96,9 +97,13 @@ def evaluate_channel(
         return False
     return True
 
-def _split_rule(rule: FilterRule) -> tuple[str, str, str]:
-    """Extrae (include, exclude, base) del patrón."""
-    pattern = rule.pattern
+@lru_cache(maxsize=4096)
+def _split_pattern(pattern: str) -> tuple[str, str, str]:
+    """Extrae (include, exclude, base) del patrón.
+
+    Se cachea por patrón: sin esto se hacían dos búsquedas de regex por regla
+    y por canal (37.600 canales × 24 reglas = más de un millón por recarga).
+    """
     exclude = ""
     include = ""
 
@@ -113,6 +118,11 @@ def _split_rule(rule: FilterRule) -> tuple[str, str, str]:
         pattern = pattern.replace(f" {m_yes.group(0)}", "").replace(m_yes.group(0), "")
 
     return (include or pattern).strip(), exclude, pattern.strip()
+
+
+def _split_rule(rule: FilterRule) -> tuple[str, str, str]:
+    """(include, exclude, base) del patrón de la regla (cacheado)."""
+    return _split_pattern(rule.pattern)
 
 
 def _rule_matches(
