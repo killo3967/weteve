@@ -85,3 +85,34 @@ class TestCacheRemota:
         assert repo.load_epg("https://ejemplo.net/guia.xml").channel_names == {}
         assert repo.load_epg("https://ejemplo.net/guia.xml").channel_names == {}
         assert intentos["n"] == 2       # se reintenta en la siguiente
+
+
+class TestIconosDelXmltv:
+    """Las guías publican el logo en <channel><icon src="…"/>."""
+
+    def test_el_icono_llega_a_channel_info(self, tmp_path):
+        from src.infrastructure.adapters.xmltv_repository import XMLTVRepository
+
+        guia = tmp_path / "guia.xml"
+        guia.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<tv><channel id="k.la1"><display-name>La 1 HD</display-name>'
+            '<icon src="https://logos/la1.png"/></channel>'
+            '<channel id="k.a3"><display-name>Antena 3</display-name></channel>'
+            '<programme start="20261019120000 +0200" stop="20261019130000 +0200"'
+            ' channel="k.la1"><title>P</title></programme></tv>',
+            encoding="utf-8")
+        epg = XMLTVRepository(ttl_seconds=0).load_epg(str(guia))
+        assert epg.channel_info["k.la1"].logo == "https://logos/la1.png"
+        assert "k.a3" not in epg.channel_info
+
+    def test_icono_relativo_se_ignora(self, tmp_path):
+        from src.infrastructure.adapters.xmltv_repository import XMLTVRepository
+
+        guia = tmp_path / "guia.xml"
+        guia.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<tv><channel id="x"><display-name>X</display-name>'
+            '<icon src="/img/x.png"/></channel></tv>', encoding="utf-8")
+        epg = XMLTVRepository(ttl_seconds=0).load_epg(str(guia))
+        assert epg.channel_info == {}

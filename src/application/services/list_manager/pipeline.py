@@ -20,6 +20,18 @@ from src.infrastructure.adapters.file_m3u_repository import FileM3URepository
 logger = logging.getLogger(__name__)
 
 
+def _combinar(principal: ChannelInfo | None,
+              respaldo: ChannelInfo | None) -> ChannelInfo | None:
+    """Une dos metadatos del mismo canal: cada campo se queda con el que hay."""
+    if principal is None:
+        return respaldo
+    if respaldo is None:
+        return principal
+    return ChannelInfo(
+        dial=principal.dial if principal.dial is not None else respaldo.dial,
+        logo=principal.logo or respaldo.logo)
+
+
 def _is_separator_channel(name: str) -> bool:
     """True si el nombre es en realidad un separador de sesion, no un canal.
 
@@ -524,8 +536,9 @@ class ListManagerPipeline:
         sin_dial: list[MappedChannel] = []
         usados: set[int] = set()
         for mapped in served:
-            meta = (info.get(mapped.matched_epg_id or "")
-                    or por_nombre.get(base_name(mapped.name)))
+            meta = _combinar(
+                info.get(mapped.matched_epg_id or ""),
+                por_nombre.get(base_name(mapped.name)))
             logo = (meta.logo if meta is not None else None) or mapped.logo_url
             canal = dataclasses_replace(mapped, logo_url=logo)
             dial = meta.dial if meta is not None else None
@@ -553,16 +566,19 @@ class ListManagerPipeline:
         """Canal (por nombre base) → dial/logo, venga de la guía que venga.
 
         Es el respaldo cuando el id que resolvió el emparejamiento —o el
-        mapeo manual— pertenece a una guía que no publica metadatos. Si dos
-        guías los publican para el mismo nombre, gana la de más prioridad.
+        mapeo manual— pertenece a una guía que no publica metadatos. Se leen de
+        mayor a menor prioridad y cada campo se completa con el primero que lo
+        traiga: el dial puede venir de Movistar y el logo de otra guía.
         """
-        elegido: dict[str, tuple[int, bool, ChannelInfo]] = {}
-        for cid, meta in epg.channel_info.items():
+        elegido: dict[str, ChannelInfo] = {}
+        for cid in sorted(epg.channel_info,
+                          key=lambda c: -epg.channel_priority.get(c, 0)):
+            meta = epg.channel_info[cid]
             clave = base_name(epg.channel_names.get(cid, ""))
             if not clave:
                 continue
-            peso = epg.channel_priority.get(cid, 0)
-            previo = elegido.get(clave)
-            if previo is None or (peso, bool(meta.dial)) > (previo[0], previo[1]):
-                elegido[clave] = (peso, bool(meta.dial), meta)
-        return {clave: datos[2] for clave, datos in elegido.items()}
+            actual = elegido.get(clave) or ChannelInfo()
+            elegido[clave] = ChannelInfo(
+                dial=actual.dial if actual.dial is not None else meta.dial,
+                logo=actual.logo or meta.logo)
+        return elegido

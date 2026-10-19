@@ -270,3 +270,36 @@ class TestMetadatosPorNombre:
         # …pero el número y el logo vienen de quien los publica
         assert canal.chno == 1
         assert canal.logo_url == "http://l/tve.png"
+
+
+class TestDialYLogoDeGuiasDistintas:
+    """El dial viene de una guía y el logo de otra: el canal se queda con los dos."""
+
+    def test_se_combinan_por_nombre(self):
+        movistar = EPGData(
+            programs=[Program("P", AHORA, AHORA + timedelta(hours=1), "TVE")],
+            channel_names={"TVE": "LA 1"},
+            channel_info={"TVE": ChannelInfo(dial=1)},
+        )
+        koala = EPGData(
+            programs=[Program("Q", AHORA, AHORA + timedelta(hours=1), "k.la1")],
+            channel_names={"k.la1": "La 1 HD"},
+            channel_info={"k.la1": ChannelInfo(logo="http://koala/la1.png")},
+        )
+        ref_mv = SourceRef("m", "Movistar+", "movistar.xml", 10)
+        ref_koala = SourceRef("k", "Koala", "koala.xml", 0)
+        pipeline = ListManagerPipeline(
+            m3u_repository=_FakeM3URepo(
+                [Channel("LA 1 HD", "http://s/la1", "General")]),
+            epg_repository=_FakeEpgRepo({"movistar.xml": movistar,
+                                         "koala.xml": koala}),
+        )
+        pipeline.register_merged("m", (SourceRef("s", "lista", "l.m3u"),),
+                                 (ref_mv, ref_koala))
+        target = PipelineTarget(
+            name="t", source_index="m",
+            source_refs=(SourceRef("s", "lista", "l.m3u"),),
+            epg_refs=(ref_mv, ref_koala))
+        canal = pipeline.run(target).channels[0]
+        assert canal.chno == 1
+        assert canal.logo_url == "http://koala/la1.png"

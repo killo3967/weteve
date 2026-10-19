@@ -11,7 +11,7 @@ from pathlib import Path
 
 import requests
 
-from src.domain.entities.epg import EPGData, Program
+from src.domain.entities.epg import ChannelInfo, EPGData, Program
 from src.domain.ports.i_epg_repo import IEPGRepository
 from src.infrastructure.utils.sevenzip import extract_7z
 
@@ -169,15 +169,22 @@ class XMLTVRepository(IEPGRepository):
         """Parsea la estructura XMLTV."""
         programs = []
         channel_names = {}
+        channel_info: dict[str, ChannelInfo] = {}
         try:
             root = ET.fromstring(content)
 
-            # 1. Mapear IDs de canales a nombres
+            # 1. Mapear IDs de canales a nombres (y su logo, si lo publican)
             for chan_elem in root.findall('channel'):
                 chan_id = chan_elem.get('id')
                 display_name = chan_elem.find('display-name')
                 if chan_id and display_name is not None:
                     channel_names[chan_id] = display_name.text or ""
+                icono = chan_elem.find('icon') if chan_id else None
+                if chan_id and icono is not None:
+                    src = str(icono.get('src') or "").strip()
+                    # solo URLs absolutas: una ruta relativa no le sirve a nadie
+                    if src.startswith(("http://", "https://")):
+                        channel_info[chan_id] = ChannelInfo(logo=src)
 
             # 2. Parsear programas
             for prog_elem in root.findall('programme'):
@@ -207,7 +214,7 @@ class XMLTVRepository(IEPGRepository):
                 ))
 
             logging.info(f"EPG parseada: {len(programs)} programas y {len(channel_names)} canales mapeados.")
-            return EPGData(programs, channel_names)
+            return EPGData(programs, channel_names, channel_info=channel_info)
         except Exception as e:
             logging.error(f"Error parseando XMLTV: {e}")
             return EPGData()
