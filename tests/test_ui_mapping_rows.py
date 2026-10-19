@@ -325,36 +325,46 @@ class TestFiltrarCanalDesdeElMenu:
             "custom-filter:!{LA 1 HD}:0:and",
             "custom-filter:!{LA 2 HD}:0:and"]
 
-    def test_no_salta_de_pestaña_y_queda_encolado(self, dialog, fake_api,
-                                                  wait_save):
-        """Sin cambiar de pestaña: la regla se encola (5 s) y luego se manda."""
+    def test_no_salta_de_pestaña_y_aplica_al_momento(self, dialog, fake_api,
+                                                     wait_save):
+        """Sin cambiar de pestaña: se manda el PUT con la exclusión."""
         self._con_dos(dialog, fake_api)
         antes = dialog.tabs.currentIndex()
         dialog.epg_mapping.row_menu([0]).actions()[-1].trigger()
-        assert dialog.tabs.currentIndex() == antes
-        assert dialog._apply_timer.isActive()
-        assert "se aplicará" in dialog.result_label.text()
-        assert not [c for c in fake_api.calls if c[0] == "put"]
-
-        dialog._flush_pending_apply()
         wait_save(dialog)
+        assert dialog.tabs.currentIndex() == antes
         puts = {c[1]: c[2] for c in fake_api.calls if c[0] == "put"}
         enviado = puts["/targets/0/rules"]
         assert enviado["reload"] is True
         assert "custom-filter:!{LA 1 HD}:0:and" in enviado["rules"]
 
-    def test_varios_filtros_se_aplican_una_sola_vez(self, dialog, fake_api,
-                                                    wait_save):
-        """El debounce coalesce: tres clics, un solo PUT."""
+    def test_clics_seguidos_no_encolan_recargas_en_cascada(self, dialog,
+                                                           fake_api,
+                                                           wait_save,
+                                                           monkeypatch):
+        """Un clic mientras hay trabajo en curso no lanza otro: queda pendiente
+        y al terminar se aplica UNA vez con las reglas definitivas."""
+        import time as _time
+
         self._con_dos(dialog, fake_api)
-        menu = dialog.epg_mapping.row_menu([0, 1])
-        accion = next(a for a in menu.actions() if a.text().startswith("Filtrar"))
-        accion.trigger()
+        original = fake_api.put
+
+        def put_lento(path, payload, timeout=None):
+            _time.sleep(0.3)      # simula el pipeline del demonio
+            return original(path, payload, timeout=timeout)
+
+        monkeypatch.setattr(fake_api, "put", put_lento)
         dialog.epg_mapping.row_menu([0]).actions()[-1].trigger()
-        dialog._flush_pending_apply()
+        assert dialog._saving is True          # el primer trabajo está en vuelo
+        dialog.epg_mapping.row_menu([1]).actions()[-1].trigger()
+        assert dialog._pending_apply is True
         wait_save(dialog)
-        puts = [c for c in fake_api.calls if c[0] == "put" and c[1] == "/targets/0/rules"]
-        assert len(puts) == 1
+        puts = [c[2] for c in fake_api.calls
+                if c[0] == "put" and c[1] == "/targets/0/rules"]
+        assert len(puts) == 2, puts            # el primero + uno con las dos
+        ambas = [" ".join(p["rules"]) for p in puts]
+        assert any("!{LA 1 HD}" in texto and "!{LA 2 HD}" in texto
+                   for texto in ambas), puts
 
     def test_el_repintado_ya_no_pide_preview(self, dialog, fake_api,
                                               monkeypatch):

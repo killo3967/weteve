@@ -1171,10 +1171,6 @@ def _source_payload(entry) -> dict:
             "refresh_min": entry.refresh_min, "enabled": entry.enabled}
 
 
-#: Espera tras el último «Filtrar canal» antes de reejecutar el pipeline.
-APPLY_DEBOUNCE_MS = 5000
-
-
 class ListManagerDialog(QDialog):
     """Diálogo principal del gestor: wizard 3 pasos + servicio web."""
 
@@ -1423,12 +1419,6 @@ class ListManagerDialog(QDialog):
         self._config_watch.timeout.connect(self._reload_config_if_changed)
         self._config_watch.start()
 
-        # Filtrar encola el recálculo: si sigues filtrando canales, solo se
-        # reejecuta el pipeline una vez, 5 s después del último cambio.
-        self._apply_timer = QTimer(self)
-        self._apply_timer.setSingleShot(True)
-        self._apply_timer.setInterval(APPLY_DEBOUNCE_MS)
-        self._apply_timer.timeout.connect(self._flush_pending_apply)
         # El preview solo se refresca al entrar en la pestaña (y al editar
         # reglas): pedirlo en cada repintado era trabajo duplicado.
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -1485,12 +1475,15 @@ class ListManagerDialog(QDialog):
             self._loading_targets = False
 
     def _flush_pending_apply(self) -> None:
-        """Aplica ya los filtros encolados (temporizador, Aplicar, cerrar)."""
-        self._apply_timer.stop()
+        """Aplica los filtros pendientes si no hay trabajo en curso.
+
+        Si lo hay, se quedan marcados: al terminar el trabajo actual se
+        reejecuta una sola vez con las reglas definitivas.
+        """
         if not self._pending_apply:
             return
         if self._saving:
-            return                      # al terminar el guardado se reintenta
+            return
         self._pending_apply = False
         self._apply_rules_now()
 
@@ -1548,7 +1541,6 @@ class ListManagerDialog(QDialog):
         client = self._api_client()
         if client is None:
             return
-        self._apply_timer.stop()
         self._pending_apply = False
         target_id = self._target_id()
         reglas = self.rules_widget.get_rules()
@@ -1603,13 +1595,12 @@ class ListManagerDialog(QDialog):
         self.rules_widget.add_rules(reglas)
         self._pending_apply = True
         if self._saving:
+            # el pool tiene un solo hilo: al terminar se aplica lo pendiente
+            # con las reglas definitivas (varios clics = una sola recarga más)
             self.result_label.setText(
-                "Filtro añadido: se aplicará al terminar el guardado en curso…")
+                "Filtro añadido: se aplicará al terminar el trabajo en curso…")
         else:
-            self._apply_timer.start()
-            self.result_label.setText(
-                f"Filtro añadido: se aplicará en {APPLY_DEBOUNCE_MS // 1000} s "
-                "(o pulsa «Aplicar» ahora).")
+            self._flush_pending_apply()
 
     def _load_priorities(self) -> None:
         """Pinta la prioridad de calidad del target activo (fichero o fábrica)."""
@@ -1701,7 +1692,6 @@ class ListManagerDialog(QDialog):
         if self._saving:
             return  # ya hay un guardado en marcha: no se encola otro
         # el lote incluye las reglas: lo pendiente va dentro
-        self._apply_timer.stop()
         self._pending_apply = False
         config_path = self._config.get("_config_path")
         client = self._api_client()
@@ -2148,7 +2138,6 @@ class ListManagerDialog(QDialog):
         self._maybe_stop_daemon()
         self._config_watch.stop()
         self._preview_timer.stop()
-        self._apply_timer.stop()
         self._logo_service.shutdown()
         if self._pending_apply:
             # No se pierde un filtro pendiente: se manda y se espera (~2 s).
@@ -2164,7 +2153,6 @@ class ListManagerDialog(QDialog):
     def reject(self) -> None:
         """Botón Cerrar: mismo camino que el aspa de la ventana."""
         self._maybe_stop_daemon()
-        self._apply_timer.stop()
         if self._pending_apply:
             self._pending_apply = False
             self._apply_rules_now()
