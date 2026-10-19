@@ -934,9 +934,8 @@ class EpgMappingWidget(QWidget):
         filtrar = QAction("Filtrar canal" if len(nombres) == 1
                           else "Filtrar canales", menu)
         filtrar.setToolTip(
-            "Añade el canal a la pestaña Filtros iptv como regla AND "
-            "(varios: el primero AND y el resto OR, para que la lista no "
-            "quede vacía)")
+            "Excluye el canal: lo añade a Filtros iptv como regla AND "
+            "(«Excluir») para que deje de servirse")
         filtrar.triggered.connect(
             lambda _checked=False, elegidos=nombres:
             self.filter_requested.emit(elegidos))
@@ -1189,7 +1188,7 @@ class ListManagerDialog(QDialog):
         rules_column = QWidget(self.tab_filters)
         rules_layout = QVBoxLayout(rules_column)
         rules_layout.setContentsMargins(0, 0, 0, 0)
-        self.rules_widget = FilterRulesWidget(on_apply=self._refresh_mapping,
+        self.rules_widget = FilterRulesWidget(on_apply=self._apply_rules_now,
                                               dialog=self)
         self.rules_widget.load_rules(config.get("rules", []))
         rules_layout.addWidget(self.rules_widget)
@@ -1403,21 +1402,56 @@ class ListManagerDialog(QDialog):
         finally:
             self._loading_targets = False
 
-    def _filter_channels(self, names: list[str]) -> None:
-        """Añade los canales del mapeo a las reglas (incluir, AND/OR).
+    def _apply_rules_now(self) -> None:
+        """«Aplicar» de Filtros iptv: guarda las reglas y reejecuta el pipeline.
 
-        Con varios canales la primera regla va como AND (afina la lista) y las
-        demás como OR: varias reglas de inclusión en AND se cruzarían entre sí
-        y dejarían la lista vacía.
+        Va por el pool de guardado (el pipeline tarda segundos): al terminar,
+        el mapeado se repinta con lo que sirve el demonio y los canales
+        excluidos ya no aparecen.
+        """
+        if self._saving:
+            return
+        client = self._api_client()
+        if client is None:
+            return
+        target_id = self._target_id()
+        reglas = self.rules_widget.get_rules()
+        self._saving = True
+        self._save_pending = {"rules_objects": reglas}
+        self._config_watch.stop()
+        if self._save_button is not None:
+            self._save_button.setEnabled(False)
+        self.result_label.setText("Aplicando filtros en el demonio…")
+        serializadas = [rule.serialize() for rule in reglas]
+
+        def job() -> dict:
+            code, body = client.put(f"/targets/{target_id}/rules",
+                                    {"rules": serializadas, "reload": True})
+            if code == 0 or code >= 400 or "error" in body:
+                return {"ok": False, "body": body, "code": code,
+                        "label": "filtros"}
+            return {"ok": True, "served": (body or {}).get("filtered_count")}
+
+        self._save_pool.submit(job).add_done_callback(
+            lambda fut: self.save_finished.emit(fut.result())
+            if not fut.cancelled() else None)
+
+    def _filter_channels(self, names: list[str]) -> None:
+        """Excluye del listado los canales elegidos en el mapeo.
+
+        Se añaden a «Filtros iptv» como reglas ``!{nombre}`` con operador AND
+        (exclusión, igual que la regla que crea «Añadir regla»): así dejan de
+        servirse y desaparecen también del mapeado.
         """
         elegidos = [nombre for nombre in dict.fromkeys(names) if nombre]
         if not elegidos:
             return
         reglas = [
-            FilterRule(field="custom-filter", pattern=nombre, exclude=False,
-                       case_sensitive=False,
-                       operator="and" if posicion == 0 else "or")
-            for posicion, nombre in enumerate(elegidos)
+            # el patrón va sin "!{}": la tabla lo añade al serializar si la
+            # acción es Excluir (así se ve el nombre limpio en la columna Texto)
+            FilterRule(field="custom-filter", pattern=nombre, exclude=True,
+                       case_sensitive=False, operator="and")
+            for nombre in elegidos
         ]
         self.rules_widget.add_rules(reglas)
         self.tabs.setCurrentWidget(self.tab_filters)
@@ -1658,16 +1692,24 @@ class ListManagerDialog(QDialog):
 
         if payload.get("daemon") is not None and payload.get("client_path"):
             save_daemon_config(Path(payload["client_path"]), payload["daemon"])
-        self._config = {**self._config, **self._saved_state(payload)}
+        if "name" in payload:
+            self._config = {**self._config, **self._saved_state(payload)}
+        elif "rules_objects" in payload:
+            self._config = {**self._config, "rules": payload["rules_objects"]}
         # escritura ajena a la firma del vigilante: no hay que reaccionar
         self._config_signature = self._config_file_signature()
         self._api_ready = False
         self._refresh_mapping()
         self.status_panel.refresh()
         served = result.get("served")
-        self.result_label.setText(
-            f"Guardado en el demonio: {served if served is not None else '—'} "
-            f"canales servidos (puerto {payload.get('port')}).")
+        if "name" in payload:
+            self.result_label.setText(
+                f"Guardado en el demonio: {served if served is not None else '—'} "
+                f"canales servidos (puerto {payload.get('port')}).")
+        else:
+            self.result_label.setText(
+                f"Filtros aplicados: {served if served is not None else '—'} "
+                "canales servidos.")
 
     def _mapping_changes(self, current: dict[str, str]) -> list[dict]:
         """Mapeos a enviar: los asignados ahora y los borrados explícitos.

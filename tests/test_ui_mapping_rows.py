@@ -298,7 +298,7 @@ class TestFiltrarCanalDesdeElMenu:
                   if a.text()]
         assert "Filtrar canal" in textos
 
-    def test_un_canal_se_añade_como_and_e_incluir(self, dialog, fake_api):
+    def test_un_canal_se_excluye_con_and(self, dialog, fake_api):
         self._con_dos(dialog, fake_api)
         menu = dialog.epg_mapping.row_menu([0])
         next(a for a in menu.actions()
@@ -307,19 +307,22 @@ class TestFiltrarCanalDesdeElMenu:
         assert len(reglas) == 1
         regla = reglas[0]
         assert regla.field == "custom-filter"
-        assert regla.pattern == "LA 1 HD"
-        assert regla.exclude is False
+        assert regla.pattern == "!{LA 1 HD}"      # exclusión
+        assert regla.exclude is True
         assert regla.operator == "and"
 
-    def test_varios_canales_primero_and_y_el_resto_or(self, dialog, fake_api):
-        """Varias inclusiones en AND se cruzarían y dejarían la lista vacía."""
+    def test_varios_canales_se_excluyen_todos_con_and(self, dialog, fake_api):
         self._con_dos(dialog, fake_api)
         menu = dialog.epg_mapping.row_menu([0, 1])
         next(a for a in menu.actions()
              if a.text() == "Filtrar canales").trigger()
         reglas = dialog.rules_widget.get_rules()
         assert [(r.pattern, r.operator) for r in reglas] == [
-            ("LA 1 HD", "and"), ("LA 2 HD", "or")]
+            ("!{LA 1 HD}", "and"), ("!{LA 2 HD}", "and")]
+        # se serializan como en el fichero
+        assert [r.serialize() for r in reglas] == [
+            "custom-filter:!{LA 1 HD}:0:and",
+            "custom-filter:!{LA 2 HD}:0:and"]
 
     def test_salta_a_la_pestaña_de_filtros(self, dialog, fake_api):
         self._con_dos(dialog, fake_api)
@@ -330,3 +333,28 @@ class TestFiltrarCanalDesdeElMenu:
         self._con_dos(dialog, fake_api)
         dialog._filter_channels(["LA 1 HD", "LA 1 HD"])
         assert len(dialog.rules_widget.get_rules()) == 1
+
+
+class TestAplicarFiltros:
+    """«Aplicar» de Filtros iptv guarda las reglas y reejecuta el pipeline."""
+
+    def test_manda_las_reglas_con_recarga(self, dialog, fake_api, wait_save):
+        from src.application.services.list_manager.models import FilterRule
+
+        dialog.rules_widget.add_rules([FilterRule(
+            field="custom-filter", pattern="7TV MALAGA HD", exclude=True,
+            operator="and")])
+        dialog._apply_rules_now()
+        wait_save(dialog)
+        puts = {c[1]: c[2] for c in fake_api.calls if c[0] == "put"}
+        enviado = puts["/targets/0/rules"]
+        assert enviado["reload"] is True
+        assert "custom-filter:!{7TV MALAGA HD}:0:and" in enviado["rules"]
+        assert "Filtros aplicados" in dialog.result_label.text()
+
+    def test_guardar_y_aplicar_no_se_pisan(self, dialog, fake_api, wait_save):
+        """Un «Aplicar» durante un guardado se ignora (un lote a la vez)."""
+        dialog._saving = True
+        dialog._apply_rules_now()
+        assert not [c for c in fake_api.calls if c[0] == "put"]
+        dialog._saving = False
