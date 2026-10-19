@@ -22,6 +22,8 @@ venv/
 
 # Project-local config (each user keeps their own)
 config.ini
+daemon.toml
+weteve.ini
 
 # Tooling artifacts
 .atl/
