@@ -1,5 +1,6 @@
 import logging
 import re
+import time
 from pathlib import Path
 
 import requests
@@ -17,12 +18,47 @@ def normalize_spacing(text: str) -> str:
     return " ".join(text.split())
 
 class FileM3URepository(IPlaylistRepository):
-    """Adaptador que gestiona la persistencia y carga de canales desde archivos M3U."""
+    """Adaptador que gestiona la persistencia y carga de canales desde archivos M3U.
 
-    def get_channels(self, source: str) -> list[Channel]:
-        """Carga los canales desde una URL o un archivo local."""
-        m3u_content = self._get_content(source)
-        return self._parse_m3u(m3u_content)
+    Cachea la lista ya parseada (37.600 canales, 0,4 s por recarga), como se
+    hace con la EPG: cada recarga del pipeline no tiene por qué releer la
+    misma lista.
+
+    - Fichero local: se reutiliza mientras no cambien ``mtime`` ni tamaño.
+    - URL: se reutiliza durante ``ttl_seconds`` (5 min por defecto).
+    - ``fresh=True`` ignora la cache y vuelve a leer.
+    """
+
+    DEFAULT_TTL_SECONDS = 300.0
+
+    def __init__(self, ttl_seconds: float | None = None) -> None:
+        self._ttl = (self.DEFAULT_TTL_SECONDS if ttl_seconds is None
+                     else float(ttl_seconds))
+        self._cache: dict[str, tuple[tuple, list[Channel]]] = {}
+        self._uncached = 0
+
+    def _signature(self, source: str) -> tuple:
+        """Huella de la fuente: si cambia, hay que volver a leerla."""
+        if source.startswith("http"):
+            if self._ttl <= 0:
+                self._uncached += 1
+                return ("url-sin-cache", self._uncached)
+            return ("url", int(time.monotonic() // self._ttl))
+        try:
+            stat = Path(source).stat()
+        except OSError:
+            return ("file-ausente", source)
+        return ("file", stat.st_mtime_ns, stat.st_size)
+
+    def get_channels(self, source: str, fresh: bool = False) -> list[Channel]:
+        """Carga los canales desde una URL o un archivo local (con cache)."""
+        signature = self._signature(source)
+        cached = None if fresh else self._cache.get(source)
+        if cached is not None and cached[0] == signature:
+            return list(cached[1])
+        channels = self._parse_m3u(self._get_content(source))
+        self._cache[source] = (signature, channels)
+        return list(channels)
 
     def _get_content(self, source: str) -> list[str]:
         """Obtiene las líneas del contenido M3U."""

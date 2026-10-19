@@ -1171,6 +1171,10 @@ def _source_payload(entry) -> dict:
             "refresh_min": entry.refresh_min, "enabled": entry.enabled}
 
 
+#: Espera tras el último «Filtrar canal» antes de reejecutar el pipeline.
+APPLY_DEBOUNCE_MS = 5000
+
+
 class ListManagerDialog(QDialog):
     """Diálogo principal del gestor: wizard 3 pasos + servicio web."""
 
@@ -1419,6 +1423,16 @@ class ListManagerDialog(QDialog):
         self._config_watch.timeout.connect(self._reload_config_if_changed)
         self._config_watch.start()
 
+        # Filtrar encola el recálculo: si sigues filtrando canales, solo se
+        # reejecuta el pipeline una vez, 5 s después del último cambio.
+        self._apply_timer = QTimer(self)
+        self._apply_timer.setSingleShot(True)
+        self._apply_timer.setInterval(APPLY_DEBOUNCE_MS)
+        self._apply_timer.timeout.connect(self._flush_pending_apply)
+        # El preview solo se refresca al entrar en la pestaña (y al editar
+        # reglas): pedirlo en cada repintado era trabajo duplicado.
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+
     # -- refresco desde disco -------------------------------------------------
 
     def _config_file_signature(self) -> tuple[int, int] | None:
@@ -1470,6 +1484,21 @@ class ListManagerDialog(QDialog):
         finally:
             self._loading_targets = False
 
+    def _flush_pending_apply(self) -> None:
+        """Aplica ya los filtros encolados (temporizador, Aplicar, cerrar)."""
+        self._apply_timer.stop()
+        if not self._pending_apply:
+            return
+        if self._saving:
+            return                      # al terminar el guardado se reintenta
+        self._pending_apply = False
+        self._apply_rules_now()
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Al entrar en «Filtros iptv» se refresca el preview (una vez)."""
+        if self.tabs.widget(index) is self.tab_filters:
+            self._schedule_filter_preview()
+
     def _refresh_guides(self) -> None:
         """«Actualizar guías»: descarga de nuevo el XMLTV y reejecuta.
 
@@ -1519,6 +1548,8 @@ class ListManagerDialog(QDialog):
         client = self._api_client()
         if client is None:
             return
+        self._apply_timer.stop()
+        self._pending_apply = False
         target_id = self._target_id()
         reglas = self.rules_widget.get_rules()
         self._saving = True
@@ -1570,13 +1601,15 @@ class ListManagerDialog(QDialog):
             for nombre in elegidos
         ]
         self.rules_widget.add_rules(reglas)
-        self._schedule_filter_preview()
+        self._pending_apply = True
         if self._saving:
-            self._pending_apply = True
             self.result_label.setText(
                 "Filtro añadido: se aplicará al terminar el guardado en curso…")
         else:
-            self._apply_rules_now()
+            self._apply_timer.start()
+            self.result_label.setText(
+                f"Filtro añadido: se aplicará en {APPLY_DEBOUNCE_MS // 1000} s "
+                "(o pulsa «Aplicar» ahora).")
 
     def _load_priorities(self) -> None:
         """Pinta la prioridad de calidad del target activo (fichero o fábrica)."""
@@ -1602,6 +1635,7 @@ class ListManagerDialog(QDialog):
         target_id = self.target_combo.currentData()
         if target_id is None or str(target_id) == self._target_id():
             return
+        self._flush_pending_apply()   # lo pendiente es del target anterior
         self._config["target_id"] = str(target_id)
         self._apply_config_from_disk()
         self.name_edit.setText(str(self._config.get("name") or ""))
@@ -1649,6 +1683,9 @@ class ListManagerDialog(QDialog):
             self._refresh_mapping()
         finally:
             self._reloading = False
+        # las reglas han cambiado en disco: el preview de «qué queda» ya no
+        # vale. Es un evento externo (no un repintado), así que se pide ya.
+        self._refresh_filter_preview()
 
 
     def _on_save(self) -> None:
@@ -1663,6 +1700,9 @@ class ListManagerDialog(QDialog):
         """
         if self._saving:
             return  # ya hay un guardado en marcha: no se encola otro
+        # el lote incluye las reglas: lo pendiente va dentro
+        self._apply_timer.stop()
+        self._pending_apply = False
         config_path = self._config.get("_config_path")
         client = self._api_client()
         if config_path is None or client is None:
@@ -2069,7 +2109,6 @@ class ListManagerDialog(QDialog):
             aviso = (" — catálogo incompleto: el demonio no devolvió todo "
                      "(faltan canales en las listas)")
         self.result_label.setText("Demonio: " + "; ".join(parts) + "." + aviso)
-        self._refresh_filter_preview()
 
     # ------------------------------------------------------------------
     def _request_logos(self) -> None:
@@ -2109,17 +2148,29 @@ class ListManagerDialog(QDialog):
         self._maybe_stop_daemon()
         self._config_watch.stop()
         self._preview_timer.stop()
+        self._apply_timer.stop()
         self._logo_service.shutdown()
-        # Un guardado en vuelo no debe retener la ventana: el hilo termina su
-        # lote y el resultado se descarta (``_on_save_finished`` comprueba si
-        # el diálogo sigue vivo).
-        self._save_pool.shutdown(wait=False, cancel_futures=True)
+        if self._pending_apply:
+            # No se pierde un filtro pendiente: se manda y se espera (~2 s).
+            self._pending_apply = False
+            self._apply_rules_now()
+            self._save_pool.shutdown(wait=True)
+        else:
+            # Un guardado en vuelo no debe retener la ventana: el hilo termina
+            # y el resultado se descarta (``_on_save_finished`` lo comprueba).
+            self._save_pool.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)
 
     def reject(self) -> None:
         """Botón Cerrar: mismo camino que el aspa de la ventana."""
         self._maybe_stop_daemon()
-        self._save_pool.shutdown(wait=False, cancel_futures=True)
+        self._apply_timer.stop()
+        if self._pending_apply:
+            self._pending_apply = False
+            self._apply_rules_now()
+            self._save_pool.shutdown(wait=True)
+        else:
+            self._save_pool.shutdown(wait=False, cancel_futures=True)
         super().reject()
 
     def _api_client(self) -> ApiClient | None:
