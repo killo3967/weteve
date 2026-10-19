@@ -17,13 +17,14 @@ def dialog(qtbot):
 class TestTabs:
     def test_tab_widget_existe(self, dialog):
         assert dialog.tabs is not None
-        assert dialog.tabs.count() == 7
+        assert dialog.tabs.count() == 8
 
     def test_titulos_de_pestanas(self, dialog):
         titles = [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())]
         assert titles == [
             "Estado", "Listas IPTV", "Filtros iptv", "Listas EPG",
-            "Mapeado IPTV <-> EPG", "Configuración", "Logs",
+            "Mapeado IPTV <-> EPG", "Catálogo de la guía", "Configuración",
+            "Logs",
         ]
 
     def test_widgets_dentro_de_pestanas(self, dialog):

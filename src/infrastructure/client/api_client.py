@@ -184,6 +184,17 @@ class ApiClient:
         return self._all_pages(
             lambda offset: self.epg_channels(target_id, offset=offset))
 
+    def epg_catalog(self, target_id: str, limit: int = 1000,
+                    offset: int = 0) -> tuple[int, dict]:
+        """Catálogo de la guía: dial, nombre, código interno y estado."""
+        return self.get(f"/targets/{target_id}/catalog",
+                        limit=limit, offset=offset)
+
+    def all_epg_catalog(self, target_id: str) -> tuple[int, dict]:
+        """Tabla de referencia completa (todas las páginas)."""
+        return self._all_pages(
+            lambda offset: self.epg_catalog(target_id, offset=offset))
+
     def _all_pages(self, fetch,
                    max_pages: int = 100) -> tuple[int, dict]:
         """Recorre las páginas hasta ``total`` y devuelve una sola respuesta.

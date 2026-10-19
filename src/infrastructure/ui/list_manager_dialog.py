@@ -668,6 +668,88 @@ def _sin_acentos(texto: str) -> str:
     return "".join(c for c in plano if not unicodedata.combining(c)).lower()
 
 
+class CatalogWidget(QWidget):
+    """Tabla de referencia de la guía: dial, canal, código interno y guías.
+
+    No mapea nada: es el dialecto del proveedor puesto en filas, para saber
+    qué canal es cada código (``BBDRA`` = «BBC Series», antes «BBC Drama»), qué
+    número le toca y si ya está en la lista servida.
+    """
+
+    COL_DIAL, COL_NAME, COL_CODE, COL_LISTS, COL_SERVED = range(5)
+    HEADERS = ("Dial", "Canal", "Código", "Guías", "En tu lista")
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        fila = QHBoxLayout()
+        self.name_filter = QLineEdit(self)
+        self.name_filter.setPlaceholderText("Filtrar por nombre o código…")
+        self.name_filter.setClearButtonEnabled(True)
+        self.name_filter.setFixedWidth(260)
+        self.name_filter.textChanged.connect(lambda _t: self._apply_filter())
+        fila.addWidget(self.name_filter)
+        self.summary = QLabel("", self)
+        fila.addWidget(self.summary)
+        fila.addStretch(1)
+        layout.addLayout(fila)
+
+        self.table = QTableWidget(0, len(self.HEADERS), self)
+        self.table.setHorizontalHeaderLabels(list(self.HEADERS))
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        header = self.table.horizontalHeader()
+        if header is not None:
+            for columna in range(len(self.HEADERS)):
+                header.setSectionResizeMode(
+                    columna, QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(self.COL_DIAL, 60)
+        self.table.setColumnWidth(self.COL_NAME, 320)
+        self.table.setColumnWidth(self.COL_CODE, 90)
+        self.table.setColumnWidth(self.COL_LISTS, 220)
+        self.table.setColumnWidth(self.COL_SERVED, 90)
+        layout.addWidget(self.table)
+
+    def set_channels(self, rows) -> None:
+        """Repuebla con el catálogo del daemon (ya ordenado por dial)."""
+        filas = list(rows or [])
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(filas))
+        for indice, fila in enumerate(filas):
+            dial = fila.get("dial")
+            self.table.setItem(indice, self.COL_DIAL,
+                               QTableWidgetItem("" if dial is None else str(dial)))
+            self.table.setItem(indice, self.COL_NAME,
+                               QTableWidgetItem(str(fila.get("name") or "")))
+            self.table.setItem(indice, self.COL_CODE,
+                               QTableWidgetItem(str(fila.get("code") or "")))
+            guias = fila.get("lists") or []
+            self.table.setItem(indice, self.COL_LISTS,
+                               QTableWidgetItem(", ".join(guias)))
+            self.table.setItem(
+                indice, self.COL_SERVED,
+                QTableWidgetItem("sí" if fila.get("served") else "no"))
+        en_lista = sum(1 for f in filas if f.get("served"))
+        self.summary.setText(f"{len(filas)} canales en la guía · "
+                             f"{en_lista} en tu lista")
+        self._apply_filter()
+
+    def _apply_filter(self) -> None:
+        buscado = _sin_acentos(self.name_filter.text().strip())
+        for row in range(self.table.rowCount()):
+            nombre = self.table.item(row, self.COL_NAME)
+            codigo = self.table.item(row, self.COL_CODE)
+            texto = _sin_acentos(f"{nombre.text() if nombre else ''} "
+                                 f"{codigo.text() if codigo else ''}")
+            self.table.setRowHidden(row, bool(buscado) and buscado not in texto)
+
+    def visible_rows(self) -> int:
+        return sum(1 for row in range(self.table.rowCount())
+                   if not self.table.isRowHidden(row))
+
+
 class EpgMappingWidget(QWidget):
     """Editor manual de asociación EPG con control de activación por canal.
 
@@ -1361,6 +1443,8 @@ class ListManagerDialog(QDialog):
         self.result_label = QLabel("")
         epg_layout.addWidget(self.result_label)
         self.tabs.addTab(self.tab_mapping, "Mapeado IPTV <-> EPG")
+        self.tab_catalog = CatalogWidget(self)
+        self.tabs.addTab(self.tab_catalog, "Catálogo de la guía")
 
         # Descarga asíncrona de logos con caché en disco (TTL 7 días).
         from src.infrastructure.ui.logo_cache_service import LogoCacheService
@@ -1567,9 +1651,24 @@ class ListManagerDialog(QDialog):
         self._apply_rules_now()
 
     def _on_tab_changed(self, index: int) -> None:
-        """Al entrar en «Filtros iptv» se refresca el preview (una vez)."""
-        if self.tabs.widget(index) is self.tab_filters:
+        """Al entrar en una pestaña que lee del demonio, se refresca."""
+        widget = self.tabs.widget(index)
+        if widget is self.tab_filters:
             self._schedule_filter_preview()
+        elif widget is getattr(self, "tab_catalog", None):
+            self._refresh_catalog()
+
+    def _refresh_catalog(self) -> None:
+        """Repuebla el catálogo (dial, nombre, código) desde el demonio."""
+        client = self._api_client()
+        if client is None:
+            return
+        code, body = client.all_epg_catalog(self._target_id())
+        if code != 200:
+            self.tab_catalog.summary.setText(
+                f"Demonio: {body.get('error', f'HTTP {code}')}")
+            return
+        self.tab_catalog.set_channels(body.get("channels") or [])
 
     def _refresh_guides(self) -> None:
         """«Actualizar guías»: descarga de nuevo el XMLTV y reejecuta.

@@ -146,6 +146,12 @@ class TargetService:
         return self._supervisor.list_epg_channels(
             target_id, limit=int(limit), offset=int(offset))
 
+    def epg_catalog(self, target_id: str, limit: int = 200,
+                    offset: int = 0) -> dict:
+        """Catálogo de la guía con dial, código interno y si está en la lista."""
+        return self._supervisor.epg_catalog(
+            target_id, limit=int(limit), offset=int(offset))
+
     def groups(self, target_id: str) -> dict:
         return {"groups": self._supervisor.groups(target_id)}
 

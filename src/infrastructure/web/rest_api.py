@@ -14,6 +14,7 @@ Lecturas implementadas:
   GET /api/v1/targets/{id}/channels            ?limit&offset&unmatched_only
   GET /api/v1/targets/{id}/mapping-candidates  ?limit&offset
   GET /api/v1/targets/{id}/epg-channels        ?limit&offset
+  GET /api/v1/targets/{id}/catalog             ?limit&offset
   GET /api/v1/sources
   GET /api/v1/targets/{id}/groups
   GET /api/v1/targets/{id}/group-fields
@@ -151,6 +152,9 @@ class RestApi:
                 include_served=_bool_param(query, "include_served"))
         if sub == "epg-channels":
             return 200, self._service.epg_channels(
+                target_id, limit=limit, offset=offset)
+        if sub == "catalog":
+            return 200, self._service.epg_catalog(
                 target_id, limit=limit, offset=offset)
         if sub == "groups":
             return 200, self._service.groups(target_id)

@@ -35,9 +35,21 @@ from src.application.services.list_manager.playlist_builder import (
     build_m3u,
     build_xmltv,
 )
+from src.application.services.list_manager.quality import base_name
 from src.infrastructure.web.playlist_server import LOGOS_PREFIX, url_base_for
 
 logger = logging.getLogger(__name__)
+
+
+def _parece_codigo(channel_id: str, nombre: str) -> bool:
+    """True si el id es un código de cadena (BBDRA, UCL) y no el nombre."""
+    cid = str(channel_id or "").strip()
+    visible = str(nombre or "").strip()
+    if not cid or cid.lower() == visible.lower():
+        return False
+    if " " in cid or len(cid) > 8 or not cid.isupper():
+        return False
+    return True
 
 
 def _nombre_con_codigo(channel_id: str, nombre: str) -> str:
@@ -48,13 +60,10 @@ def _nombre_con_codigo(channel_id: str, nombre: str) -> str:
     y ``UCL`` es «UEFA Champions League». Sin el código, buscar el canal por su
     nombre viejo en el desplegable es imposible.
     """
-    cid = str(channel_id or "").strip()
     visible = str(nombre or "").strip()
-    if not cid or not visible or cid.lower() == visible.lower():
-        return visible or cid
-    if " " in cid or len(cid) > 8 or not cid.isupper():
-        return visible
-    return f"{visible} ({cid})"
+    if not _parece_codigo(channel_id, nombre):
+        return visible or str(channel_id or "").strip()
+    return f"{visible} ({channel_id})"
 
 class TargetSupervisor:
     """Gestiona N targets: pipeline cacheado + servidor HTTP por target."""
@@ -487,6 +496,56 @@ class TargetSupervisor:
                               "lists": list(lists.get(cid, ()))}
                              for cid, name in page],
                 "total": total, "count": len(page), "offset": int(offset)}
+
+    def epg_catalog(self, target_id: str, limit: int = 200,
+                    offset: int = 0) -> dict:
+        """Tabla de referencia de la guía: dial, nombre, código y guías.
+
+        Sale de los metadatos de canal que publica la guía (``channel_info``),
+        no de la lista servida: es el dialecto real del proveedor, con sus
+        códigos (``BBDRA``, ``UCL``) y sus huecos. ``served`` dice qué canales
+        de ese catálogo están hoy en la lista del target.
+        """
+        epg = None
+        lists: dict[str, tuple[str, ...]] = {}
+        servidos: set[str] = set()
+        nombres_servidos: set[str] = set()
+        with self._lock:
+            target = self._targets.get(target_id)
+            if target is not None:
+                epg = self._pipeline.get_epg(target.source_index)
+                lists = self._pipeline.epg_lists(target.source_index)
+                result = self._results.get(target_id)
+                if result is not None:
+                    servidos = {c.matched_epg_id for c in result.channels
+                                if c.matched_epg_id}
+                    # Un mapeo manual puede apuntar a otra guía: el canal de
+                    # Movistar sigue estando «en la lista» por nombre.
+                    nombres_servidos = {base_name(c.name)
+                                        for c in result.channels}
+        if epg is None:
+            return {"error": (f"target {target_id} sin EPG cargado: "
+                                "ejecuta reload_target o run_pipeline")}
+        info = epg.channel_info
+        filas = []
+        for cid, nombre in epg.channel_names.items():
+            meta = info.get(cid)
+            en_lista = cid in servidos or base_name(nombre) in nombres_servidos
+            filas.append({
+                "id": cid,
+                "name": nombre,
+                "code": cid if _parece_codigo(cid, nombre) else "",
+                "dial": meta.dial if meta is not None else None,
+                "logo": (meta.logo if meta is not None else None) or "",
+                "lists": list(lists.get(cid, ())),
+                "served": en_lista,
+            })
+        filas.sort(key=lambda f: (f["dial"] is None, f["dial"] or 0,
+                                  str(f["name"]).lower()))
+        total = len(filas)
+        page = filas[int(offset):int(offset) + int(limit)]
+        return {"channels": page, "total": total, "count": len(page),
+                "offset": int(offset)}
 
     def suggest_epg_matches(self, target_id: str, channel_name: str,
                             limit: int = 5) -> dict:

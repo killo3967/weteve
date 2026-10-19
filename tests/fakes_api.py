@@ -56,6 +56,16 @@ class FakeApi:
     def all_epg_channels(self, target_id: str):
         return self.epg_channels(target_id)
 
+    def all_epg_catalog(self, target_id: str):
+        return self.epg_catalog(target_id)
+
+    def epg_catalog(self, target_id: str, limit: int = 1000):
+        if self.down:
+            return 0, {"error": "sin conexión"}
+        rows = list(getattr(self, "catalog", []) or [])
+        return 200, {"channels": rows, "total": len(rows),
+                     "count": len(rows), "offset": 0}
+
     def epg_channels(self, target_id: str, limit: int = 1000):
         if self.down:
             return 0, {"error": "sin conexión"}
