@@ -23,6 +23,7 @@ class FakeApi:
         #: targets que devuelve GET /targets (id -> nombre)
         self.targets_map: dict[str, str] = {"0": "test"}
         self.calls: list[tuple] = []
+        self.last_put_timeout: float | None = None
 
     # -- lecturas ------------------------------------------------------------
 
@@ -97,8 +98,9 @@ class FakeApi:
 
     # -- escrituras ----------------------------------------------------------
 
-    def put(self, path: str, payload: dict):
+    def put(self, path: str, payload: dict, timeout: float | None = None):
         self.calls.append(("put", path, payload))
+        self.last_put_timeout = timeout
         return 200, {"ok": True}
 
     def set_sources(self, sources: list[dict]):

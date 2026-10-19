@@ -351,6 +351,10 @@ class TestAplicarFiltros:
         assert enviado["reload"] is True
         assert "custom-filter:!{7TV MALAGA HD}:0:and" in enviado["rules"]
         assert "Filtros aplicados" in dialog.result_label.text()
+        # la petición reejecuta el pipeline: no puede cortar al timeout corto
+        from src.infrastructure.client.api_client import PIPELINE_TIMEOUT
+
+        assert fake_api.last_put_timeout == PIPELINE_TIMEOUT
 
     def test_guardar_y_aplicar_no_se_pisan(self, dialog, fake_api, wait_save):
         """Un «Aplicar» durante un guardado se ignora (un lote a la vez)."""

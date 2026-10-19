@@ -48,7 +48,10 @@ from src.application.services.list_manager.models import (
 )
 from src.application.services.list_manager.playlist_builder import build_dummy_epg_id
 from src.application.services.list_manager.source_catalog import SourceCatalog
-from src.infrastructure.client.api_client import ApiClient
+from src.infrastructure.client.api_client import (
+    PIPELINE_TIMEOUT,
+    ApiClient,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1425,8 +1428,12 @@ class ListManagerDialog(QDialog):
         serializadas = [rule.serialize() for rule in reglas]
 
         def job() -> dict:
+            # reload=True reejecuta el pipeline (segundos): con el timeout
+            # corto el cliente cortaba la petición y el demonio seguía
+            # trabajando; la GUI avisaba de un fallo que no había ocurrido.
             code, body = client.put(f"/targets/{target_id}/rules",
-                                    {"rules": serializadas, "reload": True})
+                                    {"rules": serializadas, "reload": True},
+                                    timeout=PIPELINE_TIMEOUT)
             if code == 0 or code >= 400 or "error" in body:
                 return {"ok": False, "body": body, "code": code,
                         "label": "filtros"}
