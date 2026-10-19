@@ -152,6 +152,21 @@ class FilterRulesWidget(QWidget):
         self.table.setCellWidget(row, 5, self._build_arrows_widget(row))
         self._notify_changed()
 
+    def add_rules(self, rules: list[FilterRule]) -> None:
+        """Añade reglas al final avisando una sola vez (una vista previa)."""
+        if not rules:
+            return
+        self._suspend_changes = True
+        try:
+            for rule in rules:
+                self._add_row(field=rule.field, text=rule.pattern,
+                              exclude=rule.exclude,
+                              case_sensitive=rule.case_sensitive,
+                              operator=rule.operator)
+        finally:
+            self._suspend_changes = False
+        self._notify_changed()
+
     def _remove_row(self) -> None:
         row = self.table.currentRow()
         if row >= 0:
@@ -575,6 +590,9 @@ class EpgMappingWidget(QWidget):
     # La casilla «solo los que necesitan atención» cambia qué se pide al
     # daemon: el diálogo escucha y repuebla.
     filter_changed = pyqtSignal()
+    # «Filtrar canal» del menú contextual: nombres elegidos, para añadirlos a
+    # la pestaña de reglas.
+    filter_requested = pyqtSignal(list)
 
     # Columnas de la tabla
     COL_NAME, COL_URL, COL_LOGO, COL_EPG, COL_ACTIVE = range(5)
@@ -909,6 +927,20 @@ class EpgMappingWidget(QWidget):
                 lambda _checked=False, valor=habilitar:
                 self.set_rows_enabled(rows, valor))
             menu.addAction(accion)
+        menu.addSeparator()
+        nombres = [self.table.item(fila, self.COL_NAME).text()
+                   for fila in rows
+                   if self.table.item(fila, self.COL_NAME) is not None]
+        filtrar = QAction("Filtrar canal" if len(nombres) == 1
+                          else "Filtrar canales", menu)
+        filtrar.setToolTip(
+            "Añade el canal a la pestaña Filtros iptv como regla AND "
+            "(varios: el primero AND y el resto OR, para que la lista no "
+            "quede vacía)")
+        filtrar.triggered.connect(
+            lambda _checked=False, elegidos=nombres:
+            self.filter_requested.emit(elegidos))
+        menu.addAction(filtrar)
         return menu
 
     def _show_row_menu(self, pos) -> None:
@@ -1178,6 +1210,7 @@ class ListManagerDialog(QDialog):
         epg_layout = QVBoxLayout(self.tab_mapping)
         self.epg_mapping = EpgMappingWidget()
         self.epg_mapping.filter_changed.connect(self._refresh_mapping)
+        self.epg_mapping.filter_requested.connect(self._filter_channels)
         epg_layout.addWidget(self.epg_mapping)
         self.result_label = QLabel("")
         epg_layout.addWidget(self.result_label)
@@ -1368,6 +1401,26 @@ class ListManagerDialog(QDialog):
             self.target_combo.setCurrentIndex(max(idx, 0))
         finally:
             self._loading_targets = False
+
+    def _filter_channels(self, names: list[str]) -> None:
+        """Añade los canales del mapeo a las reglas (incluir, AND/OR).
+
+        Con varios canales la primera regla va como AND (afina la lista) y las
+        demás como OR: varias reglas de inclusión en AND se cruzarían entre sí
+        y dejarían la lista vacía.
+        """
+        elegidos = [nombre for nombre in dict.fromkeys(names) if nombre]
+        if not elegidos:
+            return
+        reglas = [
+            FilterRule(field="custom-filter", pattern=nombre, exclude=False,
+                       case_sensitive=False,
+                       operator="and" if posicion == 0 else "or")
+            for posicion, nombre in enumerate(elegidos)
+        ]
+        self.rules_widget.add_rules(reglas)
+        self.tabs.setCurrentWidget(self.tab_filters)
+        self._schedule_filter_preview()
 
     def _load_priorities(self) -> None:
         """Pinta la prioridad de calidad del target activo (fichero o fábrica)."""

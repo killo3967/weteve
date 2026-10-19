@@ -278,3 +278,55 @@ class TestDuplicadosDeCalidadEnLaTabla:
         self._dos_variantes(fake_api)
         dialog._refresh_mapping()
         assert "variantes descartadas por calidad" in dialog.result_label.text()
+
+
+class TestFiltrarCanalDesdeElMenu:
+    """«Filtrar canal»: el canal elegido acaba en las reglas como inclusión."""
+
+    def _con_dos(self, dialog, fake_api):
+        fake_api.served_channels = [
+            _row(name="LA 1 HD", url="http://x/la1.ts", tvg_id="La 1 HD"),
+            _row(name="LA 2 HD", url="http://x/la2.ts", tvg_id="La 2"),
+        ]
+        fake_api.epg = [{"id": "La 1 HD", "display_name": "La 1 HD"},
+                        {"id": "La 2", "display_name": "La 2"}]
+        dialog._refresh_mapping()
+
+    def test_el_menu_ofrece_filtrar_canal(self, dialog, fake_api):
+        self._con_dos(dialog, fake_api)
+        textos = [a.text() for a in dialog.epg_mapping.row_menu([0]).actions()
+                  if a.text()]
+        assert "Filtrar canal" in textos
+
+    def test_un_canal_se_añade_como_and_e_incluir(self, dialog, fake_api):
+        self._con_dos(dialog, fake_api)
+        menu = dialog.epg_mapping.row_menu([0])
+        next(a for a in menu.actions()
+             if a.text() == "Filtrar canal").trigger()
+        reglas = dialog.rules_widget.get_rules()
+        assert len(reglas) == 1
+        regla = reglas[0]
+        assert regla.field == "custom-filter"
+        assert regla.pattern == "LA 1 HD"
+        assert regla.exclude is False
+        assert regla.operator == "and"
+
+    def test_varios_canales_primero_and_y_el_resto_or(self, dialog, fake_api):
+        """Varias inclusiones en AND se cruzarían y dejarían la lista vacía."""
+        self._con_dos(dialog, fake_api)
+        menu = dialog.epg_mapping.row_menu([0, 1])
+        next(a for a in menu.actions()
+             if a.text() == "Filtrar canales").trigger()
+        reglas = dialog.rules_widget.get_rules()
+        assert [(r.pattern, r.operator) for r in reglas] == [
+            ("LA 1 HD", "and"), ("LA 2 HD", "or")]
+
+    def test_salta_a_la_pestaña_de_filtros(self, dialog, fake_api):
+        self._con_dos(dialog, fake_api)
+        dialog.epg_mapping.row_menu([0]).actions()[-1].trigger()
+        assert dialog.tabs.currentWidget() is dialog.tab_filters
+
+    def test_los_nombres_repetidos_se_añaden_una_vez(self, dialog, fake_api):
+        self._con_dos(dialog, fake_api)
+        dialog._filter_channels(["LA 1 HD", "LA 1 HD"])
+        assert len(dialog.rules_widget.get_rules()) == 1
