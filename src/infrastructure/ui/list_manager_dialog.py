@@ -1558,9 +1558,7 @@ class ListManagerDialog(QDialog):
             metrics = (body or {}).get("metrics") or {}
             return {"ok": True, "served": metrics.get("filtered_count")}
 
-        self._save_pool.submit(job).add_done_callback(
-            lambda fut: self.save_finished.emit(fut.result())
-            if not fut.cancelled() else None)
+        self._save_pool.submit(job).add_done_callback(self._on_save_done)
 
     def _apply_rules_now(self) -> None:
         """«Aplicar» de Filtros iptv: guarda las reglas y reejecuta el pipeline.
@@ -1603,9 +1601,7 @@ class ListManagerDialog(QDialog):
             metrics = (body or {}).get("metrics") or {}
             return {"ok": True, "served": metrics.get("filtered_count")}
 
-        self._save_pool.submit(job).add_done_callback(
-            lambda fut: self.save_finished.emit(fut.result())
-            if not fut.cancelled() else None)
+        self._save_pool.submit(job).add_done_callback(self._on_save_done)
 
     def _filter_channels(self, names: list[str]) -> None:
         """Excluye del mapeado los canales elegidos y lo aplica al momento.
@@ -1742,9 +1738,33 @@ class ListManagerDialog(QDialog):
         self.result_label.setText(
             "Guardando en el demonio… (el pipeline tarda unos segundos)")
         fut = self._save_pool.submit(self._save_job, payload)
-        fut.add_done_callback(
-            lambda f: self.save_finished.emit(f.result())
-            if not f.cancelled() else None)
+        fut.add_done_callback(self._on_save_done)
+
+    def _on_save_done(self, future) -> None:
+        """Entrega el resultado del trabajo en segundo plano (corre en el pool).
+
+        ``closeEvent`` no espera a un guardado en vuelo —la ventana no debe
+        retenerse—, así que este callback puede llegar con la ventana ya
+        destruida. Emitir ahí la señal lanzaba ``RuntimeError: wrapped C/C++
+        object of type ListManagerDialog has been deleted`` desde
+        ``concurrent.futures``, que lo registraba como error propio. Se
+        comprueba el objeto y, si se destruyó entre la comprobación y el
+        ``emit``, el resultado se descarta en silencio: no hay a quién avisar.
+        """
+        from PyQt6 import sip
+
+        if future.cancelled() or sip.isdeleted(self):
+            return
+        try:
+            result = future.result()
+        except Exception as exc:  # el job promete un dict; esto es un fallo suyo
+            logger.exception("trabajo en segundo plano falló: %s", exc)
+            result = {"ok": False, "body": {"error": str(exc)}, "code": 0,
+                      "label": "guardado"}
+        try:
+            self.save_finished.emit(result)
+        except RuntimeError:
+            return  # ventana destruida entre la comprobación y la señal
 
     def save_in_progress(self) -> bool:
         """True mientras el guardado en segundo plano está en marcha."""
