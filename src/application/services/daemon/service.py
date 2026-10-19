@@ -9,6 +9,7 @@ pipeline). Solo ``run`` ejecuta.
 """
 
 import logging
+import time
 from dataclasses import replace
 from typing import cast
 
@@ -333,12 +334,17 @@ class TargetService:
         """
         epg_path = (self._store.get_epg_path(target_id)
                     if self._store is not None else None)
+        t0 = time.perf_counter()
         self._store.save(target_id, new, epg_path=epg_path, bind=bind)
+        t_file = time.perf_counter()
         out: dict = {"ok": True, "target": serialize_target(new),
                      "reloaded": False}
         if reload:
             out["reloaded"] = self._supervisor.reload_target(
                 target_id, new, epg_path=epg_path)
+            t_reload = time.perf_counter()
+            logger.info("guardado target %s: fichero=%.2fs recarga=%.2fs",
+                        target_id, t_file - t0, t_reload - t_file)
             out["metrics"] = self._supervisor.metrics(target_id)
         return out
 

@@ -19,6 +19,7 @@ registra en el pipeline junto a la fuente, igual que hace el diálogo Qt.
 
 import logging
 import threading
+import time
 
 from src.application.services.daemon.scheduler import RefreshScheduler, target_interval_min
 from src.application.services.list_manager.epg_matcher import EpgMatcher
@@ -54,14 +55,21 @@ class TargetSupervisor:
         # cartera de fuentes: callable() -> SourceCatalog (inyectable p/ tests)
         self._catalog_fn = catalog_fn
         self._scheduler = RefreshScheduler(self._scheduled_reload)
+        # tiempos de la última recarga por target (perfilado del flujo)
+        self._timings: dict[str, dict] = {}
 
     # -- helpers internos ----------------------------------------------------
 
     @staticmethod
     def _render(result, epg) -> tuple[str, str]:
         """Convierte un PipelineResult en (playlist, epg_xml) listos para servir."""
+        t0 = time.perf_counter()
         playlist = build_m3u(result.channels)
+        t1 = time.perf_counter()
         epg_xml = build_xmltv(result.channels, epg)
+        t2 = time.perf_counter()
+        logger.info("render: playlist=%.2fs epg=%.2fs (%d canales servidos)",
+                    t1 - t0, t2 - t1, len(result.channels))
         return playlist, epg_xml
 
     def _ensure_source(self, target: PipelineTarget, epg_path: str | None,
@@ -219,8 +227,11 @@ class TargetSupervisor:
                         epg_path or self._epg_paths.get(target_id))
                 current_epg = self._epg_paths.get(target_id)
             try:
+                t_fuentes = time.perf_counter()
                 self._ensure_source(tgt, current_epg, refresh_epg=refresh_epg)
+                t_pipeline = time.perf_counter()
                 result = self._pipeline.run(tgt)
+                t_run = time.perf_counter()
             except Exception as e:
                 logger.error("Pipeline falló al recargar %s: %s", target_id, e)
                 with self._lock:
@@ -228,6 +239,20 @@ class TargetSupervisor:
                 return False
             epg = self._pipeline.get_epg(tgt.source_index)
             content = self._render(result, epg)
+            t_render = time.perf_counter()
+            self._timings[target_id] = {
+                "fuentes": round(t_pipeline - t_fuentes, 3),
+                "pipeline": round(t_run - t_pipeline, 3),
+                "render": round(t_render - t_run, 3),
+                "total": round(t_render - t_fuentes, 3),
+                "refresh_epg": bool(refresh_epg),
+            }
+            logger.info(
+                "recarga %s: fuentes=%.2fs pipeline=%.2fs render=%.2fs "
+                "total=%.2fs (guias %s)", target_id,
+                t_pipeline - t_fuentes, t_run - t_pipeline,
+                t_render - t_run, t_render - t_fuentes,
+                "releidas" if refresh_epg else "de cache")
             with self._lock:
                 self._remember(target_id, result)
                 self._schedule_refresh(target_id, tgt)
@@ -472,6 +497,7 @@ class TargetSupervisor:
             "filtered_count": result.filtered_count,
             "unmatched_count": len(result.unmatched),
             "duplicates_count": len(result.excluded_duplicate),
+            "timings": dict(self._timings.get(target_id, {})),
         }
         if error:
             out["error"] = error

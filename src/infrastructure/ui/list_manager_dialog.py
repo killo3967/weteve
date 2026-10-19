@@ -6,6 +6,7 @@ en el pipeline (application) y en el servidor (infrastructure/web).
 
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -1436,6 +1437,7 @@ class ListManagerDialog(QDialog):
             return
         target_id = self._target_id()
         self._saving = True
+        self._job_started = time.monotonic()
         self._save_pending = {"refresh_guides": True}
         self._config_watch.stop()
         if self._save_button is not None:
@@ -1443,7 +1445,10 @@ class ListManagerDialog(QDialog):
         self.result_label.setText("Descargando guías EPG…")
 
         def job() -> dict:
+            t_http = time.monotonic()
             code, body = client.refresh_epg(target_id)
+            logger.info("actualizar guías: demonio=%.2fs (HTTP %s)",
+                        time.monotonic() - t_http, code)
             if code == 0 or code >= 400 or "error" in body:
                 return {"ok": False, "body": body, "code": code,
                         "label": "guías"}
@@ -1469,6 +1474,7 @@ class ListManagerDialog(QDialog):
         target_id = self._target_id()
         reglas = self.rules_widget.get_rules()
         self._saving = True
+        self._job_started = time.monotonic()
         self._save_pending = {"rules_objects": reglas}
         self._config_watch.stop()
         if self._save_button is not None:
@@ -1480,9 +1486,12 @@ class ListManagerDialog(QDialog):
             # reload=True reejecuta el pipeline (segundos): con el timeout
             # corto el cliente cortaba la petición y el demonio seguía
             # trabajando; la GUI avisaba de un fallo que no había ocurrido.
+            t_http = time.monotonic()
             code, body = client.put(f"/targets/{target_id}/rules",
                                     {"rules": serializadas, "reload": True},
                                     timeout=PIPELINE_TIMEOUT)
+            logger.info("aplicar filtros: demonio=%.2fs (HTTP %s)",
+                        time.monotonic() - t_http, code)
             if code == 0 or code >= 400 or "error" in body:
                 return {"ok": False, "body": body, "code": code,
                         "label": "filtros"}
@@ -1763,21 +1772,27 @@ class ListManagerDialog(QDialog):
         # escritura ajena a la firma del vigilante: no hay que reaccionar
         self._config_signature = self._config_file_signature()
         self._api_ready = False
+        t_mapeado = time.monotonic()
         self._refresh_mapping()
+        t_mapeado = time.monotonic() - t_mapeado
         self.status_panel.refresh()
+        total = time.monotonic() - getattr(self, "_job_started",
+                                           time.monotonic())
+        logger.info("trabajo en la GUI: repintar mapeado=%.2fs total=%.2fs",
+                    t_mapeado, total)
         served = result.get("served")
         if "name" in payload:
             self.result_label.setText(
                 f"Guardado en el demonio: {served if served is not None else '—'} "
-                f"canales servidos (puerto {payload.get('port')}).")
+                f"canales servidos (puerto {payload.get('port')}, {total:.1f} s).")
         elif payload.get("refresh_guides"):
             self.result_label.setText(
                 f"Guías actualizadas: {served if served is not None else '—'} "
-                "canales servidos.")
+                f"canales servidos ({total:.1f} s).")
         else:
             self.result_label.setText(
                 f"Filtros aplicados: {served if served is not None else '—'} "
-                "canales servidos.")
+                f"canales servidos ({total:.1f} s).")
         if self._pending_apply:
             # había un filtro esperando: se manda ahora, con las reglas al día
             self._pending_apply = False

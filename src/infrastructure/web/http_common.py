@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from http.server import ThreadingHTTPServer
 
 logger = logging.getLogger(__name__)
@@ -58,9 +59,21 @@ class AccessLogMixin:
     # Lo aporta BaseHTTPRequestHandler en las tres subclases.
     client_address: tuple[str, int]
 
+    def parse_request(self) -> bool:  # noqa: D401 - hook de BaseHTTPRequestHandler
+        """Marca el inicio: el log de acceso añade lo que tardó la petición."""
+        from http.server import BaseHTTPRequestHandler
+        from typing import cast
+
+        self._t_inicio = time.perf_counter()
+        # el mixin siempre se combina con BaseHTTPRequestHandler
+        return BaseHTTPRequestHandler.parse_request(
+            cast(BaseHTTPRequestHandler, self))
+
     def log_message(self, format: str, *args) -> None:
-        logger.info("%s: %s - %s", self.log_prefix, self.client_address[0],
-                    format % args)
+        inicio = getattr(self, "_t_inicio", None)
+        ms = (time.perf_counter() - inicio) * 1000 if inicio else 0.0
+        logger.info("%s: %s - %s (%.0f ms)", self.log_prefix,
+                    self.client_address[0], format % args, ms)
 
     def log_error(self, format: str, *args) -> None:
         logger.warning("%s: %s - %s", self.log_prefix, self.client_address[0],
