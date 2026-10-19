@@ -28,6 +28,8 @@ weteve.ini
 # Tooling artifacts
 .atl/
 logs/
+# caché de logos de la GUI (se regenera sola)
+src/cache/
 
 # Sesión/herramientas locales
 .pi/

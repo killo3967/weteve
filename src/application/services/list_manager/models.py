@@ -83,12 +83,15 @@ class SourceRef:
 
     ``id`` es el id de la entrada en ``[source.*]``; ``name`` se copia para
     poder prefijar el display name ("Lista.Canal") sin leer la cartera.
+    ``priority`` viaja igual: el pipeline ordena las guías por ese peso para
+    decidir cuál manda cuando dos anuncian el mismo canal.
     """
 
     id: str
     name: str
     # copia de la ubicación al guardar; evita releer la cartera en el pipeline
     location: str = ""
+    priority: int = 0
 
 
 @dataclass(frozen=True)

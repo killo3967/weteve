@@ -52,6 +52,10 @@ class SourceEntry:
         refresh_min: minutos entre refreescos automáticos; 0 = estática
             (solo se recarga manualmente).
         enabled: si la fila participa en la unión.
+        priority: peso de la fuente al resolver un emparejamiento ambiguo
+            (gana el mayor). Es lo que decide qué guía manda cuando dos
+            anuncian el mismo canal: 10 para la que trae dial y logo, 0 para
+            el resto, por ejemplo.
     """
 
     id: str
@@ -61,6 +65,7 @@ class SourceEntry:
     location: str
     refresh_min: int = 0
     enabled: bool = True
+    priority: int = 0
 
     def with_updates(self, **changes) -> "SourceEntry":
         return replace(self, **changes)
@@ -126,7 +131,7 @@ class SourceCatalog:
             return None
         changes = {k: v for k, v in changes.items()
                    if k in {"name", "kind", "source_type", "location",
-                            "refresh_min", "enabled"}}
+                            "refresh_min", "enabled", "priority"}}
         updated = entry.with_updates(**changes)
         self._entries[source_id] = updated
         return updated

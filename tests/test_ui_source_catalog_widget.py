@@ -72,8 +72,9 @@ class TestSourceCatalogWidget:
             _entry("a", enabled=True), _entry("b", enabled=False),
         ]))
         qtbot.addWidget(w)
-        assert w.table.item(0, 4).checkState() == Qt.CheckState.Checked
-        assert w.table.item(1, 4).checkState() == Qt.CheckState.Unchecked
+        # Activa es la última columna: antes va la prioridad de la fuente
+        assert w.table.item(0, 5).checkState() == Qt.CheckState.Checked
+        assert w.table.item(1, 5).checkState() == Qt.CheckState.Unchecked
 
     def test_get_seleccion_devuelve_ids_activos(self, qtbot):
         w = SourceCatalogWidget(kind="m3u", catalog=SourceCatalog([
@@ -99,3 +100,24 @@ class TestSourceCatalogWidget:
         out = w.get_catalog()
         assert len(out.all()) == 1
         assert out.all()[0].id  # id generado, no vacío
+
+
+class TestPrioridadDeLaFuente:
+    """El peso decide qué guía manda cuando dos anuncian el mismo canal."""
+
+    def test_la_prioridad_se_edita_y_se_lee(self, qtbot):
+        w = SourceCatalogWidget(kind="epg", catalog=SourceCatalog([
+            _entry("a", kind="epg"),
+        ]))
+        qtbot.addWidget(w)
+        assert w.table.item(0, 4).text() == "0"
+        w.table.item(0, 4).setText("10")
+        assert w.get_catalog().get("a").priority == 10
+
+    def test_prioridad_no_numerica_vale_cero(self, qtbot):
+        w = SourceCatalogWidget(kind="epg", catalog=SourceCatalog([
+            _entry("a", kind="epg"),
+        ]))
+        qtbot.addWidget(w)
+        w.table.item(0, 4).setText("alta")
+        assert w.get_catalog().get("a").priority == 0

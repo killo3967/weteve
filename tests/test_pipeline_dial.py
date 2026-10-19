@@ -171,3 +171,102 @@ class TestMergeDeMetadatos:
         canal = result.channels[0]
         assert canal.chno == 1
         assert canal.logo_url == "http://guia/la1.png"
+
+
+class TestPrioridadDeGuias:
+    """Con dos guías que anuncian el mismo canal, la prioridad decide."""
+
+    def test_la_guia_de_mas_prioridad_aporta_el_id_y_el_dial(self):
+        # La guía general anuncia el nombre exacto del canal; la de Movistar,
+        # sin la etiqueta de calidad pero con dial y logo.
+        general = EPGData(
+            programs=[Program("P", AHORA, AHORA + timedelta(hours=1), "doble.la1")],
+            channel_names={"doble.la1": "La 1 HD"},
+        )
+        movistar = EPGData(
+            programs=[Program("Q", AHORA, AHORA + timedelta(hours=1), "TVE")],
+            channel_names={"TVE": "LA 1"},
+            channel_info={"TVE": ChannelInfo(dial=1, logo="http://l/tve.png")},
+        )
+        ref_general = SourceRef("g", "guía general", "general.xml", 0)
+        ref_movistar = SourceRef("m", "Movistar+", "movistar.xml", 10)
+        pipeline = ListManagerPipeline(
+            m3u_repository=_FakeM3URepo(
+                [Channel("LA 1 HD", "http://s/la1", "General")]),
+            epg_repository=_FakeEpgRepo({"general.xml": general,
+                                         "movistar.xml": movistar}),
+        )
+        pipeline.register_merged("m", (SourceRef("s", "lista", "l.m3u"),),
+                                 (ref_general, ref_movistar))
+        target = PipelineTarget(
+            name="t", source_index="m",
+            source_refs=(SourceRef("s", "lista", "l.m3u"),),
+            epg_refs=(ref_general, ref_movistar))
+        canal = pipeline.run(target).channels[0]
+        assert canal.matched_epg_id == "TVE"
+        assert canal.chno == 1
+        assert canal.logo_url == "http://l/tve.png"
+
+    def test_sin_prioridades_gana_la_primera_de_la_cartera(self):
+        general = EPGData(
+            programs=[Program("P", AHORA, AHORA + timedelta(hours=1), "doble.la1")],
+            channel_names={"doble.la1": "La 1 HD"},
+        )
+        movistar = EPGData(
+            programs=[Program("Q", AHORA, AHORA + timedelta(hours=1), "TVE")],
+            channel_names={"TVE": "LA 1"},
+        )
+        ref_general = SourceRef("g", "guía general", "general.xml")
+        ref_movistar = SourceRef("m", "Movistar+", "movistar.xml")
+        pipeline = ListManagerPipeline(
+            m3u_repository=_FakeM3URepo(
+                [Channel("LA 1 HD", "http://s/la1", "General")]),
+            epg_repository=_FakeEpgRepo({"general.xml": general,
+                                         "movistar.xml": movistar}),
+        )
+        pipeline.register_merged("m", (SourceRef("s", "lista", "l.m3u"),),
+                                 (ref_general, ref_movistar))
+        target = PipelineTarget(
+            name="t", source_index="m",
+            source_refs=(SourceRef("s", "lista", "l.m3u"),),
+            epg_refs=(ref_general, ref_movistar))
+        assert pipeline.run(target).channels[0].matched_epg_id == "doble.la1"
+
+
+class TestMetadatosPorNombre:
+    """El dial y el logo no dependen de a qué guía apunte el mapeo manual."""
+
+    def test_mapeo_manual_a_otra_guia_sigue_recibiendo_dial_y_logo(self):
+        # El canal está mapeado a mano al id de la guía general ("La 1 HD"),
+        # que no publica metadatos; Movistar+ lo anuncia como "LA 1".
+        general = EPGData(
+            programs=[Program("P", AHORA, AHORA + timedelta(hours=1),
+                              "doble.la1")],
+            channel_names={"doble.la1": "La 1 HD"},
+        )
+        movistar = EPGData(
+            programs=[Program("Q", AHORA, AHORA + timedelta(hours=1), "TVE")],
+            channel_names={"TVE": "LA 1"},
+            channel_info={"TVE": ChannelInfo(dial=1, logo="http://l/tve.png")},
+        )
+        ref_general = SourceRef("g", "guía general", "general.xml")
+        ref_movistar = SourceRef("m", "Movistar+", "movistar.xml", 10)
+        pipeline = ListManagerPipeline(
+            m3u_repository=_FakeM3URepo(
+                [Channel("LA 1 HD", "http://s/la1", "General")]),
+            epg_repository=_FakeEpgRepo({"general.xml": general,
+                                         "movistar.xml": movistar}),
+        )
+        pipeline.register_merged("m", (SourceRef("s", "lista", "l.m3u"),),
+                                 (ref_general, ref_movistar))
+        target = PipelineTarget(
+            name="t", source_index="m",
+            source_refs=(SourceRef("s", "lista", "l.m3u"),),
+            epg_refs=(ref_general, ref_movistar),
+            epg_overrides={"http://s/la1": "doble.la1"})
+        canal = pipeline.run(target).channels[0]
+        # la guía del mapeo sigue mandando en la parrilla…
+        assert canal.matched_epg_id == "doble.la1"
+        # …pero el número y el logo vienen de quien los publica
+        assert canal.chno == 1
+        assert canal.logo_url == "http://l/tve.png"

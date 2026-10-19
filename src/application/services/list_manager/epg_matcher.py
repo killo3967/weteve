@@ -40,6 +40,9 @@ class EpgMatcher:
         # anuncian el mismo canal, gana la que aporta los metadatos, porque es
         # la única que puede dar número real y logo.
         self._con_metadatos = set(epg.channel_info)
+        # Peso de la guía que anuncia cada id: es el desempate principal entre
+        # candidatos de guías distintas (lo fija la cartera, no el canal).
+        self._prioridades = epg.channel_priority
         # Normaliza los channel-ids del XMLTV para match por tvg-id
         # case-insensitive.
         self._ids_by_normalized_id: dict[str, str] = {}
@@ -61,10 +64,22 @@ class EpgMatcher:
                 self._preferir(self._id_by_base_name, base, channel_id)
 
     def _preferir(self, mapa: dict[str, str], clave: str, channel_id: str) -> None:
-        """Guarda el id para ``clave``; gana el de la guía con metadatos."""
+        """Guarda el id para ``clave``; gana la guía de más prioridad.
+
+        A igual prioridad gana la que publica dial y logo (es la única que
+        puede dar número real); sin ella, el primero que llega, que es el
+        orden de la cartera.
+        """
         previo = mapa.get(clave)
-        if previo is None or (channel_id in self._con_metadatos
-                              and previo not in self._con_metadatos):
+        if previo is None:
+            mapa[clave] = channel_id
+            return
+        nueva = self._prioridades.get(channel_id, 0)
+        actual = self._prioridades.get(previo, 0)
+        if nueva > actual:
+            mapa[clave] = channel_id
+        elif nueva == actual and (channel_id in self._con_metadatos
+                                  and previo not in self._con_metadatos):
             mapa[clave] = channel_id
 
     def match(self, tvg_id: str | None, name: str) -> str | None:
@@ -75,19 +90,23 @@ class EpgMatcher:
                 return self._ids_by_normalized_id[norm_id]
         norm_name = normalize_channel_name(name)
         base = base_name(name)
-        candidatos = [
-            self._id_by_normalized_name.get(norm_name),
-            self._id_by_base_name.get(base) if base else None,
-        ]
-        # El nombre exacto manda; pero si esa guía no publica dial/logo y la
-        # otra sí, se prefiere la que los publica.
-        for candidato in candidatos:
-            if candidato and candidato in self._con_metadatos:
-                return candidato
-        for candidato in candidatos:
-            if candidato:
-                return candidato
-        return None
+        candidatos: list[tuple[str, bool]] = []
+        exacto = self._id_by_normalized_name.get(norm_name)
+        if exacto:
+            candidatos.append((exacto, True))
+        por_base = self._id_by_base_name.get(base) if base else None
+        if por_base and por_base != exacto:
+            candidatos.append((por_base, False))
+        if not candidatos:
+            return None
+
+        def peso(candidato: tuple[str, bool]) -> tuple[int, bool, bool]:
+            cid, es_exacto = candidato
+            # prioridad de la guía > guía que publica dial/logo > nombre exacto
+            return (self._prioridades.get(cid, 0), cid in self._con_metadatos,
+                    es_exacto)
+
+        return max(candidatos, key=peso)[0]
 
     def suggestions(self, name: str, limit: int = 5) -> list[tuple[str, str]]:
         """Hasta ``limit`` sugerencias (channel-id, nombre) por similitud."""

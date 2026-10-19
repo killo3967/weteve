@@ -36,6 +36,15 @@ def _parse_bool(raw: str, default: bool = True) -> bool:
     return raw in _TRUE
 
 
+def _parse_priority(raw: str, default: int = 0) -> int:
+    """Peso de la fuente en el INI heredado; un valor no numérico vale 0."""
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        logger.warning("priority no numérica (%r): se toma %d", raw, default)
+        return default
+
+
 def _name_from_location(location: str) -> str:
     """Nombre legible derivado de la ruta o URL (sin extensión)."""
     tail = location.replace("\\", "/").rstrip("/").split("/")[-1]
@@ -72,6 +81,7 @@ def _read_entry(parser: configparser.ConfigParser, sec: str, sid: str) -> Source
         location=location,
         refresh_min=refresh,
         enabled=_parse_bool(parser.get(sec, "enabled", fallback="1")),
+        priority=_parse_priority(parser.get(sec, "priority", fallback="0")),
     )
 
 
@@ -100,7 +110,8 @@ def refs_for_target(parser: configparser.ConfigParser, sec: str,
     for sid in (p.strip() for p in raw.split(",") if p.strip()):
         entry = catalog.get(sid)
         if entry is not None:
-            refs.append(SourceRef(entry.id, entry.name, entry.location))
+            refs.append(SourceRef(entry.id, entry.name, entry.location,
+                                  entry.priority))
         else:
             logger.warning("%s referencia la fuente inexistente %r: se ignora",
                            sec, sid)

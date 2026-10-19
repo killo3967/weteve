@@ -29,7 +29,8 @@ from src.application.services.list_manager.source_catalog import (
 
 logger = logging.getLogger(__name__)
 
-_COLS = ("Nombre", "Tipo de origen", "URL o fichero", "Refresco (min)", "Activa")
+_COLS = ("Nombre", "Tipo de origen", "URL o fichero", "Refresco (min)",
+         "Prioridad", "Activa")
 _TYPE_LABELS = {"file": "Fichero local", "url": "URL remota",
                 "movistar": "Movistar+ (web)"}
 
@@ -184,12 +185,17 @@ class SourceCatalogWidget(QWidget):
         self.table.setItem(row, 1, tipo)
         self.table.setItem(row, 2, QTableWidgetItem(e.location))
         self.table.setItem(row, 3, QTableWidgetItem(str(e.refresh_min)))
+        prioridad = QTableWidgetItem(str(e.priority))
+        prioridad.setToolTip(
+            "Peso al resolver un emparejamiento ambiguo: cuando dos guías\n"
+            "anuncian el mismo canal, gana la de número más alto.")
+        self.table.setItem(row, 4, prioridad)
         active = QTableWidgetItem()
         active.setFlags(Qt.ItemFlag.ItemIsEnabled
                         | Qt.ItemFlag.ItemIsUserCheckable)
         active.setCheckState(Qt.CheckState.Checked if e.enabled
                              else Qt.CheckState.Unchecked)
-        self.table.setItem(row, 4, active)
+        self.table.setItem(row, 5, active)
         self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, e.id)
 
     def _on_cell_clicked(self, row: int, column: int) -> None:
@@ -270,6 +276,10 @@ class SourceCatalogWidget(QWidget):
                 refresh = max(0, int(self.table.item(row, 3).text().strip() or 0))
             except ValueError:
                 refresh = 0
+            try:
+                priority = int(self.table.item(row, 4).text().strip() or 0)
+            except ValueError:
+                priority = 0
             entries.append(SourceEntry(
                 id=eid,
                 name=name_item.text().strip(),
@@ -277,8 +287,9 @@ class SourceCatalogWidget(QWidget):
                 source_type=LocationDelegate.infer_source_type(location),
                 location=location,
                 refresh_min=refresh,
-                enabled=self.table.item(row, 4).checkState()
+                enabled=self.table.item(row, 5).checkState()
                 == Qt.CheckState.Checked,
+                priority=priority,
             ))
         return SourceCatalog(entries)
 
@@ -291,7 +302,7 @@ class SourceCatalogWidget(QWidget):
             item = self.table.item(row, 0)
             if item is None:
                 continue
-            active = self.table.item(row, 4)
+            active = self.table.item(row, 5)
             if active and active.checkState() == Qt.CheckState.Checked:
                 out.append(str(item.data(Qt.ItemDataRole.UserRole)))
         return out
@@ -302,7 +313,7 @@ class SourceCatalogWidget(QWidget):
             item = self.table.item(row, 0)
             if item is None:
                 continue
-            active = self.table.item(row, 4)
+            active = self.table.item(row, 5)
             if active:
                 active.setCheckState(
                     Qt.CheckState.Checked

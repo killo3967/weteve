@@ -58,6 +58,7 @@ def serialize_source(entry: SourceEntry) -> dict:
         "location": entry.location,
         "refresh_min": entry.refresh_min,
         "enabled": entry.enabled,
+        "priority": entry.priority,
     }
 
 
@@ -213,6 +214,10 @@ class TargetService:
             refresh = max(0, int(raw.get("refresh_min") or 0))
         except (TypeError, ValueError):
             refresh = 0
+        try:
+            priority = int(raw.get("priority") or 0)
+        except (TypeError, ValueError):
+            priority = 0
         return SourceEntry(
             id=str(raw.get("id") or new_source_id()),
             name=str(raw.get("name") or location),
@@ -221,6 +226,7 @@ class TargetService:
             location=location,
             refresh_min=refresh,
             enabled=bool(raw.get("enabled", True)),
+            priority=priority,
         ), None
 
     def sources(self, kind: str | None = None) -> dict:
@@ -253,24 +259,23 @@ class TargetService:
                 "sources": [serialize_source(e) for e in catalog.all()]}
 
     def add_source(self, name: str, kind: str, location: str,
-                   refresh_min: int = 0) -> dict:
+                   refresh_min: int = 0, priority: int = 0) -> dict:
         entry, error = self._source_entry({
             "name": name, "kind": kind, "location": location,
-            "refresh_min": refresh_min})
+            "refresh_min": refresh_min, "priority": priority})
         if error is not None:
             return {"error": error}
         assert entry is not None
         catalog = self._catalog()
         catalog.add(entry)
         self._save_catalog(catalog)
-        return {"id": entry.id, "name": entry.name, "kind": entry.kind,
-                "source_type": entry.source_type, "location": entry.location,
-                "refresh_min": entry.refresh_min, "enabled": entry.enabled}
+        return serialize_source(entry)
 
     def update_source(self, source_id: str, name: str | None = None,
                       location: str | None = None,
                       refresh_min: int | None = None,
-                      enabled: bool | None = None) -> dict:
+                      enabled: bool | None = None,
+                      priority: int | None = None) -> dict:
         catalog = self._catalog()
         if catalog.get(source_id) is None:
             return {"error": f"fuente {source_id} no existe"}
@@ -285,6 +290,8 @@ class TargetService:
             changes["source_type"] = infer_source_type(changes["location"])
         if refresh_min is not None:
             changes["refresh_min"] = max(0, int(refresh_min))
+        if priority is not None:
+            changes["priority"] = int(priority)
         if enabled is not None:
             changes["enabled"] = bool(enabled)
         updated = catalog.update(source_id, **changes)
@@ -315,7 +322,7 @@ class TargetService:
                 return {"error": f"fuente {sid} no existe"}
 
         def refs(ids):
-            return tuple(SourceRef(e.id, e.name, e.location)
+            return tuple(SourceRef(e.id, e.name, e.location, e.priority)
                          for e in (catalog.get(str(sid)) for sid in ids) if e)
 
         new = replace(t, source_refs=refs(m3u_ids), epg_refs=refs(epg_ids))

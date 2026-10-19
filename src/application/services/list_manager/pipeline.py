@@ -11,7 +11,7 @@ from src.application.services.list_manager.models import (
     MappedChannel,
     PipelineTarget,
 )
-from src.application.services.list_manager.quality import dedupe_variants
+from src.application.services.list_manager.quality import base_name, dedupe_variants
 from src.domain.entities.epg import ChannelInfo, EPGData, Program
 from src.domain.ports.i_epg_repo import IEPGRepository
 from src.infrastructure.adapters.epg_repository_router import EPGRepositoryRouter
@@ -315,17 +315,28 @@ class ListManagerPipeline:
         Devuelve además, por channel-id, las guías que lo anuncian (el nombre
         de la fuente, no su ruta): la tabla de mapeo lo muestra y así dos
         fuentes con el mismo nombre de canal dejan de ser indistinguibles.
+
+        Las guías se leen en orden de prioridad (mayor primero): el primer
+        nombre que llega es el que gana en el emparejamiento, así que ese
+        orden es el que decide qué guía manda cuando dos anuncian el mismo
+        canal. Cada id guarda además el peso de su guía, que el matcher usa
+        para desempatar entre candidatos de guías distintas.
         """
         if not epg_refs:
             return None, {}
         programs: list[Program] = []
         names: dict[str, str] = {}
         info: dict[str, ChannelInfo] = {}
+        priorities: dict[str, int] = {}
         origins: dict[str, list[str]] = {}
-        for ref in epg_refs:
+        ordenadas = sorted(
+            epg_refs,
+            key=lambda r: -int(getattr(r, "priority", 0) or 0))
+        for ref in ordenadas:
             epg = self._epg_repo.load_epg(ref.location, fresh=fresh)
             if epg is None:
                 continue
+            peso = int(getattr(ref, "priority", 0) or 0)
             label = str(getattr(ref, "name", "") or "") or Path(
                 str(getattr(ref, "location", ""))).name
             programs.extend(epg.programs)
@@ -333,8 +344,7 @@ class ListManagerPipeline:
                 if name and not names.get(cid):
                     names[cid] = name
                 if label and label not in origins.setdefault(cid, []):
-                    origins[cid].append(label)
-            # Dial y logo: gana el primero que los publique, y una segunda
+                    origins[cid].append(label)            # Dial y logo: gana el primero que los publique, y una segunda
             # guía puede completar el que falte (una trae dial y otra logo).
             for cid, meta in epg.channel_info.items():
                 previo = info.get(cid) or ChannelInfo()
@@ -342,11 +352,16 @@ class ListManagerPipeline:
                     dial=previo.dial if previo.dial is not None else meta.dial,
                     logo=previo.logo or meta.logo,
                 )
+            for cid in epg.channel_names:
+                previa = priorities.get(cid)
+                if previa is None or peso > previa:
+                    priorities[cid] = peso
         lists = {cid: tuple(labels) for cid, labels in origins.items()}
         if not programs and not names:
             return None, lists
         return EPGData(programs=programs, channel_names=names,
-                       channel_info=info), lists
+                       channel_info=info,
+                       channel_priority=priorities), lists
 
     def _run_single(self, target: PipelineTarget, m3u_path: str,
                     epg: EPGData | None) -> PipelineResult:
@@ -501,11 +516,16 @@ class ListManagerPipeline:
         muestre el mismo orden que la parrilla del proveedor.
         """
         info = epg.channel_info if epg is not None else {}
+        # Un mapeo manual puede apuntar a una guía que no publica dial ni logo
+        # (la de siempre): en ese caso se buscan por nombre del canal, que es
+        # lo que permite tener número real sin rehacer los 179 mapeos.
+        por_nombre = self._meta_por_nombre(epg) if epg is not None else {}
         con_dial: list[MappedChannel] = []
         sin_dial: list[MappedChannel] = []
         usados: set[int] = set()
         for mapped in served:
-            meta = info.get(mapped.matched_epg_id or "")
+            meta = (info.get(mapped.matched_epg_id or "")
+                    or por_nombre.get(base_name(mapped.name)))
             logo = (meta.logo if meta is not None else None) or mapped.logo_url
             canal = dataclasses_replace(mapped, logo_url=logo)
             dial = meta.dial if meta is not None else None
@@ -527,3 +547,22 @@ class ListManagerPipeline:
             con_dial.append(dataclasses_replace(canal, chno=siguiente))
             siguiente += 1
         return sorted(con_dial, key=lambda m: (m.chno or 0, m.name))
+
+    @staticmethod
+    def _meta_por_nombre(epg: EPGData) -> dict[str, ChannelInfo]:
+        """Canal (por nombre base) → dial/logo, venga de la guía que venga.
+
+        Es el respaldo cuando el id que resolvió el emparejamiento —o el
+        mapeo manual— pertenece a una guía que no publica metadatos. Si dos
+        guías los publican para el mismo nombre, gana la de más prioridad.
+        """
+        elegido: dict[str, tuple[int, bool, ChannelInfo]] = {}
+        for cid, meta in epg.channel_info.items():
+            clave = base_name(epg.channel_names.get(cid, ""))
+            if not clave:
+                continue
+            peso = epg.channel_priority.get(cid, 0)
+            previo = elegido.get(clave)
+            if previo is None or (peso, bool(meta.dial)) > (previo[0], previo[1]):
+                elegido[clave] = (peso, bool(meta.dial), meta)
+        return {clave: datos[2] for clave, datos in elegido.items()}

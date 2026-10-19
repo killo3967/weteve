@@ -43,10 +43,14 @@ class EPGData:
     """Agregado que gestiona la colección de programas."""
     def __init__(self, programs: list[Program] | None = None,
                  channel_names: dict[str, str] | None = None,
-                 channel_info: dict[str, ChannelInfo] | None = None):
+                 channel_info: dict[str, ChannelInfo] | None = None,
+                 channel_priority: dict[str, int] | None = None):
         self._programs = programs or []
         self._channel_names: dict[str, str] = dict(channel_names or {})
         self._channel_info: dict[str, ChannelInfo] = dict(channel_info or {})
+        # guía que anuncia cada id → su peso: con dos guías que anuncian el
+        # mismo canal, gana la de mayor prioridad
+        self._channel_priority: dict[str, int] = dict(channel_priority or {})
         # Mapa de channel_id -> nombre normalizado (opcional, para ayudar al matching)
         self._channel_id_to_normalized_name = {
             cid: normalize_name(name) for cid, name in (channel_names or {}).items()
@@ -111,6 +115,11 @@ class EPGData:
     def channel_info(self) -> dict[str, ChannelInfo]:
         """Copia del mapa channel_id -> dial/logo, si la fuente los publica."""
         return dict(self._channel_info)
+
+    @property
+    def channel_priority(self) -> dict[str, int]:
+        """Copia del mapa channel_id -> peso de la guía que lo anuncia."""
+        return dict(self._channel_priority)
 
     def programs_by_channel_ids(self) -> list[str]:
         """Channel-ids distintos presentes en la EPG (con o sin programas)."""

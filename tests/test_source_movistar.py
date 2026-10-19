@@ -62,3 +62,32 @@ class TestTipoDeOrigenMovistar:
                                        "source_type": "loquesea"}])
         assert "error" not in salida, salida
         assert salida["sources"][0]["source_type"] == "movistar"
+
+
+class TestPrioridadDeLaFuente:
+    """El peso viaja con la fuente: cartera → daemon.toml → refs del target."""
+
+    def test_se_guarda_solo_cuando_aporta(self, tmp_path):
+        service, path = _service(tmp_path)
+        salida = service.set_sources([
+            {"name": "Guía Movistar+", "kind": "epg",
+             "location": "movistar://epg", "priority": 10},
+            {"name": "otra", "kind": "epg", "location": "C:/guia.xml"},
+        ])
+        assert "error" not in salida, salida
+        assert [s["priority"] for s in salida["sources"]] == [10, 0]
+        texto = path.read_text(encoding="utf-8")
+        assert "priority = 10" in texto
+        # la fuente sin peso no escribe la clave: el fichero no gana ruido
+        assert texto.count("priority =") == 1
+
+    def test_llega_a_las_refs_del_target(self, tmp_path):
+        from src.infrastructure.client import config_toml
+
+        service, path = _service(tmp_path)
+        service.set_sources([{"name": "Guía Movistar+", "kind": "epg",
+                              "location": "movistar://epg", "priority": 10}])
+        config = config_toml.load(path)
+        catalog = config_toml.catalog_from(config)
+        entradas = catalog.of_kind("epg")
+        assert entradas[0].priority == 10

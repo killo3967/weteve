@@ -76,6 +76,9 @@ def dumps(config: dict) -> str:
         for key in ("id", "name", "kind", "source_type", "location"):
             lines.append(f"{key} = {_val(source.get(key, ''))}")
         lines.append(f"refresh_min = {_val(int(source.get('refresh_min') or 0))}")
+        # solo si aporta algo: un fichero sin prioridades no gana ruido
+        if int(source.get("priority") or 0):
+            lines.append(f"priority = {_val(int(source.get('priority') or 0))}")
         lines.append(f"enabled = {_val(bool(source.get('enabled', True)))}")
         lines.append("")
     for target in config.get("targets") or []:
@@ -142,17 +145,28 @@ def catalog_from(config: dict) -> SourceCatalog:
                     source_type=raw.get("source_type", "file"),
                     location=str(raw.get("location", "")),
                     refresh_min=int(raw.get("refresh_min") or 0),
-                    enabled=bool(raw.get("enabled", True)))
+                    enabled=bool(raw.get("enabled", True)),
+                    priority=int(raw.get("priority") or 0))
         for raw in config.get("sources") or [] if raw.get("id")
     ])
 
 
 def catalog_to_entries(catalog: SourceCatalog) -> list[dict]:
-    """``[[sources]]`` a partir de la cartera."""
-    return [{"id": entry.id, "name": entry.name, "kind": entry.kind,
-             "source_type": entry.source_type, "location": entry.location,
-             "refresh_min": entry.refresh_min, "enabled": entry.enabled}
-            for entry in catalog.all()]
+    """``[[sources]]`` a partir de la cartera.
+
+    ``priority`` solo aparece si no es 0: así el fichero no gana una clave por
+    fuente que nunca se ha tocado, y ``load`` devuelve exactamente lo que hay
+    escrito (la comparación de ``migrate-config --check`` depende de eso).
+    """
+    out = []
+    for entry in catalog.all():
+        raw = {"id": entry.id, "name": entry.name, "kind": entry.kind,
+               "source_type": entry.source_type, "location": entry.location,
+               "refresh_min": entry.refresh_min, "enabled": entry.enabled}
+        if entry.priority:
+            raw["priority"] = entry.priority
+        out.append(raw)
+    return out
 
 
 def target_to_dict(target: PipelineTarget, target_id: str) -> dict:
@@ -183,7 +197,8 @@ def target_from_dict(raw: dict, catalog: SourceCatalog) -> PipelineTarget:
         for source_id in raw.get(key) or []:
             entry = catalog.get(str(source_id))
             if entry is not None:
-                out.append(SourceRef(entry.id, entry.name, entry.location))
+                out.append(SourceRef(entry.id, entry.name, entry.location,
+                                     entry.priority))
         return tuple(out)
 
     rules = tuple(FilterRule.parse(text) for text in raw.get("rules") or []

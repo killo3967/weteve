@@ -139,3 +139,34 @@ class TestPrioridadDeLaGuiaConMetadatos:
         )
         matcher = EpgMatcher(epg)
         assert matcher.match(None, "LA 1 HD") == "doble.la1hd"
+
+
+class TestPrioridadDeFuente:
+    """El peso de la cartera manda sobre cualquier otro desempate."""
+
+    def _epg(self):
+        epg = EPGData(
+            programs=[Program("P", datetime(2026, 10, 8, 12),
+                              datetime(2026, 10, 8, 13), cid)
+                      for cid in ("doble.la1hd", "TVE")],
+            channel_names={"doble.la1hd": "La 1 HD", "TVE": "LA 1"},
+        )
+        return epg
+
+    def test_mas_prioridad_gana_aunque_el_otro_nombre_sea_exacto(self):
+        epg = self._epg()
+        epg._channel_priority = {"doble.la1hd": 0, "TVE": 10}
+        assert EpgMatcher(epg).match(None, "LA 1 HD") == "TVE"
+
+    def test_con_la_misma_prioridad_gana_el_nombre_exacto(self):
+        epg = self._epg()
+        epg._channel_priority = {"doble.la1hd": 5, "TVE": 5}
+        assert EpgMatcher(epg).match(None, "LA 1 HD") == "doble.la1hd"
+
+    def test_la_prioridad_gana_a_la_guia_con_metadatos(self):
+        from src.domain.entities.epg import ChannelInfo
+
+        epg = self._epg()
+        epg._channel_info = {"TVE": ChannelInfo(dial=1)}
+        epg._channel_priority = {"doble.la1hd": 10, "TVE": 0}
+        assert EpgMatcher(epg).match(None, "LA 1 HD") == "doble.la1hd"
