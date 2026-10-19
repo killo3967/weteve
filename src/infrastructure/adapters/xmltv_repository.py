@@ -3,6 +3,7 @@ import io
 import logging
 import shutil
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime
@@ -16,18 +17,58 @@ from src.infrastructure.utils.sevenzip import extract_7z
 
 
 class XMLTVRepository(IEPGRepository):
-    """Adaptador de infraestructura para cargar datos EPG desde archivos XMLTV."""
+    """Adaptador de infraestructura para cargar datos EPG desde archivos XMLTV.
+
+    Cachea la guía ya parseada: cambiar una regla de filtro reejecuta el
+    pipeline pero no cambia las guías, y volver a descargar y parsear 100.000
+    programas en cada clic se nota (segundos).
+
+    - Fichero local: se reutiliza mientras no cambien ``mtime`` ni tamaño.
+    - URL: se reutiliza durante ``ttl_seconds`` (5 min por defecto, el mismo
+      suelo que el planificador de recargas). ``ttl_seconds=0`` desactiva la
+      cache, útil para forzar una descarga fresca.
+    """
+
+    DEFAULT_TTL_SECONDS = 300.0
+
+    def __init__(self, ttl_seconds: float | None = None) -> None:
+        self._ttl = (self.DEFAULT_TTL_SECONDS if ttl_seconds is None
+                     else float(ttl_seconds))
+        self._cache: dict[str, tuple[tuple, EPGData]] = {}
+        # contador para el modo sin cache (monotonic en Windows tiene ~16 ms
+        # de resolución: dos llamadas seguidas darían la misma firma)
+        self._uncached = 0
+
+    def _signature(self, source: str) -> tuple:
+        """Huella de la fuente: si cambia, hay que volver a leerla."""
+        if source.startswith("http"):
+            if self._ttl <= 0:
+                self._uncached += 1
+                return ("url-sin-cache", self._uncached)
+            return ("url", int(time.monotonic() // self._ttl))
+        try:
+            stat = Path(source).stat()
+        except OSError:
+            return ("file-ausente", source)
+        return ("file", stat.st_mtime_ns, stat.st_size)
 
     def load_epg(self, source: str) -> EPGData:
-        """Carga, descarga y parsea una fuente XMLTV."""
+        """Carga, descarga y parsea una fuente XMLTV (con cache)."""
+        signature = self._signature(source)
+        cached = self._cache.get(source)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
         try:
             content = self._get_content(source)
             if not content:
                 return EPGData()
-            return self._parse_xmltv(content)
+            epg = self._parse_xmltv(content)
         except Exception as e:
+            # Un fallo no se cachea: en la siguiente recarga se reintenta.
             logging.error(f"Error cargando EPG desde {source}: {e}")
             return EPGData()
+        self._cache[source] = (signature, epg)
+        return epg
 
     def _get_content(self, source: str) -> bytes:
         """Descarga el contenido y lo descomprime (gz/zip/7z) si es necesario."""
