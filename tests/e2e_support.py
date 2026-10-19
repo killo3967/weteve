@@ -16,7 +16,6 @@ Uso típico en un test::
 
 from __future__ import annotations
 
-import configparser
 import http.client
 import importlib.util
 import json
@@ -55,27 +54,40 @@ def _daemon_module():
 
 
 def _write_config(path: Path, token: str = "") -> Path:
-    parser = configparser.ConfigParser()
-    parser["DAEMON"] = {
-        "control_host": "127.0.0.1", "control_port": "0", "mcp_port": "0",
-        "mcp_token": token, "autostart": "0", "stop_on_exit": "0",
+    """Escribe ``daemon.toml`` (datos) y ``weteve.ini`` (cliente) para el e2e."""
+    from src.application.services.daemon.config import (
+        CLIENT_FILE,
+        DaemonConfig,
+        save_daemon_config,
+    )
+    from src.infrastructure.client import config_toml
+
+    datos = path.with_name(config_toml.CONFIG_FILE)
+    config = {
+        "version": config_toml.SCHEMA_VERSION,
+        "sources": [],
+        "targets": [{
+            "id": TARGET,
+            "name": "e2e",
+            "port": 0,
+            "bind": "127.0.0.1",
+            "starting_number": 1,
+            "custom_m3u": str(M3U).replace("\\", "/"),
+            "custom_epg": str(XMLTV).replace("\\", "/"),
+            "epg_source": -1,
+            "m3u_sources": [],
+            "epg_sources": [],
+            "rules": [],
+            "disabled": [],
+            "overrides": {},
+            "quality_priority": {},
+        }],
     }
-    parser[f"listmanager.target.{TARGET}"] = {
-        "name": "e2e",
-        "custom_m3u": str(M3U).replace("\\", "/"),
-        "custom_epg": str(XMLTV).replace("\\", "/"),
-        "port": "0",
-        "bind": "127.0.0.1",
-        "rules": "",
-        "epg_overrides": "",
-        "disabled_channels": "",
-        "m3u_sources": "",
-        "epg_sources": "",
-    }
-    path.write_text("", encoding="utf-8")
-    with open(path, "w", encoding="utf-8") as fh:
-        parser.write(fh)
-    return path
+    config_toml.save(datos, config)
+    save_daemon_config(path.with_name(CLIENT_FILE), DaemonConfig(
+        control_host="127.0.0.1", control_port=0, mcp_port=0,
+        mcp_token=token, autostart=False, stop_on_exit=False))
+    return datos
 
 
 class DaemonHandle:
@@ -144,8 +156,11 @@ class DaemonHandle:
 def start(tmp_path: Path, token: str = "", start_service: bool = True
           ) -> DaemonHandle:
     """Arranca daemon + target (pipeline y servidor de playlist)."""
-    config_path = _write_config(tmp_path / "config.ini", token=token)
-    data = _daemon_module().build_daemon(config_path)
+    config_path = _write_config(tmp_path / "daemon.toml", token=token)
+    from src.application.services.daemon.config import CLIENT_FILE
+
+    data = _daemon_module().build_daemon(config_path,
+                                         tmp_path / CLIENT_FILE)
     if start_service:
         out = data["service"].start_service(TARGET)
         if not out.get("ok"):

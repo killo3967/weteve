@@ -11,13 +11,11 @@ pytest.importorskip("PyQt6")
 
 @pytest.fixture
 def config_ini(qtbot, tmp_path: Path) -> Path:
-    cfg = tmp_path / "config.ini"
-    cfg.write_text(
-        "[DAEMON]\ncontrol_port = 32123\n\n[listmanager.target.0]\n"
-        "name = x\nport = 8080\n",
-        encoding="utf-8",
-    )
-    return cfg
+    from toml_helpers import target, write_client, write_daemon
+
+    write_client(tmp_path / "weteve.ini", control_port=32123)
+    return write_daemon(tmp_path / "daemon.toml",
+                        targets=[target("0", name="x")])
 
 
 def _dialog(qtbot, cfg: Path):
@@ -87,14 +85,13 @@ class TestPestanasCartera:
         assert seleccion[2] == [cartera[0]["id"]]
 
     def test_abrir_con_selecciones_previas_marca_filas(self, qtbot, config_ini):
-        config_ini.write_text(
-            "[DAEMON]\ncontrol_port = 32123\n\n[source.platero]\n"
-            "name = platero\nkind = m3u\nsource_type = url\n"
-            "location = http://s/l.m3u\nrefresh_min = 30\nenabled = 1\n\n"
-            "[listmanager.target.0]\nname = x\nport = 8080\n"
-            "m3u_sources = platero\n",
-            encoding="utf-8",
-        )
+        from toml_helpers import source, target, write_daemon
+
+        write_daemon(config_ini,
+                     sources=[source("platero", "platero", "m3u",
+                                     "http://s/l.m3u", refresh_min=30)],
+                     targets=[target("0", name="x",
+                                     m3u_sources=["platero"])])
         d = ListManagerDialog(None, config={
             "target_id": "0", "_config_path": config_ini, "name": "x",
             "port": 8080,
@@ -113,10 +110,10 @@ class TestCamposHeredados:
     def test_guardar_no_borra_custom_m3u_si_el_llamador_no_lo_pasa(
             self, qtbot, config_ini):
         """Guardar reescribe la sección: los campos legacy se leen del fichero."""
-        cfg = config_ini.read_text(encoding="utf-8").replace(
-            "name = x",
-            "name = x\ncustom_m3u = C:/vieja.m3u\ncustom_epg = C:/tv.xml")
-        config_ini.write_text(cfg, encoding="utf-8")
+        from toml_helpers import patch_daemon
+
+        patch_daemon(config_ini, lambda c: c["targets"][0].update(
+            custom_m3u="C:/vieja.m3u", custom_epg="C:/tv.xml"))
         d = ListManagerDialog(None, config={
             "target_id": "0", "_config_path": config_ini, "name": "x",
             "port": 8080})

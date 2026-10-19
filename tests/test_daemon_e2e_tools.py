@@ -1,7 +1,7 @@
 """Test e2e del daemon real: 20 herramientas MCP sobre el daemon completo.
 
 A diferencia de test_daemon_mcp_transport.py (stubs), aquí arranca el daemon
-COMPLETO vía ``build_daemon`` con un config.ini temporal y fuentes locales
+COMPLETO vía ``build_daemon`` con un ``daemon.toml`` temporal y fuentes locales
 (fixtures M3U/XMLTV), y se llama a CADA una de las 23 tools verificando el
 resultado esperado, incluido servir la playlist por HTTP real.
 
@@ -11,7 +11,6 @@ normal (no usa el marker ``network``).
 
 from __future__ import annotations
 
-import configparser
 import json
 import socket
 import time
@@ -21,6 +20,12 @@ from pathlib import Path
 
 import pytest
 
+from src.application.services.daemon.config import (
+    CLIENT_FILE,
+    DaemonConfig,
+    save_daemon_config,
+)
+from src.infrastructure.client import config_toml
 from src.infrastructure.client.sources_store import load_catalog
 
 M3U_FIXTURE = """#EXTM3U
@@ -177,11 +182,21 @@ def workspace(tmp_path: Path) -> Path:
     xml = tmp_path / "guia.xml"
     xml.write_text(XMLTV_FIXTURE, encoding="utf-8")
 
-    cp = configparser.ConfigParser()
-    cp["DAEMON"] = {"control_host": "127.0.0.1",
-                    "control_port": "0", "mcp_port": "0", "mcp_token": ""}
-    with open(tmp_path / "config.ini", "w", encoding="utf-8") as f:
-        cp.write(f)
+    config_toml.save(tmp_path / "daemon.toml", {
+        "version": config_toml.SCHEMA_VERSION,
+        "sources": [],
+        "targets": [{
+            "id": "0", "name": "e2e", "port": 0, "bind": "127.0.0.1",
+            "starting_number": 1,
+            "custom_m3u": str(m3u).replace("\\", "/"),
+            "custom_epg": str(xml).replace("\\", "/"),
+            "epg_source": -1, "m3u_sources": [], "epg_sources": [],
+            "rules": [], "disabled": [], "overrides": {},
+            "quality_priority": {},
+        }],
+    })
+    save_daemon_config(tmp_path / CLIENT_FILE, DaemonConfig(
+        control_host="127.0.0.1", control_port=0, mcp_port=0))
     (tmp_path / "fixtures").mkdir()
     (tmp_path / "fixtures" / "lista.m3u").write_text(M3U_FIXTURE, encoding="utf-8")
     (tmp_path / "fixtures" / "guia.xml").write_text(XMLTV_FIXTURE, encoding="utf-8")
@@ -197,7 +212,8 @@ def daemon(workspace: Path):
         "weteve_daemon", Path(__file__).resolve().parents[1] / "daemon.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    d = mod.build_daemon(workspace / "config.ini")
+    d = mod.build_daemon(workspace / "daemon.toml",
+                        workspace / CLIENT_FILE)
     yield d
     d["supervisor"].stop_all()
     d["server"].stop()
@@ -242,7 +258,7 @@ class TestDaemonE2ETools:
         # update_source
         r = mcp.call("update_source", {"id": m3u_id, "name": "Lista e2e v2"})
         assert "error" not in r, r
-        catalog = load_catalog(workspace / "config.ini")
+        catalog = load_catalog(workspace / "daemon.toml")
         assert catalog.get(m3u_id).name == "Lista e2e v2"
 
         # remove_source (se recrean en el fixture del ciclo de target)

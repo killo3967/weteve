@@ -1,4 +1,6 @@
-"""Persistencia del operador: config.ini round-trip con back-compat."""
+"""Persistencia del operador de reglas en ``daemon.toml``."""
+
+from toml_helpers import target, write_daemon
 
 from src.application.services.daemon.target_store import TargetStore
 from src.application.services.list_manager.models import FilterRule
@@ -18,13 +20,11 @@ class TestSerializeRoundtrip:
         r = FilterRule.parse(raw)
         assert r.operator == "and" and r.pattern == "SPAIN"
 
-    def test_config_ini_guarda_y_lee_operador(self, tmp_path):
-        cfg_path = tmp_path / "config.ini"
-        cfg_path.write_text(
-            "[DAEMON]\ncontrol_port = 32123\n"
-            "[listmanager.target.0]\nname = prueba\ncustom_m3u = x.m3u\n"
-            "rules = group-title:SPAIN:0:and|custom-filter:HBO:0\n",
-            encoding="utf-8")
+    def test_el_fichero_guarda_y_lee_el_operador(self, tmp_path):
+
+        cfg_path = write_daemon(tmp_path / "daemon.toml", targets=[target(
+            "0", name="prueba", custom_m3u="x.m3u",
+            rules=["group-title:SPAIN:0:and", "custom-filter:HBO:0"])])
         store = TargetStore(cfg_path)
         store.load()
         targets = store.list()

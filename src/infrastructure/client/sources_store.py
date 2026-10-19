@@ -1,16 +1,10 @@
-"""Persistencia de la cartera global de fuentes en config.ini.
+"""Cartera de fuentes: lectura/escritura en ``daemon.toml`` y lector legado.
 
-Una sección ``[source.<id>]`` por entrada, con claves explícitas. Se usan
-secciones (y no ``<id> = a|b|c``) porque los nombres de lista reales llevan
-``|`` ("Series | HBO | 4K") y las rutas llevan espacios y acentos.
-
-Cada target selecciona sus filas con ``m3u_sources`` / ``epg_sources`` (ids
-separados por coma) dentro de su sección ``listmanager.target.N``.
-
-Compatibilidad: un config.ini antiguo guarda una sola fuente por target en
-``custom_m3u`` / ``custom_epg``. migrate_legacy_sources() convierte esas
-ubicaciones en entradas de la cartera y enlaza los targets a ellas, de modo
-que una config existente sigue funcionando sin tocarla el usuario.
+La cartera vive en los bloques ``[[sources]]`` del TOML (ver ``config_toml``).
+Aquí quedan:
+- ``load_catalog`` / ``save_catalog``: el acceso que usan demonio y GUI.
+- ``read_catalog`` / ``refs_for_target``: **lectores del INI viejo**, usados
+  solo por ``daemon.py migrate-config`` para convertir un ``config.ini``.
 """
 
 import configparser
@@ -24,13 +18,6 @@ from src.application.services.list_manager.source_catalog import (
     SourceEntry,
     SourceKind,
     SourceType,
-)
-from src.infrastructure.client.config_store import (
-    dump as _dump,
-)
-from src.infrastructure.client.config_store import (
-    update,
-    write_sources,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,105 +110,18 @@ def refs_for_target(parser: configparser.ConfigParser, sec: str,
 
 
 def load_catalog(path: Path) -> SourceCatalog:
-    """Lee la cartera desde ``[source.*]``. Sin sección, cartera vacía."""
-    parser = configparser.ConfigParser()
-    if path.exists():
-        parser.read(path, encoding="utf-8")
-    entries = []
-    for sec in parser.sections():
-        if not sec.startswith(_SOURCE_PREFIX):
-            continue
-        entry = _read_entry(parser, sec, sec[len(_SOURCE_PREFIX):])
-        if entry is not None:
-            entries.append(entry)
-    return SourceCatalog(entries)
+    """Lee la cartera de fuentes de ``daemon.toml``."""
+    from src.infrastructure.client import config_toml
+
+    return config_toml.catalog_from(config_toml.load(path))
 
 
 def save_catalog(path: Path, catalog: SourceCatalog) -> None:
-    """Escribe la cartera, reemplazando por completo las secciones previas.
+    """Reemplaza la cartera en ``daemon.toml`` (una lectura, una escritura).
 
-    Las demás secciones (SETTINGS, [DAEMON], listmanager.target.*) se
-    conservan intactas: el formato y la escritura viven en ``config_store``.
+    Las refs de los targets a fuentes que ya no están se podan: si no, el
+    target apuntaría a ids fantasma y el pipeline no encontraría la lista.
     """
-    update(path, lambda parser: write_sources(parser, catalog))
+    from src.infrastructure.client import config_toml
 
-
-def load_target_selections(path: Path) -> dict[str, dict[str, list[str]]]:
-    """Ids seleccionados por target: ``{target_id: {"m3u": [...], "epg": [...]}}``."""
-    parser = configparser.ConfigParser()
-    if path.exists():
-        parser.read(path, encoding="utf-8")
-    out: dict[str, dict[str, list[str]]] = {}
-    for sec in parser.sections():
-        if not sec.startswith(_TARGET_PREFIX):
-            continue
-        tid = sec[len(_TARGET_PREFIX):]
-        out[tid] = {
-            "m3u": _split_ids(parser.get(sec, "m3u_sources", fallback="")),
-            "epg": _split_ids(parser.get(sec, "epg_sources", fallback="")),
-        }
-    return out
-
-
-def _split_ids(raw: str) -> list[str]:
-    return [p.strip() for p in (raw or "").split(",") if p.strip()]
-
-
-
-
-def _ensure_source(catalog: SourceCatalog, kind: str, location: str) -> str:
-    """Devuelve el id de la entrada para ``location``, creándola si no existe.
-
-    La deduplicación es por ubicación (no por nombre): dos targets que usan la
-    misma lista comparten una única fila de la cartera.
-    """
-    existing = next((e for e in catalog.all()
-                     if e.kind == kind and e.location == location), None)
-    if existing is not None:
-        return existing.id
-    source_type = "url" if _looks_like_url(location) else "file"
-    entry = catalog.add_new(
-        name=_name_from_location(location), kind=cast(SourceKind, kind),
-        source_type=cast(SourceType, source_type), location=location,
-        refresh_min=0)
-    return entry.id
-
-
-def migrate_legacy_sources(path: Path) -> SourceCatalog:
-    """Convierte ``custom_m3u``/``custom_epg`` de targets antiguos en cartera.
-
-    Idempotente: si un target ya tiene ``m3u_sources``, no se toca. Al final
-    reescribe el fichero una sola vez. Devuelve la cartera resultante.
-    """
-    parser = configparser.ConfigParser()
-    if path.exists():
-        parser.read(path, encoding="utf-8")
-
-    catalog = SourceCatalog(
-        [e for e in (
-            _read_entry(parser, sec, sec[len(_SOURCE_PREFIX):])
-            for sec in parser.sections() if sec.startswith(_SOURCE_PREFIX)
-        ) if e is not None]
-    )
-
-    changed = False
-    for sec in parser.sections():
-        if not sec.startswith(_TARGET_PREFIX):
-            continue
-        for field, kind in (("custom_m3u", "m3u"), ("custom_epg", "epg")):
-            key = f"{kind}_sources"
-            if parser.get(sec, key, fallback="").strip():
-                continue  # ya migrado o elegido por el usuario
-            location = parser.get(sec, field, fallback="").strip()
-            if not location:
-                continue
-            sid = _ensure_source(catalog, kind, location)
-            parser.set(sec, key, sid)
-            changed = True
-            logger.info("Migrada fuente %s de target %s a la cartera (%s)",
-                        field, sec, sid)
-
-    if changed:
-        write_sources(parser, catalog)
-        _dump(parser, path)
-    return catalog
+    config_toml.save_catalog(path, catalog)

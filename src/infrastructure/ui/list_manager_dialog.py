@@ -1155,10 +1155,9 @@ class ListManagerDialog(QDialog):
 
         # Demonio: estado y aplicación de la config al servicio permanente
         from src.infrastructure.ui.daemon_panel import DaemonPanel
-        config_path = config.get("_config_path")
         self.daemon_panel = DaemonPanel(
             target_id=str(config.get("target_id", "0")),
-            config_path=config_path)
+            config_path=config.get("_client_path") or config.get("_config_path"))
         # El sondeo del demonio (~2 s si está parado) se hace después de que la
         # ventana esté visible: la aplicación debe abrir siempre.
         self.daemon_panel.refresh_later()
@@ -1249,19 +1248,15 @@ class ListManagerDialog(QDialog):
         self._apply_config_from_disk()
 
     def _apply_config_from_disk(self) -> None:
-        """Relee config.ini y repinta listas, filtros y mapeos."""
+        """Relee ``daemon.toml`` y repinta listas, filtros y mapeos."""
         path = self._config.get("_config_path")
         if path is None:
             return
-        import configparser
-
         from src.infrastructure.client.persistencia import load_config
-        from src.infrastructure.client.sources_store import read_catalog
+        from src.infrastructure.client.sources_store import load_catalog
 
         try:
-            parser = configparser.ConfigParser()
-            parser.read(path, encoding="utf-8")
-            catalog = read_catalog(parser)
+            catalog = load_catalog(Path(path))
             fresh = load_config(Path(path)).get("targets", {}).get(
                 int(self._config.get("target_id", 0)), {})
         except Exception:  # noqa: BLE001 - fichero a medio escribir
@@ -1311,6 +1306,9 @@ class ListManagerDialog(QDialog):
         if config_path is None or client is None:
             return
         payload = self._save_payload(client, Path(config_path))
+        # solo se escribe el fichero del cliente si el diálogo lo conoce:
+        # sin él, la sección [DAEMON] no tiene dónde ir
+        payload["client_path"] = self._config.get("_client_path")
         self._saving = True
         self._save_pending = payload
         self._config_watch.stop()
@@ -1447,8 +1445,8 @@ class ListManagerDialog(QDialog):
         # 4) [DAEMON]: se aplica al reiniciar el demonio
         from src.application.services.daemon.config import save_daemon_config
 
-        if payload.get("daemon") is not None:
-            save_daemon_config(payload["config_path"], payload["daemon"])
+        if payload.get("daemon") is not None and payload.get("client_path"):
+            save_daemon_config(Path(payload["client_path"]), payload["daemon"])
         self._config = {**self._config, **self._saved_state(payload)}
         # escritura ajena a la firma del vigilante: no hay que reaccionar
         self._config_signature = self._config_file_signature()
@@ -1742,13 +1740,21 @@ class ListManagerDialog(QDialog):
             self._api_ready = True
             from src.application.services.daemon.config import load_daemon_config
 
-            path = self._config.get("_config_path")
+            path = self._client_path()
             if path is not None:
                 cfg = load_daemon_config(Path(path))
                 self._api = ApiClient(host=cfg.control_host,
                                       port=cfg.control_port,
                                       token=cfg.mcp_token)
         return self._api
+
+    def _client_path(self):
+        """Fichero del cliente (``weteve.ini``): host, puerto y token.
+
+        Se acepta ``_config_path`` como respaldo para configuraciones de test
+        que solo pasan una ruta.
+        """
+        return self._config.get("_client_path") or self._config.get("_config_path")
 
     def _target_id(self) -> str:
         return str(self._config.get("target_id", "0"))

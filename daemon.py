@@ -20,7 +20,10 @@ import sys
 import threading
 from pathlib import Path
 
-from src.application.services.daemon.config import load_daemon_config
+from src.application.services.daemon.config import (
+    CLIENT_FILE,
+    load_daemon_config,
+)
 from src.application.services.daemon.control_api import ControlApiServer
 from src.application.services.daemon.mcp_server import McpStreamableServer
 from src.application.services.daemon.mcp_tools import build_tool_registry
@@ -31,7 +34,6 @@ from src.application.services.daemon.target_store import TargetStore
 from src.infrastructure.client.daemon_client import DaemonClient
 from src.infrastructure.client.sources_store import (
     load_catalog,
-    migrate_legacy_sources,
 )
 from src.infrastructure.web.rest_api import RestApi
 
@@ -96,19 +98,26 @@ def setup_logging(log_path: Path | None = None,
     file_h.addFilter(tag_filter)
     root.addHandler(file_h)
 
-DEFAULT_CONFIG = Path("config.ini")
+DEFAULT_CONFIG = Path("daemon.toml")
+#: Fichero del cliente (INI) que dice dónde escuchar; lo escribe la GUI.
+DEFAULT_CLIENT = Path(CLIENT_FILE)
+#: Fichero viejo, solo como origen de `migrate-config`.
+DEFAULT_INI = Path("config.ini")
 
-def build_daemon(config_path: Path = DEFAULT_CONFIG) -> dict:
+
+def build_daemon(config_path: Path = DEFAULT_CONFIG,
+                 client_path: Path = DEFAULT_CLIENT) -> dict:
     """Construye y arranca el daemon.
 
-    Todo se sirve en **un solo puerto** (``[DAEMON] control_port``): control,
-    REST (``/api/v1``), MCP (``/mcp``) y las playlists del supervisor
-    (``/weteve/{id}/playlist.m3u`` y ``/epg.xml``).
+    Todo se sirve en **un solo puerto** (``weteve.ini``, ``control_port``):
+    control, REST (``/api/v1``), MCP (``/mcp``) y las playlists del supervisor
+    (``/weteve/{id}/playlist.m3u`` y ``/epg.xml``). Los datos (fuentes y
+    targets) se leen de ``daemon.toml``.
 
     Devuelve {"supervisor", "store", "service", "control_api", "server",
     "shutdown", "running"}.
     """
-    cfg = load_daemon_config(config_path)
+    cfg = load_daemon_config(client_path)
     if cfg.control_host not in ("127.0.0.1", "localhost") and not cfg.mcp_token:
         # La API y el MCP no distinguen usuarios: expuestos a la red sin token
         # cualquiera con acceso al puerto puede reescribir la configuración.
@@ -116,13 +125,8 @@ def build_daemon(config_path: Path = DEFAULT_CONFIG) -> dict:
             "mcp_token obligatorio cuando control_host no es loopback "
             f"(control_host={cfg.control_host})")
     # Configs antiguas de fuente única → cartera, antes de leer los targets.
-    # Idempotente y solo escribe si hay algo que migrar; el demonio es el
-    # único escritor del fichero.
-    try:
-        migrate_legacy_sources(config_path)
-    except Exception:  # fichero a medio escribir: se sigue
-        logger.warning("no se pudo migrar la cartera de %s", config_path,
-                       exc_info=True)
+    # (El formato viejo se convierte con `daemon.py migrate-config`; aquí no
+    # se escribe el fichero: el demonio solo guarda cuando alguien cambia algo.)
     store = TargetStore(config_path)
     store.load()
 
@@ -176,11 +180,12 @@ def build_daemon(config_path: Path = DEFAULT_CONFIG) -> dict:
     }
 
 
-def cmd_run(config_path: Path) -> int:
+def cmd_run(config_path: Path = DEFAULT_CONFIG,
+            client_path: Path = DEFAULT_CLIENT) -> int:
     setup_logging()
     logger.info("arrancando daemon weteve (config=%s)", config_path)
     try:
-        d = build_daemon(config_path)
+        d = build_daemon(config_path, client_path)
     except RuntimeError as e:
         logger.error("%s", e)
         return 2
@@ -205,8 +210,22 @@ def cmd_run(config_path: Path) -> int:
     return 0
 
 
-def cmd_status(port: int = 34400) -> int:
-    client = DaemonClient(port=port)
+def _control_client(port: int | None = None,
+                    client_path: Path = DEFAULT_CLIENT) -> DaemonClient:
+    """Cliente de control con el host, puerto y token de ``weteve.ini``.
+
+    Los comandos de la CLI leen el mismo fichero que la GUI: con un puerto no
+    estándar, `daemon.py status` no puede mentir diciendo que no responde.
+    """
+    cfg = load_daemon_config(client_path)
+    return DaemonClient(host=cfg.control_host,
+                        port=port if port is not None else cfg.control_port,
+                        token=cfg.mcp_token)
+
+
+def cmd_status(port: int | None = None,
+               client_path: Path = DEFAULT_CLIENT) -> int:
+    client = _control_client(port, client_path)
     status = client.status()
     if status is None:
         print("daemon weteve: no responde")
@@ -221,8 +240,9 @@ def cmd_status(port: int = 34400) -> int:
     return 0
 
 
-def cmd_stop(port: int = 34400) -> int:
-    client = DaemonClient(port=port)
+def cmd_stop(port: int | None = None,
+             client_path: Path = DEFAULT_CLIENT) -> int:
+    client = _control_client(port, client_path)
     if not client.shutdown():
         print("daemon weteve: no responde (¿ya parado?)")
         return 1
@@ -255,39 +275,46 @@ def cmd_install_task(config_path: Path = DEFAULT_CONFIG) -> int:
     return 0
 
 
-def cmd_migrate_config(config_path: Path = DEFAULT_CONFIG,
+def cmd_migrate_config(ini_path: Path = DEFAULT_INI,
                        check: bool = False) -> int:
-    """Convierte ``config.ini`` en ``config.toml`` + ``daemon.toml``.
+    """Convierte ``config.ini`` en ``daemon.toml`` (datos) + ``weteve.ini``.
 
     Idempotente: se puede repetir sin miedo (la escritura es atómica y deja
     ``.bak``). El ``config.ini`` **no se borra**: se conserva hasta que el
     usuario compruebe que todo va.
     """
+    from src.application.services.daemon.config import (
+        write_client_from_legacy,
+    )
     from src.infrastructure.client import config_toml
 
-    destino = config_path.with_name(config_toml.CONFIG_FILE)
-    destino_daemon = config_path.with_name(config_toml.DAEMON_FILE)
+    datos = ini_path.with_name(config_toml.CONFIG_FILE)
+    cliente = ini_path.with_name(config_toml.CLIENT_FILE)
     if check:
-        if not destino.exists():
-            print(f"no existe {destino}: ejecuta `daemon.py migrate-config`")
+        if not datos.exists() or not cliente.exists():
+            print(f"faltan {datos.name}/{cliente.name}: "
+                  "ejecuta `daemon.py migrate-config`")
             return 1
-        esperado, _ = config_toml.from_legacy(config_path)
-        if config_toml.load(destino) != esperado:
-            print(f"{destino} no coincide con {config_path}")
+        if config_toml.load(datos) != config_toml.from_legacy(ini_path):
+            print(f"{datos} no coincide con {ini_path}")
             return 1
-        print(f"ok: {destino} coincide con {config_path}")
+        esperado = load_daemon_config(ini_path)
+        if load_daemon_config(cliente) != esperado:
+            print(f"{cliente} no coincide con {ini_path} ([DAEMON])")
+            return 1
+        print(f"ok: {datos.name} y {cliente.name} coinciden con {ini_path.name}")
         return 0
-    if not config_path.exists():
-        print(f"no hay {config_path} que migrar")
+    if not ini_path.exists():
+        print(f"no hay {ini_path} que migrar")
         return 1
-    cfg, daemon_cfg = config_toml.from_legacy(config_path)
-    config_toml.save(destino, cfg)
-    config_toml.save_daemon(destino_daemon, daemon_cfg)
+    cfg = config_toml.from_legacy(ini_path)
+    config_toml.save(datos, cfg)
+    write_client_from_legacy(ini_path, cliente)
     mapeos = sum(len(t.get("overrides") or {}) for t in cfg["targets"])
-    print(f"migrado: {destino} ({len(cfg['sources'])} fuentes, "
+    print(f"migrado: {datos} ({len(cfg['sources'])} fuentes, "
           f"{len(cfg['targets'])} target(s), {mapeos} mapeos)")
-    print(f"migrado: {destino_daemon}")
-    print(f"{config_path.name} se conserva: bórralo cuando compruebes que va")
+    print(f"migrado: {cliente} (host, puerto y token)")
+    print(f"{ini_path.name} se conserva: bórralo cuando compruebes que va")
     return 0
 
 
@@ -295,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     command = argv[0] if argv else "run"
     if command == "run":
-        return cmd_run(DEFAULT_CONFIG)
+        return cmd_run(DEFAULT_CONFIG, DEFAULT_CLIENT)
     if command == "status":
         return cmd_status()
     if command == "stop":

@@ -3,24 +3,17 @@
 from pathlib import Path
 
 import pytest
+from toml_helpers import target, write_daemon
 
 from src.application.services.daemon.mcp_tools import build_tool_registry
 from src.application.services.daemon.supervisor import TargetSupervisor
 from src.application.services.daemon.target_store import TargetStore
 
-CFG = """[DAEMON]
-control_port = 32123
-
-[listmanager.target.0]
-name = principal
-port = 8080
-"""
-
 
 @pytest.fixture
 def env(tmp_path: Path):
-    cfg = tmp_path / "config.ini"
-    cfg.write_text(CFG, encoding="utf-8")
+    cfg = write_daemon(tmp_path / "daemon.toml",
+                       targets=[target("0", name="principal")])
     store = TargetStore(cfg)
     store.load()
     reg = build_tool_registry(TargetSupervisor(catalog_fn=lambda: _load(cfg)),
@@ -83,14 +76,14 @@ class TestCatalogoMcp:
         assert _call(reg, "remove_source", {"id": sid}).get("ok")
         assert _call(reg, "list_sources", {})["sources"] == []
 
-    def test_persistencia_en_config_ini(self, env):
+    def test_persistencia_en_daemon_toml(self, env):
         reg, _, cfg = env
         _call(reg, "add_source", {"name": "a", "kind": "m3u",
                                   "location": "C:/a.m3u"})
-        parser = _parse(cfg)
-        secs = [s for s in parser.sections() if s.startswith("source.")]
-        assert len(secs) == 1
-        assert parser.get(secs[0], "name") == "a"
+        from src.infrastructure.client import config_toml
+
+        fuentes = config_toml.load(cfg)["sources"]
+        assert len(fuentes) == 1 and fuentes[0]["name"] == "a"
 
 
 class TestSeleccionTargetMcp:
@@ -118,7 +111,6 @@ class TestSeleccionTargetMcp:
 
 
 def _parse(path: Path):
-    import configparser
-    parser = configparser.ConfigParser()
-    parser.read(path, encoding="utf-8")
-    return parser
+    from src.infrastructure.client import config_toml
+
+    return config_toml.load(path)

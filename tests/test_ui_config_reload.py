@@ -1,4 +1,4 @@
-"""Refresco de la ventana abierta cuando config.ini cambia por fuera.
+"""Refresco de la ventana abierta cuando ``daemon.toml`` cambia por fuera.
 
 La config la escriben también el daemon y sus herramientas MCP (listas IPTV,
 listas EPG, filtros, mapeos). Sin esto, la ventana abierta se queda con el
@@ -16,23 +16,18 @@ from src.infrastructure.ui.list_manager_dialog import ListManagerDialog
 FIXTURES = Path(__file__).parent / "fixtures" / "list_manager"
 
 
-def _config(rules: str = "", overrides: str = "", sources: str = "",
-            m3u_sources: str = "", custom_m3u: str = "C:/fake.m3u",
-            custom_epg: str = "") -> str:
-    return (
-        "[listmanager.target.0]\n"
-        "name = x\n"
-        f"custom_m3u = {custom_m3u}\n"
-        f"custom_epg = {custom_epg}\n"
-        "port = 8080\n"
-        "bind = 127.0.0.1\n"
-        f"rules = {rules}\n"
-        f"epg_overrides = {overrides}\n"
-        "disabled_channels = \n"
-        f"m3u_sources = {m3u_sources}\n"
-        "epg_sources = \n"
-        f"{sources}"
-    )
+def _write_config(path: Path, rules=(), overrides=None, sources=(),
+                  m3u_sources=(), custom_m3u: str = "C:/fake.m3u") -> None:
+    """Escribe ``daemon.toml`` con los knobs que usaban los tests."""
+    from toml_helpers import source, target, write_daemon
+
+    write_daemon(
+        path,
+        sources=[source(s["id"], s["name"], s["kind"], s["location"])
+                 for s in sources],
+        targets=[target("0", name="x", custom_m3u=custom_m3u,
+                        rules=list(rules), overrides=dict(overrides or {}),
+                        m3u_sources=list(m3u_sources))])
 
 
 @pytest.fixture
@@ -61,8 +56,8 @@ def _make_dialog(qtbot, path: Path, **cfg) -> ListManagerDialog:
 
 @pytest.fixture
 def cfg_path(tmp_path):
-    p = tmp_path / "config.ini"
-    p.write_text(_config(), encoding="utf-8")
+    p = tmp_path / "daemon.toml"
+    _write_config(p)
     return p
 
 
@@ -84,8 +79,7 @@ class TestDeteccionDeCambio:
         calls = []
         monkeypatch.setattr(dialog, "_apply_config_from_disk",
                             lambda: calls.append(1))
-        cfg_path.write_text(_config(rules="group-title:Cine:0:and"),
-                            encoding="utf-8")
+        _write_config(cfg_path, rules=["group-title:Cine:0:and"])
         dialog._reload_config_if_changed()
         dialog._reload_config_if_changed()
         assert calls == [1]
@@ -102,24 +96,20 @@ class TestDeteccionDeCambio:
 class TestRefresco:
     def test_refresca_filtros(self, dialog, cfg_path):
         assert dialog.rules_widget.table.rowCount() == 0
-        cfg_path.write_text(
-            _config(rules="group-title:Cine:0:and|custom-filter:!{HBO}:0:and"),
-            encoding="utf-8")
+        _write_config(cfg_path, rules=["group-title:Cine:0:and",
+                                       "custom-filter:!{HBO}:0:and"])
         dialog._reload_config_if_changed()
         assert dialog.rules_widget.table.rowCount() == 2
 
     def test_refresca_mapeos_epg(self, dialog, cfg_path):
-        cfg_path.write_text(
-            _config(overrides="http://st/a::Cine.TV"), encoding="utf-8")
+        _write_config(cfg_path, overrides={"http://st/a": "Cine.TV"})
         dialog._reload_config_if_changed()
         assert dialog._overrides_now() == {"http://st/a": "Cine.TV"}
 
     def test_refresca_listas_iptv(self, dialog, cfg_path):
-        cfg_path.write_text(_config(
-            sources=("[source.aaa]\nname = Otra\nkind = m3u\n"
-                     "source_type = file\nlocation = C:/otra.m3u\n"
-                     "refresh_min = 0\nenabled = 1\n"),
-            m3u_sources="aaa"), encoding="utf-8")
+        _write_config(cfg_path, m3u_sources=["aaa"], sources=[
+            {"id": "aaa", "name": "Otra", "kind": "m3u",
+             "location": "C:/otra.m3u"}])
         dialog._reload_config_if_changed()
         assert dialog.catalog_m3u_widget.table.rowCount() == 1
         assert dialog.catalog_m3u_widget.table.item(0, 0).text() == "Otra"
@@ -127,11 +117,9 @@ class TestRefresco:
         assert [r.name for r in refs] == ["Otra"]
 
     def test_refresca_listas_epg(self, dialog, cfg_path):
-        cfg_path.write_text(_config(
-            sources=("[source.bbb]\nname = Guia\nkind = epg\n"
-                     "source_type = file\nlocation = C:/guia.xml\n"
-                     "refresh_min = 0\nenabled = 1\n"),
-            m3u_sources=""), encoding="utf-8")
+        _write_config(cfg_path, sources=[
+            {"id": "bbb", "name": "Guia", "kind": "epg",
+             "location": "C:/guia.xml"}])
         dialog._reload_config_if_changed()
         assert dialog.catalog_epg_widget.table.rowCount() == 1
         assert dialog.catalog_epg_widget.table.item(0, 0).text() == "Guia"
@@ -146,9 +134,8 @@ class TestRefresco:
         dialog._refresh_mapping()
         assert dialog._overrides_now() == {}
 
-        cfg_path.write_text(_config(
-            overrides="http://stream.example.com/cineplus::es.la1"),
-            encoding="utf-8")
+        _write_config(cfg_path,
+                      overrides={"http://stream.example.com/cineplus": "es.la1"})
         dialog._reload_config_if_changed()
 
         # el daemon ya no lo lista como pendiente: se sirve con su guía
@@ -163,8 +150,7 @@ class TestRefresco:
         dialog._refresh_filter_preview()
         assert dialog.preview_list.count() == 2
 
-        cfg_path.write_text(_config(rules="group-title:Cine:0:or"),
-                            encoding="utf-8")
+        _write_config(cfg_path, rules=["group-title:Cine:0:or"])
         fake_api.preview_names = ["Canal A"]
         fake_api.preview_total = 2
         dialog._reload_config_if_changed()

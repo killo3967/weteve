@@ -5,7 +5,7 @@ Marcados ``network`` y EXCLUIDOS por defecto (pytest.ini: addopts
 
     python -m pytest tests/test_network_sources.py -m network -v
 
-Leen la cartera real de ``config.ini`` (secciones ``[source.*]`` tipo url).
+Leen la cartera real de ``daemon.toml`` (``[[sources]]`` de tipo url).
 Si no hay ninguna fuente URL de un kind, ese bloque se salta (SKIP), así el
 test nunca falla por configuración sino por red/formato.
 """
@@ -25,7 +25,7 @@ from src.infrastructure.client.sources_store import load_catalog
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIG = Path(os.environ.get("WETEVE_NETWORK_CONFIG",
-                             str(REPO / "config.ini")))
+                             str(REPO / "daemon.toml")))
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
 TIMEOUT = 20
@@ -33,8 +33,10 @@ MAX_BYTES = 20 * 1024 * 1024  # guard: no arrastrar >20MB a memoria en tests
 
 
 def _url_sources(kind: str) -> list:
+    # Se llama desde `parametrize` al importar: no puede saltar, o la
+    # recolección falla. Sin fichero devuelve vacío y no se generan casos.
     if not CONFIG.exists():
-        pytest.skip(f"{CONFIG} no existe")
+        return []
     catalog = load_catalog(CONFIG)
     return [e for e in catalog.of_kind(kind, enabled_only=True)
             if e.source_type == "url"]

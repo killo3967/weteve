@@ -1,10 +1,11 @@
-"""Reload del daemon: debe releer config.ini, no su cache de arranque.
+"""Reload del daemon: debe releer ``daemon.toml``, no su cache de arranque.
 
 Antes, POST /targets/{id}/reload y la herramienta MCP reload_target usaban el
 PipelineTarget memorizado cuando el daemon arrancó, de modo que Guardar en la
 GUI no tenía efecto en el servicio hasta reiniciar el proceso.
 """
 import pytest
+from toml_helpers import target, write_daemon
 
 from src.application.services.daemon.control_api import ControlApiServer
 from src.application.services.daemon.mcp_tools import build_tool_registry
@@ -15,14 +16,9 @@ from src.application.services.list_manager.models import FilterRule, PipelineTar
 
 @pytest.fixture()
 def store(tmp_path):
-    cfg = tmp_path / "config.ini"
-    cfg.write_text(
-        "[listmanager.target.0]\n"
-        "name = viejo\n"
-        "custom_m3u = /x.m3u\n"
-        "rules = group-title:SPAIN:0\n"
-        "port = 8080\n",
-        encoding="utf-8")
+    cfg = write_daemon(tmp_path / "daemon.toml", targets=[target(
+        "0", name="viejo", custom_m3u="/x.m3u",
+        rules=["group-title:SPAIN:0"])])
     s = TargetStore(cfg)
     s.load()
     return s
@@ -56,16 +52,15 @@ class TestTargetStoreReload:
         assert store.reload("0").name == "viejo"
 
     def test_reload_ve_lo_que_escribio_otro_proceso(self, tmp_path):
-        cfg = tmp_path / "config.ini"
-        cfg.write_text("[listmanager.target.0]\nname = viejo\n"
-                       "custom_m3u = /x.m3u\nport = 8080\n", encoding="utf-8")
+        cfg = write_daemon(
+            tmp_path / "daemon.toml",
+            targets=[target("0", name="viejo", custom_m3u="/x.m3u")])
         s = TargetStore(cfg)
         s.load()
         # la GUI reescribe el fichero por su cuenta
-        cfg.write_text("[listmanager.target.0]\nname = nuevo\n"
-                       "custom_m3u = /x.m3u\n"
-                       "rules = custom-filter:!{HBO}:0:and\nport = 8080\n",
-                       encoding="utf-8")
+        write_daemon(cfg, targets=[target(
+            "0", name="nuevo", custom_m3u="/x.m3u",
+            rules=["custom-filter:!{HBO}:0:and"])])
         fresh = s.reload("0")
         assert fresh.name == "nuevo"
         assert fresh.rules == (FilterRule("custom-filter", "!{HBO}",
@@ -92,17 +87,16 @@ class TestControlApiReloadFromDisk:
         assert sup.calls[0][1] is None
 
     def test_target_nuevo_en_disco_se_reconoce(self, tmp_path):
-        cfg = tmp_path / "config.ini"
-        cfg.write_text("[listmanager.target.0]\nname = a\n"
-                       "custom_m3u = /x.m3u\nport = 8080\n", encoding="utf-8")
+        cfg = write_daemon(
+            tmp_path / "daemon.toml",
+            targets=[target("0", name="a", custom_m3u="/x.m3u")])
         s = TargetStore(cfg)
         s.load()
         sup = _RecordingSupervisor(s)
         api = ControlApiServer(sup, port=0, target_store=s)
-        cfg.write_text("[listmanager.target.0]\nname = a\n"
-                       "custom_m3u = /x.m3u\nport = 8080\n"
-                       "[listmanager.target.1]\nname = b\n"
-                       "custom_m3u = /y.m3u\nport = 8081\n", encoding="utf-8")
+        write_daemon(cfg, targets=[
+            target("0", name="a", custom_m3u="/x.m3u"),
+            target("1", name="b", custom_m3u="/y.m3u", port=8081)])
         status, _ = api._handle("POST", "/targets/1/reload", auth_ok=False)
         assert status == 200
 

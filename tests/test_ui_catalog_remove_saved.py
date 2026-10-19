@@ -1,4 +1,4 @@
-"""Regresión: quitar una lista y guardar debe borrarla de config.ini.
+"""Regresión: quitar una lista y guardar debe borrarla de la cartera.
 
 Cada pestaña de la cartera reconstruye su tipo desde la tabla y conserva el
 otro tipo tal como estaba en su copia de la cartera. Al guardar, el diálogo
@@ -13,45 +13,19 @@ import pytest
 pytest.importorskip("PyQt6")
 
 from src.application.services.list_manager.models import SourceRef
-from src.infrastructure.client.sources_store import read_catalog
 from src.infrastructure.ui.list_manager_dialog import ListManagerDialog
 
-CONFIG = """[listmanager.target.0]
-name = test
-custom_m3u = C:/platero.m3u
-custom_epg =
-port = 9999
-bind = 127.0.0.1
-rules =
-epg_overrides =
-disabled_channels =
-m3u_sources = aaa
-epg_sources =
 
-[source.aaa]
-name = platero2026
-kind = m3u
-source_type = file
-location = C:/platero.m3u
-refresh_min = 0
-enabled = 1
+def _seed(path: Path) -> None:
+    """Cartera con dos listas M3U y el target apuntando a la primera."""
+    from toml_helpers import source, target, write_daemon
 
-[source.bbb]
-name = abilio
-kind = m3u
-source_type = url
-location = http://
-refresh_min = 0
-enabled = 1
-"""
-
-
-def _catalog(path: Path):
-    import configparser
-
-    parser = configparser.ConfigParser()
-    parser.read(path, encoding="utf-8")
-    return read_catalog(parser)
+    write_daemon(
+        path,
+        sources=[source("aaa", "platero2026", "m3u", "C:/platero.m3u"),
+                 source("bbb", "abilio", "m3u", "http://")],
+        targets=[target("0", name="test", custom_m3u="C:/platero.m3u",
+                        m3u_sources=["aaa"], port=9999)])
 
 
 @pytest.fixture
@@ -60,8 +34,8 @@ def dialog(qtbot, tmp_path, monkeypatch):
 
     monkeypatch.setattr(repo.FileM3URepository, "_get_content",
                         lambda self, source: ["#EXTM3U"])
-    path = tmp_path / "config.ini"
-    path.write_text(CONFIG, encoding="utf-8")
+    path = tmp_path / "daemon.toml"
+    _seed(path)
     d = ListManagerDialog(None, config={
         "target_id": "0", "_config_path": path, "name": "test",
         "custom_m3u": "C:/platero.m3u", "port": 9999,

@@ -1,17 +1,24 @@
-"""Configuración [DAEMON] de weteve en config.ini.
+"""Configuración del cliente (``weteve.ini``): dónde y cómo hablar con el demonio.
 
-Sección independiente de ``listmanager.target.N``; el guardado preserva las
-secciones existentes. Claves: control_host, control_port, mcp_port, mcp_token.
+Es el único fichero INI que queda, y a propósito: son seis claves planas que la
+GUI necesita **antes** de que el demonio exista (host, puerto, token y dos
+preferencias de arranque). Los datos del demonio viven en ``daemon.toml``.
 
 ``mcp_token`` vacío = sin autenticación (solo localhost). Con valor, tanto el
 MCP como la API de control exigen ``Authorization: Bearer <token>``.
 """
 
 import configparser
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 DAEMON_SECTION = "DAEMON"
+
+#: Fichero INI del cliente (lo escribe la GUI, lo lee el demonio al arrancar).
+CLIENT_FILE = "weteve.ini"
 
 _TRUE = ("1", "true", "yes", "on", "si", "sí")
 
@@ -33,10 +40,20 @@ class DaemonConfig:
     stop_on_exit: bool = False
 
 def load_daemon_config(path: Path) -> DaemonConfig:
-    """Lee la sección [DAEMON] de config.ini; defaults si no existe."""
-    parser = configparser.ConfigParser()
+    """Lee la sección [DAEMON] de ``weteve.ini``; defaults si no existe.
+
+    Tolera ficheros que no son INI (por ejemplo un ``daemon.toml``): el
+    arranque del cliente es opcional y nunca debe impedir abrir la ventana.
+    """
+    parser = configparser.ConfigParser(interpolation=None)
     if path.exists():
-        parser.read(path, encoding="utf-8")
+        try:
+            parser.read(path, encoding="utf-8")
+        except configparser.Error:
+            logger.warning("configuración del cliente ilegible en %s: "
+                           "se usan los valores por defecto", path,
+                           exc_info=True)
+            return DaemonConfig()
     return DaemonConfig(
         control_host=parser.get(DAEMON_SECTION, "control_host", fallback="127.0.0.1"),
         control_port=parser.getint(DAEMON_SECTION, "control_port", fallback=34400),
@@ -53,3 +70,8 @@ def save_daemon_config(path: Path, cfg: DaemonConfig) -> None:
     from src.infrastructure.client.config_store import update, write_daemon
 
     update(path, lambda parser: write_daemon(parser, cfg))
+
+
+def write_client_from_legacy(ini_path: Path, client_path: Path) -> None:
+    """Migra la sección ``[DAEMON]`` del ``config.ini`` viejo a ``weteve.ini``."""
+    save_daemon_config(client_path, load_daemon_config(ini_path))

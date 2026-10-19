@@ -12,11 +12,15 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 
+from src.application.services.daemon.config import CLIENT_FILE
+from src.infrastructure.client.config_toml import CONFIG_FILE as DATA_FILE
 from src.infrastructure.client.persistencia import load_config
 from src.infrastructure.ui.list_manager_dialog import ListManagerDialog
 
 BASE_DIR = Path(__file__).resolve().parent
-CONFIG_FILE = BASE_DIR / "config.ini"
+#: Datos del demonio (fuentes y targets) y arranque del cliente.
+CONFIG_FILE = BASE_DIR / DATA_FILE
+CLIENT_PATH = BASE_DIR / CLIENT_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +53,13 @@ def main() -> int:
     # que edita el diálogo; el daemon lo sirve permanentemente.
     target_cfg = dict(targets.get("0", targets.get(0, {})))
     target_cfg["_config_path"] = CONFIG_FILE
+    target_cfg["_client_path"] = CLIENT_PATH
     target_cfg.setdefault("target_id", "0")
     dialog = ListManagerDialog(None, config=target_cfg)
     dialog.setWindowTitle("weteve — Gestor de listas")
     dialog.exec()
     # Persistencia: la hace el diálogo contra la API del demonio (escritor
-    # único). Aquí no se reescribe config.ini para no pisar lo que escribió el
+    # único). Aquí no se reescribe daemon.toml para no pisar lo que escribió el
     # demonio ni los cambios hechos por MCP mientras la ventana estaba abierta.
     logger.info("weteve finalizado")
     return 0

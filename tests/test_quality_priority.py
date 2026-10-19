@@ -115,3 +115,10 @@ class TestDeduplicacion:
     def test_prioridades_de_fabrica_estan_ordenadas(self):
         assert DEFAULT_PRIORITY["4k"] > DEFAULT_PRIORITY["full hd"]
         assert DEFAULT_PRIORITY["sd"] == 1
+
+
+def test_tabla_vacia_usa_las_prioridades_de_fabrica():
+    """Un target sin prioridad configurada no puede dejar todo a cero."""
+    canales = [_canal("LA 1 HD"), _canal("LA 1 SD")]
+    assert [c.name for c in dedupe_variants(canales, {})[0]] == ["LA 1 HD"]
+    assert weight("LA 1 4K", {}) == weight("LA 1 4K", None)

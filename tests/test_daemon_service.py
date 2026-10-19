@@ -277,15 +277,15 @@ class TestCarteraDeFuentes:
     """La API es la única vía de escritura de ``[source.*]``."""
 
     def _service(self, tmp_path):
+        from toml_helpers import source, target, write_daemon
+
         from src.application.services.daemon.target_store import TargetStore
 
-        path = tmp_path / "config.ini"
-        path.write_text(
-            "[listmanager.target.0]\nname = t\ncustom_m3u = C:/x.m3u\n"
-            "port = 8080\nm3u_sources = \nepg_sources = \n\n"
-            "[source.a]\nname = platero\nkind = m3u\nsource_type = file\n"
-            "location = C:/platero.m3u\nrefresh_min = 0\nenabled = 1\n",
-            encoding="utf-8")
+        path = tmp_path / "daemon.toml"
+        write_daemon(path,
+                     sources=[source("a", "platero", "m3u",
+                                     "C:/platero.m3u")],
+                     targets=[target("0", name="t", custom_m3u="C:/x.m3u")])
         store = TargetStore(path)
         store.load()
         return TargetService(_StubSupervisor(), store), path

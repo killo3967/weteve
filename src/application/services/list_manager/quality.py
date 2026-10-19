@@ -63,8 +63,12 @@ def quality_token(name: str) -> str:
 
 
 def weight(name: str, priority: dict[str, int] | None = None) -> int:
-    """Prioridad de un canal por su nombre."""
-    tabla = DEFAULT_PRIORITY if priority is None else priority
+    """Prioridad de un canal por su nombre.
+
+    Tabla vacía = tabla de fábrica: un target sin prioridad configurada no
+    puede quedarse con todo a cero (que sería «no servir ninguna calidad»).
+    """
+    tabla = priority or DEFAULT_PRIORITY
     return int(tabla.get(quality_token(name), tabla.get(SIN_ETIQUETA, 0)))
 
 
@@ -88,7 +92,7 @@ def dedupe_variants(channels, priority: dict[str, int] | None = None
     - Canales sin id EPG no se agrupan: sin guía no hay nada que duplicar (los
       filtra la regla de servidor).
     """
-    tabla = DEFAULT_PRIORITY if priority is None else priority
+    tabla = priority or DEFAULT_PRIORITY
     mejores: dict[tuple[str, str], tuple[int, int]] = {}
     servir: set[int] = set()
     for index, ch in enumerate(channels):

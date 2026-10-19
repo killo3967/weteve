@@ -39,7 +39,9 @@ def wired(tmp_path, monkeypatch):
                         lambda path: cfg)
     monkeypatch.setattr(daemon_mod, "ControlApiServer", _FakeServer)
     monkeypatch.setattr(daemon_mod, "McpHttpTransport", _FakeServer)
-    return daemon_mod.build_daemon(config_path=tmp_path / "config.ini")
+    return daemon_mod.build_daemon(
+        config_path=tmp_path / "daemon.toml",
+        client_path=tmp_path / "weteve.ini")
 
 
 class TestBuildDaemon:
@@ -142,24 +144,23 @@ class TestSetupLogging:
 class TestTokenObligatorioFueraDeLoopback:
     def test_sin_token_y_bind_publico_no_arranca(self, tmp_path):
         import pytest as _pytest
+        from toml_helpers import write_client
 
         import daemon
 
-        cfg = tmp_path / "config.ini"
-        cfg.write_text("[DAEMON]\ncontrol_host = 0.0.0.0\n"
-                       "control_port = 0\nmcp_port = 0\nmcp_token = \n",
-                       encoding="utf-8")
+        cfg = write_client(tmp_path / "weteve.ini", control_host="0.0.0.0",
+                           control_port=0, mcp_port=0, mcp_token="")
         with _pytest.raises(RuntimeError, match="mcp_token obligatorio"):
-            daemon.build_daemon(cfg)
+            daemon.build_daemon(tmp_path / "daemon.toml", cfg)
 
     def test_con_token_si_arranca(self, tmp_path):
+        from toml_helpers import write_client
+
         import daemon
 
-        cfg = tmp_path / "config.ini"
-        cfg.write_text("[DAEMON]\ncontrol_host = 0.0.0.0\n"
-                       "control_port = 0\nmcp_port = 0\nmcp_token = tk\n",
-                       encoding="utf-8")
-        d = daemon.build_daemon(cfg)
+        cfg = write_client(tmp_path / "weteve.ini", control_host="0.0.0.0",
+                           control_port=0, mcp_port=0, mcp_token="tk")
+        d = daemon.build_daemon(tmp_path / "daemon.toml", cfg)
         try:
             assert d["server"].is_running
         finally:
@@ -197,3 +198,59 @@ class TestInstallTask:
         monkeypatch.setattr("subprocess.run", fake_run)
         assert daemon_mod.cmd_install_task() == 1
         assert "acceso denegado" in capsys.readouterr().out
+
+
+class TestCliLeeElFicheroDelCliente:
+    """`daemon.py status/stop` usan el puerto de ``weteve.ini``, no 34400 fijo."""
+
+    def test_status_usa_el_puerto_configurado(self, tmp_path, monkeypatch):
+        from toml_helpers import write_client
+
+        cfg = write_client(tmp_path / "weteve.ini", control_port=34990,
+                           mcp_token="tk")
+        visto = {}
+
+        class _FakeClient:
+            def __init__(self, host="127.0.0.1", port=34400, token="", **_kw):
+                visto.update(host=host, port=port, token=token)
+
+            def status(self):
+                return {"targets": {}}
+
+        monkeypatch.setattr(daemon_mod, "DaemonClient", _FakeClient)
+        assert daemon_mod.cmd_status(client_path=cfg) == 0
+        assert visto == {"host": "127.0.0.1", "port": 34990, "token": "tk"}
+
+    def test_stop_usa_el_puerto_configurado(self, tmp_path, monkeypatch):
+        from toml_helpers import write_client
+
+        cfg = write_client(tmp_path / "weteve.ini", control_port=34991)
+        visto = {}
+
+        class _FakeClient:
+            def __init__(self, host="127.0.0.1", port=34400, token="", **_kw):
+                visto["port"] = port
+
+            def shutdown(self):
+                return True
+
+        monkeypatch.setattr(daemon_mod, "DaemonClient", _FakeClient)
+        assert daemon_mod.cmd_stop(client_path=cfg) == 0
+        assert visto["port"] == 34991
+
+    def test_el_puerto_explicito_manda(self, tmp_path, monkeypatch):
+        from toml_helpers import write_client
+
+        cfg = write_client(tmp_path / "weteve.ini", control_port=34990)
+        visto = {}
+
+        class _FakeClient:
+            def __init__(self, host="127.0.0.1", port=34400, token="", **_kw):
+                visto["port"] = port
+
+            def status(self):
+                return {"targets": {}}
+
+        monkeypatch.setattr(daemon_mod, "DaemonClient", _FakeClient)
+        daemon_mod.cmd_status(port=1234, client_path=cfg)
+        assert visto["port"] == 1234

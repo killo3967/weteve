@@ -1,15 +1,17 @@
-"""Configuración de weteve en TOML: esquema, lectura y escritura.
+"""Configuración de weteve en TOML: esquema, lectura, escritura y adaptadores.
 
-Un solo codec para dos ficheros, cada uno con un único escritor:
+Reparto de ficheros, un escritor cada uno:
 
-- ``config.toml``: lo escribe **el demonio** (cartera de fuentes, targets,
-  reglas, mapeos, canales desactivados y prioridad de calidad).
-- ``daemon.toml``: lo escribe **la GUI** (host, puerto, token de arranque).
+- ``daemon.toml``: lo escribe **el demonio** (cartera de fuentes, targets con
+  sus reglas, canales desactivados, mapeos y prioridad de calidad).
+- ``weteve.ini``: lo escribe **la GUI** (host, puerto, token y preferencias
+  de arranque). Es INI porque son seis claves planas y así no hay que migrar
+  el arranque: ver ``daemon/config.py``.
 
-Ventajas frente al viejo ``config.ini``: tipos nativos (enteros y booleanos no
-son cadenas), arrays para listas (reglas, desactivados, selección de fuentes) y
-**claves entrecomilladas** para los mapeos url → channel-id, que en INI era
-imposible porque configparser parte las opciones por ``=`` y ``:``.
+Ventajas frente al viejo ``config.ini`` único: tipos nativos (enteros y
+booleanos no son cadenas), arrays para listas (reglas, desactivados, selección
+de fuentes) y **claves entrecomilladas** para los mapeos url → channel-id, que
+en INI era imposible porque configparser parte las opciones por ``=`` y ``:``.
 
 TOML se lee con ``tomllib`` (stdlib); la escritura es propia para no añadir
 dependencias: solo se emiten los tipos del esquema (cadena, entero, booleano y
@@ -21,14 +23,23 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+from src.application.services.list_manager.models import (
+    FilterRule,
+    PipelineTarget,
+    SourceRef,
+)
+from src.application.services.list_manager.source_catalog import (
+    SourceCatalog,
+    SourceEntry,
+)
 from src.infrastructure.client.config_store import write_atomic
 
 #: Versión del esquema. Un fichero con versión mayor no se toca: se avisa.
 SCHEMA_VERSION = 2
 
-#: Nombres de fichero por defecto (junto al ejecutable / config.ini antiguo).
-CONFIG_FILE = "config.toml"
-DAEMON_FILE = "daemon.toml"
+#: Datos del demonio (este codec) y arranque del cliente (INI, lo escribe la GUI).
+CONFIG_FILE = "daemon.toml"
+CLIENT_FILE = "weteve.ini"
 
 
 class ConfigError(RuntimeError):
@@ -58,7 +69,7 @@ def _val(value) -> str:
 
 
 def dumps(config: dict) -> str:
-    """Serializa la configuración completa (``config.toml``)."""
+    """Serializa ``daemon.toml`` completo."""
     lines = [f"version = {int(config.get('version', SCHEMA_VERSION))}", ""]
     for source in config.get("sources") or []:
         lines.append("[[sources]]")
@@ -94,16 +105,6 @@ def dumps(config: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def dumps_daemon(daemon: dict) -> str:
-    """Serializa ``daemon.toml`` (lo escribe la GUI)."""
-    lines = [f"version = {int(daemon.get('version', SCHEMA_VERSION))}"]
-    for key in ("host", "port", "mcp_port", "token"):
-        lines.append(f"{key} = {_val(daemon.get(key, ''))}")
-    for key in ("autostart", "stop_on_exit"):
-        lines.append(f"{key} = {_val(bool(daemon.get(key, False)))}")
-    return "\n".join(lines) + "\n"
-
-
 # -- lectura -------------------------------------------------------------------
 
 def _check_version(data: dict, path: Path) -> dict:
@@ -117,7 +118,7 @@ def _check_version(data: dict, path: Path) -> dict:
 
 
 def load(path: Path) -> dict:
-    """Lee ``config.toml``. Fichero inexistente = configuración vacía."""
+    """Lee ``daemon.toml``. Fichero inexistente = configuración vacía."""
     if not path.exists():
         return {"version": SCHEMA_VERSION, "sources": [], "targets": []}
     with open(path, "rb") as f:
@@ -131,55 +132,156 @@ def load(path: Path) -> dict:
     return data
 
 
-def load_daemon(path: Path) -> dict:
-    """Lee ``daemon.toml`` con los valores por defecto de fábrica."""
-    defaults = {"version": SCHEMA_VERSION, "host": "127.0.0.1",
-                "port": 34400, "mcp_port": 34400, "token": "",
-                "autostart": False, "stop_on_exit": False}
-    if not path.exists():
-        return defaults
-    with open(path, "rb") as f:
-        data = tomllib.load(f)
-    _check_version(data, path)
-    return {**defaults, **data}
+# -- adaptadores: catálogo y targets ------------------------------------------
+
+def catalog_from(config: dict) -> SourceCatalog:
+    """``SourceCatalog`` a partir de los ``[[sources]]`` del fichero."""
+    return SourceCatalog([
+        SourceEntry(id=str(raw.get("id", "")), name=str(raw.get("name", "")),
+                    kind=raw.get("kind", "m3u"),
+                    source_type=raw.get("source_type", "file"),
+                    location=str(raw.get("location", "")),
+                    refresh_min=int(raw.get("refresh_min") or 0),
+                    enabled=bool(raw.get("enabled", True)))
+        for raw in config.get("sources") or [] if raw.get("id")
+    ])
 
 
-# -- guardado ------------------------------------------------------------------
+def catalog_to_entries(catalog: SourceCatalog) -> list[dict]:
+    """``[[sources]]`` a partir de la cartera."""
+    return [{"id": entry.id, "name": entry.name, "kind": entry.kind,
+             "source_type": entry.source_type, "location": entry.location,
+             "refresh_min": entry.refresh_min, "enabled": entry.enabled}
+            for entry in catalog.all()]
+
+
+def target_to_dict(target: PipelineTarget, target_id: str) -> dict:
+    """Target del dominio → bloque ``[[targets]]``."""
+    return {
+        "id": str(target_id),
+        "name": target.name,
+        "port": int(target.port),
+        "bind": str(getattr(target, "bind", "") or "127.0.0.1"),
+        "starting_number": int(target.starting_number),
+        "custom_m3u": "",
+        "custom_epg": "",
+        "epg_source": int(target.epg_source_index if
+                          target.epg_source_index is not None else -1),
+        "m3u_sources": [ref.id for ref in target.source_refs],
+        "epg_sources": [ref.id for ref in target.epg_refs],
+        "rules": [rule.serialize() for rule in target.rules],
+        "disabled": list(target.disabled_channels),
+        "overrides": dict(target.epg_overrides),
+        "quality_priority": dict(target.quality_priority or {}),
+    }
+
+
+def target_from_dict(raw: dict, catalog: SourceCatalog) -> PipelineTarget:
+    """Bloque ``[[targets]]`` → target del dominio (resuelve refs por id)."""
+    def refs(key: str) -> tuple[SourceRef, ...]:
+        out = []
+        for source_id in raw.get(key) or []:
+            entry = catalog.get(str(source_id))
+            if entry is not None:
+                out.append(SourceRef(entry.id, entry.name, entry.location))
+        return tuple(out)
+
+    rules = tuple(FilterRule.parse(text) for text in raw.get("rules") or []
+                  if str(text).strip())
+    epg_source = raw.get("epg_source", -1)
+    return PipelineTarget(
+        name=str(raw.get("name", "")),
+        # sin cartera, la fuente sigue siendo el M3U suelto del target antiguo
+        source_index=str(raw.get("custom_m3u") or raw.get("id", "")),
+        rules=rules,
+        epg_source_index=(int(epg_source) if int(epg_source) >= 0 else None),
+        epg_overrides={str(url): str(cid)
+                       for url, cid in (raw.get("overrides") or {}).items()},
+        port=int(raw.get("port") or 8080),
+        starting_number=int(raw.get("starting_number") or 1),
+        source_refs=refs("m3u_sources"),
+        epg_refs=refs("epg_sources"),
+        disabled_channels=tuple(str(url) for url in raw.get("disabled") or []),
+        # vacío = prioridades de fábrica (None), no una tabla con todo a cero
+        quality_priority={str(k): int(v) for k, v in
+                          (raw.get("quality_priority") or {}).items()} or None,
+    )
+
+
+# -- escritura de alto nivel ---------------------------------------------------
 
 def save(path: Path, config: dict) -> None:
-    """Guarda ``config.toml`` de forma atómica (con ``.bak``)."""
+    """Guarda ``daemon.toml`` de forma atómica (con ``.bak``)."""
     write_atomic(path, dumps(config))
 
 
-def save_daemon(path: Path, daemon: dict) -> None:
-    """Guarda ``daemon.toml`` de forma atómica (con ``.bak``)."""
-    write_atomic(path, dumps_daemon(daemon))
+def update(path: Path, mutate) -> dict:
+    """Lee, muta y escribe: una lectura y una escritura por guardado."""
+    config = load(path)
+    mutate(config)
+    save(path, config)
+    return config
+
+
+def save_catalog(path: Path, catalog: SourceCatalog) -> None:
+    """Reemplaza la cartera; los targets pierden refs a fuentes que ya no están."""
+    def mutate(config: dict) -> None:
+        config["sources"] = catalog_to_entries(catalog)
+        known = {entry.id for entry in catalog.all()}
+        for target in config["targets"]:
+            for key in ("m3u_sources", "epg_sources"):
+                target[key] = [sid for sid in target.get(key) or []
+                               if str(sid) in known]
+
+    update(path, mutate)
+
+
+def save_target(path: Path, target_id: str, target: PipelineTarget) -> None:
+    """Inserta o reemplaza un target por id."""
+    entry = target_to_dict(target, target_id)
+
+    def mutate(config: dict) -> None:
+        for index, raw in enumerate(config["targets"]):
+            if str(raw.get("id")) == str(target_id):
+                config["targets"][index] = entry
+                return
+        config["targets"].append(entry)
+
+    update(path, mutate)
+
+
+def delete_target(path: Path, target_id: str) -> bool:
+    """Elimina un target del fichero. False si no estaba."""
+    existed = {"value": False}
+
+    def mutate(config: dict) -> None:
+        keep = [raw for raw in config["targets"]
+                if str(raw.get("id")) != str(target_id)]
+        existed["value"] = len(keep) != len(config["targets"])
+        config["targets"] = keep
+
+    update(path, mutate)
+    return existed["value"]
 
 
 # -- importación desde el INI viejo -------------------------------------------
 
-def from_legacy(ini_path: Path) -> tuple[dict, dict]:
-    """Convierte ``config.ini`` en ``(config, daemon)``.
+def from_legacy(ini_path: Path) -> dict:
+    """Convierte la parte de datos de ``config.ini`` en la config nueva.
 
-    Reutiliza los lectores existentes (cartera, targets y ``[DAEMON]``): la
-    migración no reinterpreta el formato, solo lo vuelca al esquema nuevo.
+    Reutiliza los lectores existentes (cartera y targets): la migración no
+    reinterpreta el formato, solo lo vuelca al esquema nuevo. El cliente
+    (``[DAEMON]``) lo migra ``daemon/config.py``.
     """
-    from src.application.services.daemon.config import load_daemon_config
     from src.infrastructure.client.config_store import parse
-    from src.infrastructure.client.persistencia import load_config
+    from src.infrastructure.client.persistencia import load_config_ini
     from src.infrastructure.client.sources_store import read_catalog
 
     catalog = read_catalog(parse(ini_path)) if ini_path.exists() else None
-    sources = []
-    for entry in (catalog.all() if catalog is not None else []):
-        sources.append({
-            "id": entry.id, "name": entry.name, "kind": entry.kind,
-            "source_type": entry.source_type, "location": entry.location,
-            "refresh_min": entry.refresh_min, "enabled": entry.enabled,
-        })
+    sources = catalog_to_entries(catalog) if catalog is not None else []
     targets = []
     if ini_path.exists():
-        for target_id, t in sorted(load_config(ini_path)["targets"].items()):
+        for target_id, t in sorted(load_config_ini(ini_path)["targets"].items()):
             epg_source = t.get("epg_source")
             targets.append({
                 "id": str(target_id),
@@ -192,21 +294,9 @@ def from_legacy(ini_path: Path) -> tuple[dict, dict]:
                 "epg_source": -1 if epg_source is None else int(epg_source),
                 "m3u_sources": [ref.id for ref in t["m3u_refs"]],
                 "epg_sources": [ref.id for ref in t["epg_refs"]],
-                "rules": [rule.serialize() for rule in t["rules"]],
+                "rules": list(t["rules"]),
                 "disabled": list(t["disabled_channels"]),
                 "overrides": dict(t["epg_overrides"]),
                 "quality_priority": {},
             })
-    cfg = {"version": SCHEMA_VERSION, "sources": sources, "targets": targets}
-
-    legacy_daemon = load_daemon_config(ini_path)
-    daemon = {
-        "version": SCHEMA_VERSION,
-        "host": legacy_daemon.control_host,
-        "port": legacy_daemon.control_port,
-        "mcp_port": legacy_daemon.mcp_port,
-        "token": legacy_daemon.mcp_token,
-        "autostart": legacy_daemon.autostart,
-        "stop_on_exit": legacy_daemon.stop_on_exit,
-    }
-    return cfg, daemon
+    return {"version": SCHEMA_VERSION, "sources": sources, "targets": targets}

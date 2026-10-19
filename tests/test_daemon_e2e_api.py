@@ -43,10 +43,10 @@ class TestLecturas:
         code, body = api.epg_channels("0")
         assert code == 200 and body["total"] == 4
         assert {"es.la1", "es.la2"} <= {c["id"] for c in body["channels"]}
-        # cada canal dice de qué guía viene: el nombre de la fuente en la
-        # cartera (la migración de custom_epg la nombra por el fichero)
+        # cada canal dice de qué guía viene: sin cartera, la etiqueta es el
+        # nombre del fichero XMLTV que registró el target
         canal = next(c for c in body["channels"] if c["id"] == "es.la1")
-        assert canal["lists"] == ["sample"]
+        assert canal["lists"] == ["sample.xmltv"]
 
         code, body = api.groups("0")
         assert code == 200
@@ -91,9 +91,8 @@ class TestEscrituras:
             api.mapping_candidates("0", include_served=False)[1])
 
     def test_sources_round_trip(self, api, daemon):
-        # la config del arnés es legacy: el demonio la migra al arrancar
-        inicial = api.sources()[1]["sources"]
-        assert {s["kind"] for s in inicial} == {"m3u", "epg"}
+        # el arnés arranca con un target de fuente única: sin cartera
+        assert api.sources()[1]["sources"] == []
 
         from e2e_support import M3U
 
@@ -114,16 +113,19 @@ class TestEscrituras:
         assert api.run("0")[1]["filtered_count"] == 5
 
 
-class TestMigracionAlArrancar:
-    def test_la_config_legacy_se_convierte_en_cartera(self, api):
-        """Fuente única (custom_m3u/custom_epg) → filas de cartera + selección."""
-        sources = api.sources()[1]["sources"]
-        kinds = {s["kind"] for s in sources}
-        assert kinds == {"m3u", "epg"}
-        refs = api.get("/targets/0")[1]["target"]["source_refs"]
-        assert [r["kind"] if "kind" in r else r["name"] for r in refs]
-        # el target ya apunta a la fila migrada
-        assert len(refs) == 1
+class TestTargetDeFuenteUnica:
+    """Sin cartera, el target sirve el M3U suelto de ``custom_m3u``.
+
+    La conversión de un ``config.ini`` antiguo a cartera ya no ocurre al
+    arrancar: la hace ``daemon.py migrate-config`` (ver test_config_toml).
+    """
+
+    def test_sirve_sin_filas_de_cartera(self, api):
+        assert api.sources()[1]["sources"] == []
+        target = api.get("/targets/0")[1]["target"]
+        assert target["source_refs"] == []
+        assert target["m3u"]
+        assert api.target_status("0")[1]["channel_count"] == 3
 
 
 class TestErrores:
