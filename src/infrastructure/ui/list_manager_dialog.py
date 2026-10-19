@@ -1260,13 +1260,14 @@ class ListManagerDialog(QDialog):
         config_tab_layout.addWidget(target_group)
 
         # Sección [DAEMON]: API de control + endpoint MCP. Se persiste aparte
-        # (sección [DAEMON] de config.ini) vía save_daemon_config en _on_save.
+        # (sección [DAEMON] de ``weteve.ini``) vía save_daemon_config.
         from src.application.services.daemon.config import (
             DaemonConfig,
             load_daemon_config,
         )
-        if config_path:
-            self._daemon_cfg = load_daemon_config(Path(config_path))
+        client_path = config.get("_client_path") or config_path
+        if client_path:
+            self._daemon_cfg = load_daemon_config(Path(client_path))
         else:
             self._daemon_cfg = DaemonConfig()
         daemon_group = QGroupBox("Demonio (un puerto: control, API y MCP)")
