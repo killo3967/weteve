@@ -106,3 +106,37 @@ class TestPrioridadDeCalidad:
         tabla = d.priority_widget.table
         tabla.item(0, d.priority_widget.COL_PRIORIDAD).setText("99")
         assert d.priority_widget.values()["full hd"] == 9
+
+
+class TestEliminarCalidad:
+    """Botón «Eliminar calidad» y explicación del sentido del número."""
+
+    def test_el_boton_existe(self, qtbot, config_path):
+        d = _dialog(qtbot, config_path)
+        assert d.priority_widget.remove_btn.text() == "&Eliminar calidad"
+
+    def test_elimina_la_fila_seleccionada(self, qtbot, config_path):
+        d = _dialog(qtbot, config_path)
+        w = d.priority_widget
+        antes = dict(w.values())
+        assert "full hd" in antes
+        fila = next(r for r in range(w.table.rowCount())
+                    if w.table.item(r, w.COL_CALIDAD).text() == "full hd")
+        w.table.selectRow(fila)
+        w.remove_btn.click()
+        assert "full hd" not in w.values()
+        assert len(w.values()) == len(antes) - 1
+
+    def test_sin_seleccion_no_cambia_nada(self, qtbot, config_path):
+        d = _dialog(qtbot, config_path)
+        w = d.priority_widget
+        antes = dict(w.values())
+        w.remove_btn.click()
+        assert w.values() == antes
+
+    def test_la_explicacion_dice_que_mas_es_mejor(self, qtbot, config_path):
+        d = _dialog(qtbot, config_path)
+        texto = d.priority_widget.hint_label.text()
+        assert "Más número = más prioridad" in texto
+        assert "0 = no servir nunca" in texto
+        assert "1 = último recurso" in texto

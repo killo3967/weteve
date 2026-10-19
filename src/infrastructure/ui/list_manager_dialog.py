@@ -456,17 +456,35 @@ class QualityPriorityWidget(QWidget):
                                         QHeaderView.ResizeMode.Stretch)
             header.setSectionResizeMode(self.COL_PRIORIDAD,
                                         QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.itemChanged.connect(lambda _item: self.changed.emit())
         layout.addWidget(self.table)
         botones = QHBoxLayout()
         add_btn = QPushButton("&Añadir calidad")
         add_btn.clicked.connect(lambda: self._add_row("", 0))
+        self.remove_btn = QPushButton("&Eliminar calidad")
+        self.remove_btn.setToolTip(
+            "Quita la calidad seleccionada de la tabla: esa variante deja de "
+            "tenerse en cuenta al elegir canal.")
+        self.remove_btn.clicked.connect(self.remove_selected)
         reset_btn = QPushButton("&Restaurar")
         reset_btn.clicked.connect(self.reset)
         botones.addWidget(add_btn)
+        botones.addWidget(self.remove_btn)
         botones.addWidget(reset_btn)
         botones.addStretch(1)
         layout.addLayout(botones)
+
+        # Debajo del marco: qué significa el número (el orden confunde).
+        self.hint_label = QLabel(
+            "Más número = más prioridad. De cada canal repetido se sirve la "
+            "variante con el número más alto: 4K=5, Full HD=4, HD=3, "
+            "sin etiqueta=2, SD=1 (así gana 4K).\n"
+            "0 = no servir nunca esa calidad; 1 = último recurso: solo entra "
+            "si no hay ninguna otra variante de ese canal.")
+        self.hint_label.setWordWrap(True)
+        layout.addWidget(self.hint_label)
         self.reset()
 
     # -- filas ---------------------------------------------------------------
@@ -475,6 +493,21 @@ class QualityPriorityWidget(QWidget):
         self.table.insertRow(fila)
         self.table.setItem(fila, self.COL_CALIDAD, QTableWidgetItem(token))
         self.table.setItem(fila, self.COL_PRIORIDAD, QTableWidgetItem(str(peso)))
+
+    def remove_selected(self) -> None:
+        """Quita las filas de calidad seleccionadas."""
+        modelo = self.table.selectionModel()
+        filas = sorted({index.row() for index in modelo.selectedRows()},
+                       reverse=True) if modelo is not None else []
+        if not filas:
+            return
+        self.table.blockSignals(True)
+        try:
+            for fila in filas:
+                self.table.removeRow(fila)
+        finally:
+            self.table.blockSignals(False)
+        self.changed.emit()
 
     def set_values(self, values: dict[str, int]) -> None:
         """Pinta la tabla; vacío = prioridades de fábrica."""
