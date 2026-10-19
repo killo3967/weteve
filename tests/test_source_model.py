@@ -85,7 +85,8 @@ class TestRenderNombreDeCanal:
         out = build_m3u([ch])
         extinf = next(l for l in out.splitlines() if l.startswith("#EXTINF"))
         assert extinf.rstrip().endswith(",HBO")
-        assert 'tvg-id=""' in extinf
+        # el id EPG viaja en el atributo; el nombre de la lista, nunca
+        assert 'tvg-id="hbo.id"' in extinf
         assert "platero" not in extinf
         assert "platero" not in ch.url
 

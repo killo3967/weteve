@@ -37,9 +37,12 @@ class TargetStore:
 
     def load(self) -> None:
         """Carga todos los targets del fichero (reemplaza lo cacheado)."""
-        parser = configparser.ConfigParser()
-        if self._path.exists():
-            parser.read(self._path, encoding="utf-8")
+        from src.infrastructure.client.config_store import (
+            parse,
+            parse_overrides,
+        )
+
+        parser = parse(self._path)
 
         targets: dict[str, PipelineTarget] = {}
         epg_paths: dict[str, str | None] = {}
@@ -52,12 +55,9 @@ class TargetStore:
             rules = tuple(
                 FilterRule.parse(r.strip()) for r in raw_rules.split("|") if r.strip()
             )
-            raw_overrides = parser.get(sec, "epg_overrides", fallback="")
-            overrides: dict[str, str] = {}
-            for pair in raw_overrides.split(";;"):
-                if "::" in pair:
-                    url, cid = pair.split("::", 1)
-                    overrides[url] = cid
+            # mismo lector que la GUI: un formato, un sitio (config_store)
+            overrides = parse_overrides(
+                parser.get(sec, "epg_overrides", fallback=""))
             raw_disabled = parser.get(sec, "disabled_channels", fallback="")
             disabled = tuple(
                 u.strip() for u in raw_disabled.split("||") if u.strip()
@@ -154,14 +154,14 @@ class TargetStore:
         """Elimina el target (cache + sección en fichero). False si no existía."""
         if target_id not in self._targets:
             return False
-        parser = configparser.ConfigParser()
-        if self._path.exists():
-            parser.read(self._path, encoding="utf-8")
+        from src.infrastructure.client.config_store import dump, parse
+
+        parser = parse(self._path)
         sec = f"{_TARGET_PREFIX}{target_id}"
         if parser.has_section(sec):
             parser.remove_section(sec)
-            with open(self._path, "w", encoding="utf-8") as f:
-                parser.write(f)
+            # misma escritura atómica que el resto: si falla, no se pierde nada
+            dump(parser, self._path)
         self._targets.pop(target_id, None)
         self._epg_paths.pop(target_id, None)
         self._binds.pop(target_id, None)

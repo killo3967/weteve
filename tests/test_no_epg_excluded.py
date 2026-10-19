@@ -165,15 +165,27 @@ class TestDummyEnXmltv:
         return MappedChannel(name=name, url=url, matched_epg_id=epg_id)
 
     def test_dummy_genera_channel_con_el_nombre_del_canal(self):
-        """El M3U sale con tvg-id="" (decisión previa), así que el reproductor
-        enlaza la guía por nombre: el display-name del dummy debe ser el nombre
-        del canal M3U, no la etiqueta 'Dummy 1h'."""
+        """El dummy se enlaza por id (tvg-id) y por nombre a la vez: su
+        display-name debe ser el nombre del canal M3U, no la etiqueta
+        'Dummy 1h', para que el emparejamiento por nombre también funcione."""
         dummy_id = build_dummy_epg_id(DUMMY_URL, "Canal Raro")
         xml = build_xmltv([self._mapped("Canal Raro", DUMMY_URL, dummy_id)],
                           _epg())
         assert f'<channel id="{dummy_id}">' in xml
         assert "<display-name>Canal Raro</display-name>" in xml
         assert "Dummy 1h" not in xml
+
+    def test_dummy_tambien_enlaza_desde_el_m3u(self):
+        """La playlist emite el id sintético del dummy y su display-name."""
+        from src.application.services.list_manager.playlist_builder import (
+            build_m3u,
+        )
+
+        dummy_id = build_dummy_epg_id(DUMMY_URL, "Canal Raro")
+        m3u = build_m3u([self._mapped("Canal Raro", DUMMY_URL, dummy_id)])
+        extinf = next(l for l in m3u.splitlines() if l.startswith("#EXTINF"))
+        assert f'tvg-id="{dummy_id}"' in extinf
+        assert extinf.endswith(",Canal Raro")
 
     def test_dummy_genera_la_parrilla_sintetica(self):
         dummy_id = build_dummy_epg_id(DUMMY_URL, "Canal Raro")

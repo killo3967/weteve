@@ -157,8 +157,12 @@ class TestBuildM3U:
         assert 'group-title="General"' in out
         assert "http://s/la1" in out
 
-    def test_tvg_id_siempre_vacio(self):
-        """Como las listas de proveedor: el id de guía no viaja en el M3U."""
+    def test_tvg_id_lleva_el_id_de_la_guia(self):
+        """El id EPG es la clave con la que el reproductor enlaza la guía;
+
+        sin él solo queda el emparejamiento por nombre, que la mayoría de
+        clientes (TiviMate, Kodi, Jellyfin) no intenta.
+        """
         chans = [
             MappedChannel("Raro", "http://s/raro", "X", chno=1),
             MappedChannel("La 1", "http://s/la1", "X", tvg_id="es.la1",
@@ -167,8 +171,9 @@ class TestBuildM3U:
         out = build_m3u(chans)
         extinf = [l for l in out.splitlines() if l.startswith("#EXTINF")]
         assert len(extinf) == 2
-        assert all('tvg-id=""' in l for l in extinf)
-        assert "es.la1" not in out
+        # el canal sin guía no enlaza nada; el mapeado lleva su channel-id
+        assert 'tvg-id=""' in extinf[0]
+        assert 'tvg-id="es.la1"' in extinf[1]
 
     def test_group_title_y_chno_siempre_presentes(self):
         out = build_m3u([MappedChannel("La 1", "http://s/la1", "SPAIN", chno=7)])
@@ -212,8 +217,8 @@ class TestBuildXmltv:
         assert [el.get("id") for el in root.findall("channel")] == ["es.la1"]
         assert len(root.findall("programme")) == 1
 
-    def test_tvg_id_de_m3u_siempre_vacio_no_compromete_el_xmltv(self):
-        """El M3U no referencia ids; el XMLTV solo lleva la guía real."""
+    def test_el_m3u_y_el_xmltv_usan_el_mismo_id(self):
+        """Playlist y guía se enlazan por el mismo channel-id."""
         import re
 
         channels = [
@@ -221,7 +226,7 @@ class TestBuildXmltv:
             MappedChannel("Sin EPG", "http://s/x", chno=2),
         ]
         m3u = build_m3u(channels)
-        assert set(re.findall(r'tvg-id="([^"]*)"', m3u)) == {""}
+        assert set(re.findall(r'tvg-id="([^"]*)"', m3u)) == {"es.la1", ""}
         assert "es.la1" in build_xmltv(channels, _epg())
 
     def test_dos_canales_al_mismo_id_no_duplican_canal(self):
@@ -322,3 +327,54 @@ class TestDisabledChannels:
         r1 = p.run(_target())
         r2 = p.run(_target(disabled_channels=()))
         assert len(r1.channels) == len(r2.channels)
+
+
+class TestVariantesDeCalidad:
+    """El mismo canal repetido con etiquetas de calidad se sirve una vez."""
+
+    @staticmethod
+    def _variantes():
+        return [
+            Channel("LA 1 HD", "http://s/la1-hd", "General", tvg_id="es.la1"),
+            Channel("LA 1 FULL HD", "http://s/la1-fhd", "General",
+                    tvg_id="es.la1"),
+            Channel("LA 1 SD", "http://s/la1-sd", "General", tvg_id="es.la1"),
+        ]
+
+    def test_se_sirve_la_mejor_variante(self):
+        p = _pipeline(epg=_epg(), channels=self._variantes())
+        result = p.run(_target())
+        assert [c.name for c in result.channels] == ["LA 1 FULL HD"]
+        assert result.channels[0].chno == 1        # numeración sin huecos
+        assert {c.name for c in result.excluded_duplicate} == {
+            "LA 1 HD", "LA 1 SD"}
+
+    def test_desactivar_la_mejor_deja_pasar_la_siguiente(self):
+        """El apagado manual va antes: sirve para elegir variante."""
+        canales = [
+            Channel("LA 1 4K", "http://s/4k", "General", tvg_id="es.la1"),
+            Channel("LA 1 HD", "http://s/hd", "General", tvg_id="es.la1"),
+        ]
+        p = _pipeline(epg=_epg(), channels=canales)
+        result = p.run(_target(disabled_channels=("http://s/4k",)))
+        assert [c.name for c in result.channels] == ["LA 1 HD"]
+        assert result.excluded_duplicate == []
+
+    def test_prioridad_propia_del_target(self):
+        """El móvil puede preferir SD: la tabla del target manda."""
+        p = _pipeline(epg=_epg(), channels=self._variantes())
+        result = p.run(_target(quality_priority={"sd": 5, "hd": 3,
+                                                "full hd": 2}))
+        assert [c.name for c in result.channels] == ["LA 1 SD"]
+
+    def test_no_deduplica_canales_sin_guia(self):
+        canales = [
+            Channel("Raro HD", "http://s/raro-hd", "General"),
+            Channel("Raro SD", "http://s/raro-sd", "General"),
+        ]
+        p = _pipeline(epg=_epg(), channels=canales)
+        result = p.run(_target())
+        # sin guía no llegan a servirse: los descarta la regla de servidor
+        assert result.channels == []
+        assert len(result.excluded_no_epg) == 2
+        assert result.excluded_duplicate == []

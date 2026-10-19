@@ -152,7 +152,7 @@ def build_daemon(config_path: Path = DEFAULT_CONFIG) -> dict:
     server = McpHttpTransport(
         mcp_core, host=cfg.control_host, port=cfg.control_port,
         token=cfg.mcp_token,
-        rest_api=RestApi(service),
+        rest_api=RestApi(service, on_shutdown=shutdown),
         control_api=control_api,
         playlist=supervisor.playlist_route,
     )
@@ -231,18 +231,63 @@ def cmd_stop(port: int = 34400) -> int:
 
 
 def cmd_install_task(config_path: Path = DEFAULT_CONFIG) -> int:
-    """Registra la tarea de Task Scheduler: al iniciar sesión, daemon.py run."""
+    """Registra la tarea de Task Scheduler: al iniciar sesión, daemon.py run.
+
+    Sin ``shell=True``: los argumentos van como lista. Componer una cadena de
+    shell con comillas anidadas se rompe en cuanto una ruta lleva espacios o
+    comillas, y ``schtasks`` acepta argv sin problema.
+    """
+    import subprocess
+
     python = Path(sys.executable)
     script = Path(__file__).resolve()
     task_name = "weteve-daemon"
-    cmd = (f'schtasks /Create /F /TN "{task_name}" /SC ONLOGON /RL LIMITED '
-           f'/TR "\'{python}\' \'{script}\' run"')
-    import subprocess
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    # /TR es un único argumento con el comando, entre comillas: schtasks lo
+    # guarda tal cual y lo ejecuta sin pasar por un shell.
+    comando = f'"{python}" "{script}" run'
+    argv = ["schtasks", "/Create", "/F", "/TN", task_name, "/SC", "ONLOGON",
+            "/RL", "LIMITED", "/TR", comando]
+    result = subprocess.run(argv, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"error registrando tarea: {result.stderr.strip()}")
         return 1
     print(f"tarea '{task_name}' registrada: {python} {script} run")
+    return 0
+
+
+def cmd_migrate_config(config_path: Path = DEFAULT_CONFIG,
+                       check: bool = False) -> int:
+    """Convierte ``config.ini`` en ``config.toml`` + ``daemon.toml``.
+
+    Idempotente: se puede repetir sin miedo (la escritura es atómica y deja
+    ``.bak``). El ``config.ini`` **no se borra**: se conserva hasta que el
+    usuario compruebe que todo va.
+    """
+    from src.infrastructure.client import config_toml
+
+    destino = config_path.with_name(config_toml.CONFIG_FILE)
+    destino_daemon = config_path.with_name(config_toml.DAEMON_FILE)
+    if check:
+        if not destino.exists():
+            print(f"no existe {destino}: ejecuta `daemon.py migrate-config`")
+            return 1
+        esperado, _ = config_toml.from_legacy(config_path)
+        if config_toml.load(destino) != esperado:
+            print(f"{destino} no coincide con {config_path}")
+            return 1
+        print(f"ok: {destino} coincide con {config_path}")
+        return 0
+    if not config_path.exists():
+        print(f"no hay {config_path} que migrar")
+        return 1
+    cfg, daemon_cfg = config_toml.from_legacy(config_path)
+    config_toml.save(destino, cfg)
+    config_toml.save_daemon(destino_daemon, daemon_cfg)
+    mapeos = sum(len(t.get("overrides") or {}) for t in cfg["targets"])
+    print(f"migrado: {destino} ({len(cfg['sources'])} fuentes, "
+          f"{len(cfg['targets'])} target(s), {mapeos} mapeos)")
+    print(f"migrado: {destino_daemon}")
+    print(f"{config_path.name} se conserva: bórralo cuando compruebes que va")
     return 0
 
 
@@ -257,6 +302,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_stop()
     if command == "install-task":
         return cmd_install_task()
+    if command == "migrate-config":
+        return cmd_migrate_config(check="--check" in argv)
     print(__doc__)
     return 2
 

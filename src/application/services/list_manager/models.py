@@ -110,6 +110,9 @@ class PipelineTarget:
     # canales desactivados manualmente (clave estable, p. ej. url); el
     # pipeline los excluye de la lista servida
     disabled_channels: tuple[str, ...] = ()
+    # prioridad de calidad (token -> peso, 0 = nunca). None = de fábrica: se
+    # sirve una sola variante de cada canal (ver list_manager/quality.py)
+    quality_priority: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)

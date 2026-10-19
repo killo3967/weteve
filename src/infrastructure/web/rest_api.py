@@ -72,8 +72,11 @@ def _status_for(result: dict) -> int:
 class RestApi:
     """Traduce peticiones HTTP a operaciones de ``TargetService``."""
 
-    def __init__(self, service) -> None:
+    def __init__(self, service, on_shutdown=None) -> None:
         self._service = service
+        # Apagar el demonio es una orden más del mismo puerto: la GUI no
+        # necesita ir a la raíz (/shutdown) con otro cliente.
+        self._on_shutdown = on_shutdown
 
     # -- entrada -------------------------------------------------------------
 
@@ -93,6 +96,9 @@ class RestApi:
 
         if rest == "/health":
             return 200, {"ok": True, "api": "v1"}
+        if rest == "/shutdown":
+            # la ruta existe, pero solo como POST
+            return 405, {"error": "método GET no soportado"}
         if rest == "/status":
             return 200, self._service.status()
         if rest == "/targets":
@@ -141,7 +147,8 @@ class RestApi:
                 unmatched_only=_bool_param(query, "unmatched_only"))
         if sub == "mapping-candidates":
             return 200, self._service.mapping_candidates(
-                target_id, limit=limit, offset=offset)
+                target_id, limit=limit, offset=offset,
+                include_served=_bool_param(query, "include_served"))
         if sub == "epg-channels":
             return 200, self._service.epg_channels(
                 target_id, limit=limit, offset=offset)
@@ -158,6 +165,12 @@ class RestApi:
         payload, error = _json_body(body)
         if error is not None:
             return 400, {"error": error}
+        if rest == "/shutdown":
+            if method != "POST":
+                return 405, {"error": f"método {method} no soportado"}
+            if self._on_shutdown is not None:
+                self._on_shutdown()
+            return 200, {"ok": True}
         if rest == "/sources":
             if method != "PUT":
                 return 405, {"error": f"método {method} no soportado"}

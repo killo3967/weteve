@@ -12,9 +12,10 @@ class TestServidorDePlaylist:
         assert body.startswith("#EXTM3U")
         assert ",La 1" in body
         assert "http://stream.example.com/la1" in body
-        # el fichero sale con tvg-id vacío a propósito: el reproductor enlaza
-        # con la guía por nombre (ver build_m3u)
-        assert 'tvg-id=""' in body
+        # el enlace con la guía va por id; el <display-name> sigue ahí para
+        # quien empareje por nombre (ver build_m3u)
+        assert 'tvg-id="es.la1"' in body
+        assert 'tvg-id="es.tdp"' in body      # casó por nombre con el XMLTV
 
     def test_sirve_el_epg(self, daemon):
         status, body = daemon.fetch("/epg.xml")

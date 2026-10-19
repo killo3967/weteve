@@ -28,7 +28,9 @@ class _FakeService:
     def channels(self, target_id, limit=50, offset=0, unmatched_only=False):
         return {"channels": [], "total": 0, "count": 0, "offset": offset}
 
-    def mapping_candidates(self, target_id, limit=200, offset=0):
+    def mapping_candidates(self, target_id, limit=200, offset=0,
+                           include_served=False):
+        self.calls.append(("mapping", include_served))
         return {"channels": [], "total": 0, "count": 0, "offset": offset}
 
     def epg_channels(self, target_id, limit=200, offset=0):
@@ -122,6 +124,32 @@ class TestApiClient:
         assert visto["timeout"] == PIPELINE_TIMEOUT
         assert PIPELINE_TIMEOUT >= 60
 
+    def test_shutdown_va_por_la_api(self, monkeypatch):
+        visto = {}
+
+        def fake_request(self, method, path, payload=None, timeout=None):
+            visto.update(method=method, path=path)
+            return 200, {"ok": True}
+
+        monkeypatch.setattr(ApiClient, "request", fake_request)
+        assert ApiClient().shutdown() == (200, {"ok": True})
+        assert (visto["method"], visto["path"]) == ("POST", "/shutdown")
+
+    def test_service_espera_al_pipeline(self, monkeypatch):
+        """Arrancar el servicio ejecuta el pipeline: no cabe en 5 s."""
+        from src.infrastructure.client.api_client import PIPELINE_TIMEOUT
+
+        visto = {}
+
+        def fake_request(self, method, path, payload=None, timeout=None):
+            visto.update(path=path, timeout=timeout)
+            return 200, {"ok": True}
+
+        monkeypatch.setattr(ApiClient, "request", fake_request)
+        ApiClient().service("0", "start")
+        assert visto["path"] == "/targets/0/service"
+        assert visto["timeout"] == PIPELINE_TIMEOUT
+
     def test_set_target_sources_sin_recargar(self, api):
         """En el lote de guardado no se recarga: solo el `run` final ejecuta."""
         client, service = api
@@ -164,3 +192,64 @@ class TestFastFail:
             assert client._down_until == 0.0
         finally:
             transport.stop()
+
+
+class TestPaginacion:
+    """La GUI no puede truncar el catálogo: se piden todas las páginas."""
+
+    def test_epg_channels_recorre_todas_las_paginas(self, monkeypatch):
+        filas = [{"id": f"id{i}"} for i in range(7)]
+        pedidos: list[int] = []
+
+        def falso(self, target_id, limit=1000, offset=0):
+            pedidos.append(offset)
+            page = filas[offset:offset + 3]
+            return 200, {"channels": page, "total": len(filas),
+                         "count": len(page), "offset": offset}
+
+        monkeypatch.setattr(ApiClient, "epg_channels", falso)
+        code, body = ApiClient().all_epg_channels("0")
+        assert code == 200
+        assert [c["id"] for c in body["channels"]] == [f"id{i}" for i in range(7)]
+        assert body["truncated"] is False
+        assert pedidos == [0, 3, 6]
+
+    def test_mapping_candidates_recorre_todas_las_paginas(self, monkeypatch):
+        filas = [{"name": f"canal{i}", "url": f"http://x/{i}"} for i in range(5)]
+        def falso(self, target_id, limit=1000, offset=0, include_served=True):
+            page = filas[offset:offset + 2]
+            return 200, {"channels": page, "total": len(filas),
+                         "count": len(page), "offset": offset}
+
+        monkeypatch.setattr(ApiClient, "mapping_candidates", falso)
+        code, body = ApiClient().all_mapping_candidates("0")
+        assert code == 200 and len(body["channels"]) == 5
+        assert body["truncated"] is False
+
+    def test_si_el_daemon_no_avanza_se_marca_truncado(self, monkeypatch):
+        def falso(self, target_id, limit=1000, offset=0):
+            return 200, {"channels": [], "total": 5, "count": 0,
+                         "offset": offset}
+
+        monkeypatch.setattr(ApiClient, "epg_channels", falso)
+        code, body = ApiClient().all_epg_channels("0")
+        assert code == 200 and body["truncated"] is True
+
+    def test_tope_de_paginas_avisa_en_vez_de_colgarse(self, monkeypatch):
+        def falso(self, target_id, limit=1000, offset=0):
+            return 200, {"channels": [{"id": str(offset)}], "total": 1000,
+                         "count": 1, "offset": offset}
+
+        monkeypatch.setattr(ApiClient, "epg_channels", falso)
+        code, body = ApiClient().all_epg_channels("0")
+        assert code == 200
+        assert body["truncated"] is True
+        assert len(body["channels"]) == 100      # tope de 100 páginas
+
+    def test_error_en_una_pagina_se_propaga(self, monkeypatch):
+        def falso(self, target_id, limit=1000, offset=0):
+            return 500, {"error": "boom"}
+
+        monkeypatch.setattr(ApiClient, "epg_channels", falso)
+        code, body = ApiClient().all_epg_channels("0")
+        assert code == 500 and body["error"] == "boom"

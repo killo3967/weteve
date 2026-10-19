@@ -165,3 +165,35 @@ class TestTokenObligatorioFueraDeLoopback:
         finally:
             d["supervisor"].stop_all()
             d["server"].stop()
+
+
+class TestInstallTask:
+    """schtasks se invoca con argv: sin shell y sin comillas anidadas."""
+
+    def test_sin_shell_y_con_argv(self, monkeypatch):
+        visto = {}
+
+        def fake_run(argv, **kwargs):
+            visto["argv"] = argv
+            visto["kwargs"] = kwargs
+            return type("R", (), {"returncode": 0, "stderr": ""})()
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        assert daemon_mod.cmd_install_task() == 0
+        assert isinstance(visto["argv"], list)
+        assert visto["argv"][0] == "schtasks"
+        assert "shell" not in visto["kwargs"]
+        # el comando de la tarea va entero en un solo argumento, entre comillas
+        i = visto["argv"].index("/TR")
+        assert visto["argv"][i + 1].endswith("run")
+        assert visto["argv"][i + 1].count('"') == 4
+        assert "/TN" in visto["argv"]
+        assert visto["argv"][visto["argv"].index("/TN") + 1] == "weteve-daemon"
+
+    def test_error_de_schtasks_devuelve_1(self, monkeypatch, capsys):
+        def fake_run(argv, **kwargs):
+            return type("R", (), {"returncode": 1, "stderr": "acceso denegado"})()
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        assert daemon_mod.cmd_install_task() == 1
+        assert "acceso denegado" in capsys.readouterr().out

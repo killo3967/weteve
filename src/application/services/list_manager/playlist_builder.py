@@ -33,18 +33,20 @@ def epg_id_of(ch: MappedChannel) -> str | None:
 def build_m3u(channels: list[MappedChannel]) -> str:
     """Genera el contenido M3U de salida a partir de los canales mapeados.
 
-    El ``tvg-id`` sale siempre vacío, como en las listas de proveedor: el
-    emparejamiento con la guía lo hace el reproductor o el agregador, no este
-    fichero. El nombre es el del canal, sin el prefijo de la lista de origen.
+    El ``tvg-id`` es el id EPG del canal (el asignado a mano o el que casó con
+    la guía): es la clave con la que el reproductor enlaza la entrada con su
+    ``<channel>`` del XMLTV. Sin él solo queda el emparejamiento por nombre, y
+    la mayoría de clientes (TiviMate, Kodi, Jellyfin) no lo intenta. Un canal
+    sin guía sale con ``tvg-id=""``: no hay nada que enlazar.
 
-    Consecuencia para el Dummy 1h: el enlace canal↔guía va por **nombre**
-    (tvg-id vacío), no por id, así que el ``<display-name>`` del dummy tiene
-    que ser el nombre del canal M3U. Si fuese la etiqueta 'Dummy 1h', ningún
-    reproductor encontraría ahí el canal.
+    El nombre es el del canal, sin el prefijo de la lista de origen, y sigue
+    siendo el ``<display-name>`` del XMLTV: el enlace funciona por id **y** por
+    nombre, así que un canal renombrado no pierde la guía.
     """
     lines = ["#EXTM3U"]
     for ch in channels:
-        attrs = ['tvg-id=""']
+        epg_id = epg_id_of(ch) or ""
+        attrs = [f'tvg-id="{epg_id}"']
         if ch.tvg_name:
             attrs.append(f'tvg-name="{ch.tvg_name}"')
         if ch.logo_url:

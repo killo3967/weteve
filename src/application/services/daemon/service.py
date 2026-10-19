@@ -131,9 +131,11 @@ class TargetService:
             unmatched_only=bool(unmatched_only))
 
     def mapping_candidates(self, target_id: str, limit: int = 200,
-                           offset: int = 0) -> dict:
+                           offset: int = 0,
+                           include_served: bool = False) -> dict:
         return self._supervisor.mapping_candidates(
-            target_id, limit=int(limit), offset=int(offset))
+            target_id, limit=int(limit), offset=int(offset),
+            include_served=bool(include_served))
 
     def epg_channels(self, target_id: str, limit: int = 200,
                      offset: int = 0) -> dict:

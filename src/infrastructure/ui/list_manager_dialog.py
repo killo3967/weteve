@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtGui import QAction, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -489,6 +490,10 @@ class EpgMappingWidget(QWidget):
         un EPG asignado. Al borrar la asignación, el canal se desactiva solo.
     """
 
+    # La casilla «solo los que necesitan atención» cambia qué se pide al
+    # daemon: el diálogo escucha y repuebla.
+    filter_changed = pyqtSignal()
+
     # Columnas de la tabla
     COL_NAME, COL_URL, COL_LOGO, COL_EPG, COL_ACTIVE = range(5)
 
@@ -504,11 +509,21 @@ class EpgMappingWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.info_label = QLabel(
-            "Canales sin guía EPG real. Elige el canal XMLTV en 'EPG asignado', o "
-            "'Dummy 1h' para servirlos con una guía de relleno de 1 h. Sin "
-            "asignación quedan fuera de la lista; desmarca 'Activo' para sacarlos."
+            "Canales y su guía EPG. Elige el canal XMLTV en 'EPG asignado', o "
+            "'Dummy 1h' para servirlos con una guía de relleno de 1 h. Un canal "
+            "sin asignación queda fuera de la lista; desmarca 'Activo' para "
+            "sacarlo."
         )
         layout.addWidget(self.info_label)
+
+        # Por defecto se ven todos los canales (también los ya servidos con
+        # guía): si no, un canal que funciona no se puede revisar ni cambiar.
+        self.only_pending_check = QCheckBox("Solo los que necesitan atención")
+        self.only_pending_check.setToolTip(
+            "Oculta los canales que ya se sirven con su guía.")
+        self.only_pending_check.stateChanged.connect(
+            lambda _state: self.filter_changed.emit())
+        layout.addWidget(self.only_pending_check)
 
         self.table = QTableWidget(0, 5, self)
         self.table.setHorizontalHeaderLabels(
@@ -516,16 +531,27 @@ class EpgMappingWidget(QWidget):
         )
         self.table.setColumnHidden(self.COL_URL, True)
         self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.setColumnWidth(self.COL_EPG, 180)
-        self.table.horizontalHeader().setSectionResizeMode(
-            self.COL_EPG, QHeaderView.ResizeMode.Fixed)
-        self.table.horizontalHeader().setSectionResizeMode(
-            self.COL_NAME, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(
-            self.COL_LOGO, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(self.COL_LOGO, 40)
-        self.table.horizontalHeader().setSectionResizeMode(
-            self.COL_ACTIVE, QHeaderView.ResizeMode.ResizeToContents)
+        # Todas las columnas redimensionables a mano (arrastrando el borde en
+        # la cabecera): los nombres de canal y las guías no siempre caben.
+        header = self.table.horizontalHeader()
+        for columna in (self.COL_NAME, self.COL_LOGO, self.COL_EPG,
+                        self.COL_ACTIVE):
+            header.setSectionResizeMode(columna,
+                                        QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(self.COL_NAME, 320)
+        self.table.setColumnWidth(self.COL_LOGO, 56)
+        self.table.setColumnWidth(self.COL_EPG, 220)
+        self.table.setColumnWidth(self.COL_ACTIVE, 72)
+        header.setMinimumSectionSize(40)
+        # Selección por filas y múltiple (Ctrl/Shift): el menú contextual actúa
+        # sobre todas las filas seleccionadas.
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_row_menu)
         layout.addWidget(self.table)
         # channel-id -> guía(s) que lo anuncian ('Doble_M', 'Koala'…). Vacío en
         # fuentes con una sola guía o sin datos: entonces no hay sufijo.
@@ -547,6 +573,14 @@ class EpgMappingWidget(QWidget):
         self._persisted_overrides: dict[str, str] = {}
         # urls apagadas a mano (las que se persisten en disabled_channels)
         self._manual_off: set[str] = set()
+        # url -> id que el pipeline resolvió solo (sin override manual)
+        self._auto_ids: dict[str, str] = {}
+        # url -> si el daemon la sirve ahora mismo (None = no lo dijo). Un
+        # duplicado de calidad tiene guía pero no se sirve.
+        self._daemon_served: dict[str, bool | None] = {}
+        # filas que el usuario acaba de tocar: su estado local manda sobre el
+        # último pipeline, que aún no se ha reejecutado
+        self._touched: set[str] = set()
         # mientras se repuebla la tabla se mueven casillas por programa: hay que
         # ignorar esos itemChanged, o convertirían un estado derivado en una
         # decisión del usuario.
@@ -581,6 +615,10 @@ class EpgMappingWidget(QWidget):
         """
         candidates = set(self._epg_names) | {self._clean(d) for d in self._epg_names.values()}
         return not any(is_dummy_label(c) for c in candidates)
+
+    def only_pending(self) -> bool:
+        """True si la tabla debe ocultar los canales ya servidos con guía."""
+        return self.only_pending_check.isChecked()
 
     def epg_channel_names(self) -> list[str]:
         """Opciones del desplegable: 'Dummy 1h' primero y luego la guía.
@@ -673,6 +711,13 @@ class EpgMappingWidget(QWidget):
         try:
             self._manual_off = set(disabled)
             self._persisted_overrides = dict(overrides)
+            # id que el pipeline resolvió solo (sin override): no se persiste
+            # como asignación manual si el usuario no lo cambia.
+            self._auto_ids = {ch.url: (ch.matched_epg_id or "")
+                              for ch in channels}
+            self._daemon_served = {ch.url: getattr(ch, "served", None)
+                                   for ch in channels}
+            self._touched = set()
             self._row_urls = [ch.url for ch in channels]
             names = self.epg_channel_names()
             self.table.setRowCount(0)
@@ -680,6 +725,11 @@ class EpgMappingWidget(QWidget):
             for row, ch in enumerate(channels):
                 name_item = QTableWidgetItem(ch.name)
                 name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                if getattr(ch, "duplicate", False):
+                    name_item.setToolTip(
+                        "Variante descartada por prioridad de calidad: se sirve "
+                        "otra variante de este canal. Desactiva esa otra si "
+                        "prefieres esta.")
                 self.table.setItem(row, self.COL_NAME, name_item)
 
                 url_item = QTableWidgetItem(ch.url)
@@ -691,7 +741,9 @@ class EpgMappingWidget(QWidget):
                 logo_item.setFlags(logo_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self.table.setItem(row, self.COL_LOGO, logo_item)
 
-                assigned = overrides.get(ch.url, "")
+                # se muestra la guía efectiva: la asignada a mano o la que
+                # resolvió el pipeline (un canal servido ya tiene la suya)
+                assigned = overrides.get(ch.url) or ch.matched_epg_id or ""
                 epg_combo = _EpgComboWidget(self)
                 epg_combo.set_items(names)
                 epg_combo.set_current(self._display_label(assigned))
@@ -724,7 +776,73 @@ class EpgMappingWidget(QWidget):
         """
         if url in self._manual_off:
             return False
+        if url in self._touched:
+            # lo que ve el usuario manda: el pipeline aún no ha reejecutado
+            return True if not self._require_epg else has_assignment
+        servido = self._daemon_served.get(url)
+        if servido is not None:
+            return servido
         return True if not self._require_epg else has_assignment
+
+    def selected_rows(self) -> list[int]:
+        """Filas seleccionadas, ordenadas (admite Ctrl/Shift)."""
+        model = self.table.selectionModel()
+        if model is None:
+            return []
+        return sorted({index.row() for index in model.selectedRows()})
+
+    def set_rows_enabled(self, rows: list[int], enabled: bool) -> None:
+        """Activa o desactiva varios canales, como la casilla pero en bloque.
+
+        Mismas reglas que ``_on_item_changed``: el apagado manual solo se
+        registra en filas que de otra forma se servirían, y reactivar una fila
+        sin guía no la sirve (manda la regla del servidor).
+        """
+        self._loading = True
+        try:
+            for row in rows:
+                if not 0 <= row < len(self._row_urls):
+                    continue
+                url = self._row_urls[row]
+                has_assignment = bool(self._row_assignment(row))
+                if enabled:
+                    self._manual_off.discard(url)
+                elif self._served(url, has_assignment):
+                    self._manual_off.add(url)
+                self._set_active(row, url, has_assignment)
+        finally:
+            self._loading = False
+
+    def row_menu(self, rows: list[int]) -> QMenu:
+        """Menú del botón derecho: habilitar o deshabilitar lo seleccionado."""
+        menu = QMenu(self.table)
+        cuantos = "1 canal" if len(rows) == 1 else f"{len(rows)} canales"
+        cabecera = QAction(cuantos, menu)
+        cabecera.setEnabled(False)
+        menu.addAction(cabecera)
+        menu.addSeparator()
+        for texto, habilitar in (("Habilitar", True), ("Deshabilitar", False)):
+            accion = QAction(texto, menu)
+            accion.triggered.connect(
+                lambda _checked=False, valor=habilitar:
+                self.set_rows_enabled(rows, valor))
+            menu.addAction(accion)
+        return menu
+
+    def _show_row_menu(self, pos) -> None:
+        """Menú contextual sobre la fila pulsada (o sobre la selección)."""
+        if self._loading:
+            return
+        index = self.table.indexAt(pos)
+        if not index.isValid():
+            return
+        if index.row() not in self.selected_rows():
+            # clic derecho fuera de la selección: opera sobre esa fila
+            self.table.selectRow(index.row())
+        filas = self.selected_rows()
+        if filas:
+            self.row_menu(filas).exec(
+                self.table.viewport().mapToGlobal(pos))
 
     def _row_assignment(self, row: int) -> str:
         """Channel-id (o 'Dummy 1h') elegido en la fila, '' si está vacía."""
@@ -742,6 +860,7 @@ class EpgMappingWidget(QWidget):
         if self._loading or row >= len(self._row_urls):
             return
         url = self._row_urls[row]
+        self._touched.add(url)
         assigned = self._row_assignment(row)
         if assigned:
             self._manual_off.discard(url)
@@ -773,6 +892,7 @@ class EpgMappingWidget(QWidget):
         if row >= len(self._row_urls):
             return
         url = self._row_urls[row]
+        self._touched.add(url)
         has_assignment = bool(self._row_assignment(row))
         if item.checkState() == Qt.CheckState.Checked:
             self._manual_off.discard(url)
@@ -791,11 +911,14 @@ class EpgMappingWidget(QWidget):
         'Dummy 1h' se traduce aquí, que es el único sitio donde se conoce la url
         del canal: el id sintético es propio de cada canal.
 
-        Las asignaciones de canales que no están en la tabla (ya servidos con
-        guía, vinieran del fichero o del MCP) se conservan tal cual: la tabla
-        solo lista canales que necesitan atención, así que no puede
-        reconstruirlas. Una fila visible con el desplegable en blanco sí borra
-        la asignación: es la forma de quitarla desde la UI.
+        Las asignaciones de canales que no están en la tabla se conservan tal
+        cual: la tabla puede estar filtrada, así que no puede reconstruirlas.
+        Una fila visible con el desplegable en blanco sí borra la asignación:
+        es la forma de quitarla desde la UI.
+
+        Tampoco se materializa la guía que el pipeline resolvió solo: si el
+        usuario no toca el desplegable, el canal sigue casando por ``tvg-id`` y
+        el fichero no se llena de overrides redundantes.
         """
         visibles = set(self._row_urls)
         overrides: dict[str, str] = {
@@ -812,8 +935,12 @@ class EpgMappingWidget(QWidget):
                 name_item = self.table.item(row, self.COL_NAME)
                 cid = build_dummy_epg_id(url_item.text(),
                                          name_item.text() if name_item else "")
+            url = url_item.text()
+            if (cid and cid == self._auto_ids.get(url)
+                    and url not in self._persisted_overrides):
+                continue  # ya lo resolvía el pipeline: no es un mapeo manual
             if cid:
-                overrides[url_item.text()] = cid
+                overrides[url] = cid
         return overrides
 
     def get_disabled(self) -> tuple[str, ...]:
@@ -877,6 +1004,11 @@ class ListManagerDialog(QDialog):
     def __init__(self, parent, config: dict):
         super().__init__(parent)
         self.setWindowTitle("weteve — Gestor de listas")
+        # Es un QDialog que se usa como ventana principal (main.py hace
+        # exec()): sin estos hints la barra de título solo trae cerrar.
+        self.setWindowFlags(self.windowFlags()
+                            | Qt.WindowType.WindowMinimizeButtonHint
+                            | Qt.WindowType.WindowMaximizeButtonHint)
         self._config = self._with_legacy_fields(config)
         # True mientras se aplica un cambio leído de disco: en ese momento las
         # asignaciones/desactivados válidos son los del fichero, no los de la
@@ -963,6 +1095,7 @@ class ListManagerDialog(QDialog):
         self.tab_mapping = QWidget(self)
         epg_layout = QVBoxLayout(self.tab_mapping)
         self.epg_mapping = EpgMappingWidget()
+        self.epg_mapping.filter_changed.connect(self._refresh_mapping)
         epg_layout.addWidget(self.epg_mapping)
         self.result_label = QLabel("")
         epg_layout.addWidget(self.result_label)
@@ -1477,9 +1610,9 @@ class ListManagerDialog(QDialog):
     def _refresh_mapping(self) -> None:
         """Repuebla la tabla de mapeo y el resumen con el snapshot del daemon.
 
-        La GUI no ejecuta el pipeline: pide ``mapping-candidates`` (canales que
-        necesitan atención), ``epg-channels`` (catálogo de guía) y el estado del
-        target. El estado editable (asignaciones y desactivados) se captura
+        La GUI no ejecuta el pipeline: pide ``mapping-candidates`` (todos los
+        canales, o solo los que necesitan atención), ``epg-channels`` (catálogo
+        de guía) y el estado del target. El estado editable (asignaciones y desactivados) se captura
         antes de repoblar: leerlo después descartaría lo que el usuario acaba de
         cambiar en las casillas y los desplegables.
         """
@@ -1489,8 +1622,10 @@ class ListManagerDialog(QDialog):
         client = self._api_client()
         if client is None:
             return
-        code, candidates = client.mapping_candidates(self._target_id(),
-                                                     limit=1000)
+        solo_pendientes = self.epg_mapping.only_pending()
+        # Todas las páginas: la tabla no puede perder canales por un límite.
+        code, candidates = client.all_mapping_candidates(
+            self._target_id(), include_served=not solo_pendientes)
         if code == 0:
             self.epg_mapping.set_epg(None)
             self.epg_mapping.load_unmatched([], overrides)
@@ -1501,7 +1636,7 @@ class ListManagerDialog(QDialog):
             self.result_label.setText(
                 f"Demonio: {candidates.get('error', f'HTTP {code}')}")
             return
-        _, epg = client.epg_channels(self._target_id(), limit=1000)
+        _, epg = client.all_epg_channels(self._target_id())
         names = {c["id"]: c.get("display_name") or c["id"]
                  for c in epg.get("channels", []) if c.get("id")}
         # Guía(s) que anuncian cada canal: con varias listas el desplegable
@@ -1518,6 +1653,8 @@ class ListManagerDialog(QDialog):
                 logo_url=c.get("logo_url") or "",
                 matched_epg_id=c.get("tvg_id") or None,
                 disabled=bool(c.get("disabled")),
+                served=c.get("served"),
+                duplicate=bool(c.get("duplicate")),
             )
             for c in candidates.get("channels", []) if c.get("url")
         ]
@@ -1537,7 +1674,15 @@ class ListManagerDialog(QDialog):
             parts.append(f"{served} canales servidos")
         parts.append(f"{pending} necesitan atención" if pending
                      else "ninguno necesita atención")
-        self.result_label.setText("Demonio: " + "; ".join(parts) + ".")
+        repetidos = sum(1 for c in candidates.get("channels", [])
+                        if c.get("duplicate"))
+        if repetidos:
+            parts.append(f"{repetidos} variantes descartadas por calidad")
+        aviso = ""
+        if candidates.get("truncated") or epg.get("truncated"):
+            aviso = (" — catálogo incompleto: el demonio no devolvió todo "
+                     "(faltan canales en las listas)")
+        self.result_label.setText("Demonio: " + "; ".join(parts) + "." + aviso)
         self._refresh_filter_preview()
 
     # ------------------------------------------------------------------
@@ -1614,7 +1759,8 @@ class ListManagerDialog(QDialog):
         Antes el diálogo tenía su propio PlaylistServer en el mismo puerto: dos
         servidores peleando por 9999 y dos pipelines. Ahora la GUI persiste
         puerto/acceso y manda la orden por la API; el contenido lo genera y lo
-        sirve el daemon.
+        sirve el daemon. No hay popup de confirmación: el botón y la URL de la
+        propia pestaña muestran el resultado.
         """
         client = self._api_client()
         if client is None:
@@ -1634,30 +1780,38 @@ class ListManagerDialog(QDialog):
                 f"No se pudo {'parar' if running else 'iniciar'} el servicio:\n"
                 f"{body.get('error', f'HTTP {code}')}")
             return
-        self._sync_service_button()
         status = body.get("status") or {}
-        if status.get("running"):
-            QMessageBox.information(
-                self, "Gestor de listas",
-                "Servicio iniciado en el daemon:\n"
-                f"{status.get('playlist_url') or ''}\n"
-                f"{status.get('epg_url') or ''}",
-            )
-        self._sync_service_url()
+        if status:
+            self._apply_service_state(status)
+        else:
+            self._sync_service_url()
+        # El estado ya se ve en la ventana: sin popup de confirmación.
         self.status_panel.refresh()
 
-    def _sync_service_button(self) -> None:
-        """Refleja en el botón si el daemon sirve el target."""
+    def _apply_service_state(self, status: dict) -> None:
+        """Pinta botón y URL con un estado ya leído del demonio.
+
+        El botón decía «Iniciar servicio» con el servicio en marcha porque solo
+        se refrescaba al pulsarlo: ahora lo pinta cualquier refresco.
+        """
         client = self._api_client()
-        if client is None:
-            return
-        code, status = client.target_status(self._target_id())
-        running = code == 200 and bool(status.get("running"))
+        root = client.root_url if client is not None else ""
+        running = bool(status.get("running"))
         self.service_button.setText(
             "&Parar servicio" if running else "&Iniciar servicio")
+        if not running:
+            self.service_url_label.setText(
+                "Servicio parado. Al iniciarlo: "
+                f"{root}/weteve/{self._target_id()}/playlist.m3u")
+            return
+        self.service_url_label.setText(
+            f"{status.get('playlist_url')}\n{status.get('epg_url')}")
 
     def _sync_service_url(self) -> None:
-        """Muestra la URL que sirve el demonio (el puerto es suyo, no del target)."""
+        """Refresca botón y URL con el estado que sirve el demonio.
+
+        El puerto es del demonio, no del target: aquí no se reconfigura nada.
+        """
         client = self._api_client()
         if client is None:
             return
@@ -1665,13 +1819,7 @@ class ListManagerDialog(QDialog):
         if code != 200:
             self.service_url_label.setText("Demonio: no responde")
             return
-        if not status.get("running"):
-            self.service_url_label.setText(
-                "Servicio parado. Al iniciarlo: "
-                f"{client.root_url}/weteve/{self._target_id()}/playlist.m3u")
-            return
-        self.service_url_label.setText(
-            f"{status.get('playlist_url')}\n{status.get('epg_url')}")
+        self._apply_service_state(status)
 
     def get_target_config(self) -> dict:
         """Serializa el estado del diálogo para persistir en config.ini.

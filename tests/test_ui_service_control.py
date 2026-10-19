@@ -108,3 +108,31 @@ class TestServicioEnElDaemon:
         dialog._api_client = lambda: api
         dialog._sync_service_url()
         assert "/weteve/0/playlist.m3u" in dialog.service_url_label.text()
+
+
+    def test_el_boton_refleja_el_estado_al_refrescar(self, dialog):
+        """Regresión: con el servicio en marcha el botón decía «Iniciar»."""
+        api = _FakeApi(running=True)
+        dialog._api_client = lambda: api
+        dialog._sync_service_url()
+        assert dialog.service_button.text() == "&Parar servicio"
+
+    def test_el_boton_vuelve_a_iniciar_al_parar(self, dialog):
+        api = _FakeApi(running=True)
+        dialog._api_client = lambda: api
+        dialog._toggle_service()
+        assert dialog.service_button.text() == "&Iniciar servicio"
+        assert "/weteve/0/playlist.m3u" in dialog.service_url_label.text()
+
+
+    def test_sin_popup_al_iniciar(self, dialog, monkeypatch):
+        """El resultado se ve en la ventana: no hace falta un diálogo modal."""
+        avisos: list = []
+        monkeypatch.setattr(QMessageBox, "information",
+                            lambda *a, **k: avisos.append(a))
+        api = _FakeApi(running=False)
+        dialog._api_client = lambda: api
+        dialog._toggle_service()
+        assert avisos == []
+        assert dialog.service_button.text() == "&Parar servicio"
+        assert "/weteve/0/playlist.m3u" in dialog.service_url_label.text()

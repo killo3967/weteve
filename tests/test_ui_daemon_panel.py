@@ -101,7 +101,11 @@ class TestLifecycleButtons:
         p, client, _ = panel
         client.alive = False
         calls = []
-        client.shutdown = lambda: (calls.append("stop"), False)[1]
+        def shutdown() -> bool:
+            calls.append("stop")
+            return False
+
+        client.shutdown = shutdown
         launcher = _FakeLauncher()
         p._launcher = launcher
         p.restart_daemon()

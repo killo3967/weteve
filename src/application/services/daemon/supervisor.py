@@ -253,12 +253,15 @@ class TargetSupervisor:
             return target_id in self._results
 
     def mapping_candidates(self, target_id: str, limit: int = 200,
-                           offset: int = 0) -> dict:
-        """Canales que necesitan atención, desde el último snapshot.
+                           offset: int = 0,
+                           include_served: bool = False) -> dict:
+        """Canales de la tabla de mapeo, desde el último snapshot.
 
-        Mismo criterio que la tabla de mapeo del diálogo: los descartados por
-        falta de guía, los desactivados a mano y los servidos sin guía. No
-        reejecuta el pipeline: si nunca se ejecutó, devuelve vacío.
+        Por defecto, solo los que necesitan atención: los descartados por
+        falta de guía, los desactivados a mano y los servidos sin guía. Con
+        ``include_served`` se añaden los servidos con guía (los que ya
+        funcionan), para poder revisarles o cambiarles la EPG. No reejecuta el
+        pipeline: si nunca se ejecutó, devuelve vacío.
         """
         with self._lock:
             result = self._results.get(target_id)
@@ -266,12 +269,17 @@ class TargetSupervisor:
                 return {"channels": [], "total": 0, "count": 0,
                         "offset": int(offset)}
             disabled = {ch.url for ch in result.excluded_disabled}
+            servidos = {c.url for c in result.channels}
+            duplicados = {c.url for c in result.excluded_duplicate}
+            pendientes = (list(result.excluded_no_epg)
+                          + list(result.excluded_disabled)
+                          + list(result.excluded_duplicate)
+                          + [c for c in result.channels
+                             if c.matched_epg_id is None])
+            candidates = list(result.channels) if include_served else []
             rows = []
             seen: set[str] = set()
-            for ch in (list(result.excluded_no_epg)
-                       + list(result.excluded_disabled)
-                       + [c for c in result.channels
-                          if c.matched_epg_id is None]):
+            for ch in (pendientes + candidates):
                 if ch.url in seen:
                     continue
                 seen.add(ch.url)
@@ -282,6 +290,10 @@ class TargetSupervisor:
                     "tvg_id": ch.matched_epg_id or "",
                     "logo_url": ch.logo_url or "",
                     "disabled": ch.url in disabled,
+                    # el daemon decide si la fila se sirve: un duplicado de
+                    # calidad tiene guía pero no sale en la lista
+                    "served": ch.url in servidos,
+                    "duplicate": ch.url in duplicados,
                 })
         total = len(rows)
         page = rows[int(offset):int(offset) + int(limit)]
@@ -453,6 +465,7 @@ class TargetSupervisor:
             "total_input": result.total_input,
             "filtered_count": result.filtered_count,
             "unmatched_count": len(result.unmatched),
+            "duplicates_count": len(result.excluded_duplicate),
         }
         if error:
             out["error"] = error

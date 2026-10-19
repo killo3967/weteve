@@ -1,0 +1,16 @@
+# daemon.toml — ejemplo del fichero de arranque del demonio
+#
+# Lo escribe la GUI (pestaña «Configuración»): es lo primero que se lee para
+# saber dónde escuchar y con qué token. Copia como `daemon.toml` si arrancas el
+# demonio a mano sin pasar por la interfaz.
+
+version = 2
+
+host = "127.0.0.1"      # 127.0.0.1 = solo este equipo; 0.0.0.0 = red local
+port = 34400            # control + REST + MCP + playlists en el mismo puerto
+mcp_port = 34400        # legado: todo se sirve en `port`
+token = ""              # vacío = sin autenticación (solo con host loopback)
+
+# Comportamiento de la interfaz (los aplica la GUI al abrir/cerrar)
+autostart = false       # arrancar el demonio al abrir la ventana si no responde
+stop_on_exit = false    # pararlo al cerrar, solo si lo arrancó esta ventana

@@ -7,6 +7,8 @@ pinta, con su catálogo de guía y su resumen.
 """
 
 import pytest
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QAbstractItemView, QTableWidgetSelectionRange
 
 from src.infrastructure.ui.list_manager_dialog import ListManagerDialog
 
@@ -81,3 +83,198 @@ class TestSinDaemon:
         dialog._refresh_mapping()
         assert dialog.epg_mapping.table.rowCount() == 0
         assert "no responde" in dialog.result_label.text()
+
+
+class TestCanalesYaServidos:
+    """La tabla incluye los canales que ya funcionan para poder revisarlos."""
+
+    def _servido(self):
+        return _row(name="LA 1 HD", url="http://x/la1.ts", tvg_id="La 1 HD")
+
+    def test_por_defecto_se_piden_tambien_los_servidos(self, dialog, fake_api):
+        fake_api.served_channels = [self._servido()]
+        fake_api.epg = [{"id": "La 1 HD", "display_name": "La 1 HD",
+                         "lists": ["Doble_M"]}]
+        dialog._refresh_mapping()
+        assert fake_api.last_include_served is True
+        assert _rows(dialog) == ["LA 1 HD"]
+        combo = dialog.epg_mapping.table.cellWidget(
+            0, dialog.epg_mapping.COL_EPG)
+        # se ve la guía efectiva, no una celda vacía
+        assert combo.current_value() == "La 1 HD · Doble_M"
+
+    def test_la_casilla_filtra_los_que_ya_sirven(self, dialog, fake_api):
+        fake_api.served_channels = [self._servido()]
+        dialog._refresh_mapping()
+        dialog.epg_mapping.only_pending_check.setChecked(True)
+        assert fake_api.last_include_served is False
+
+    def test_la_guia_automatica_no_se_convierte_en_mapeo_manual(
+            self, dialog, fake_api):
+        """Si el usuario no toca el desplegable, no se escriben overrides."""
+        fake_api.served_channels = [self._servido()]
+        fake_api.epg = [{"id": "La 1 HD", "display_name": "La 1 HD"}]
+        dialog._refresh_mapping()
+        assert dialog.epg_mapping.get_overrides() == {}
+
+    def test_cambiar_la_guia_de_un_canal_servido_si_es_mapeo(
+            self, dialog, fake_api):
+        fake_api.served_channels = [self._servido()]
+        fake_api.epg = [{"id": "La 1 HD", "display_name": "La 1 HD"},
+                        {"id": "La 1", "display_name": "La 1"}]
+        dialog._refresh_mapping()
+        combo = dialog.epg_mapping.table.cellWidget(
+            0, dialog.epg_mapping.COL_EPG)
+        combo._combo.setCurrentText("La 1")
+        assert dialog.epg_mapping.get_overrides() == {"http://x/la1.ts": "La 1"}
+
+
+class TestSeleccionMultipleYMenu:
+    """Selección por filas (Ctrl/Shift) y menú contextual habilitar/deshabilitar."""
+
+    def _filas(self, fake_api):
+        fake_api.served_channels = [
+            _row(name="LA 1 HD", url="http://x/la1.ts", tvg_id="La 1 HD"),
+            _row(name="LA 2 HD", url="http://x/la2.ts", tvg_id="La 2"),
+            _row(name="SIN GUIA", url="http://x/sin.ts", tvg_id=""),
+        ]
+        fake_api.epg = [{"id": "La 1 HD", "display_name": "La 1 HD"},
+                        {"id": "La 2", "display_name": "La 2"}]
+
+    def test_la_tabla_permite_seleccionar_varias_filas(self, dialog):
+        tabla = dialog.epg_mapping.table
+        assert (tabla.selectionBehavior()
+                == QAbstractItemView.SelectionBehavior.SelectRows)
+        assert (tabla.selectionMode()
+                == QAbstractItemView.SelectionMode.ExtendedSelection)
+
+    def test_el_menu_contextual_esta_activo(self, dialog):
+        assert (dialog.epg_mapping.table.contextMenuPolicy()
+                == Qt.ContextMenuPolicy.CustomContextMenu)
+
+    def test_filas_seleccionadas(self, dialog, fake_api):
+        self._filas(fake_api)
+        dialog._refresh_mapping()
+        tabla = dialog.epg_mapping.table
+        tabla.setRangeSelected(QTableWidgetSelectionRange(0, 0, 0, 4), True)
+        tabla.setRangeSelected(QTableWidgetSelectionRange(2, 0, 2, 4), True)
+        assert dialog.epg_mapping.selected_rows() == [0, 2]
+
+    def test_deshabilitar_desde_el_menu(self, dialog, fake_api):
+        self._filas(fake_api)
+        dialog._refresh_mapping()
+        w = dialog.epg_mapping
+        menu = w.row_menu([0, 1])
+        textos = [a.text() for a in menu.actions()]
+        assert {"Habilitar", "Deshabilitar"} <= set(textos)
+        next(a for a in menu.actions() if a.text() == "Deshabilitar").trigger()
+        assert w.get_disabled() == ("http://x/la1.ts", "http://x/la2.ts")
+        # las casillas 'Activo' acompañan
+        for row in (0, 1):
+            item = w.table.item(row, w.COL_ACTIVE)
+            assert item.checkState() == Qt.CheckState.Unchecked
+
+    def test_habilitar_desde_el_menu(self, dialog, fake_api):
+        self._filas(fake_api)
+        dialog._refresh_mapping()
+        w = dialog.epg_mapping
+        w.set_rows_enabled([0, 1], False)
+        assert len(w.get_disabled()) == 2
+        w.set_rows_enabled([0, 1], True)
+        assert w.get_disabled() == ()
+        assert (w.table.item(0, w.COL_ACTIVE).checkState()
+                == Qt.CheckState.Checked)
+
+    def test_deshabilitar_una_fila_sin_guia_no_se_persiste(self, dialog,
+                                                           fake_api):
+        """Sin guía ya está fuera: apagarla no es una decisión del usuario."""
+        self._filas(fake_api)
+        dialog._refresh_mapping()
+        dialog.epg_mapping.set_rows_enabled([2], False)
+        assert dialog.epg_mapping.get_disabled() == ()
+
+    def test_clic_derecho_fuera_de_la_seleccion_opera_sobre_esa_fila(
+            self, dialog, fake_api, monkeypatch):
+        self._filas(fake_api)
+        dialog._refresh_mapping()
+        w = dialog.epg_mapping
+        capturado = {}
+
+        class _Dummy:
+            def exec(self, *_a):
+                return None
+
+        monkeypatch.setattr(w, "row_menu",
+                            lambda rows: capturado.update(rows=rows) or _Dummy())
+
+        class _Index:
+            def isValid(self):
+                return True
+
+            def row(self):
+                return 2
+
+        monkeypatch.setattr(w.table, "indexAt", lambda pos: _Index())
+        w._show_row_menu(w.table.rect().center())
+        assert capturado["rows"] == [2]
+
+
+class TestCatalogoIncompleto:
+    """Si el demonio no entrega todo, la GUI lo dice en vez de callarse."""
+
+    def test_avisa_si_el_catalogo_viene_truncado(self, dialog, fake_api,
+                                                 monkeypatch):
+        fake_api.served_channels = [_row()]
+        original = fake_api.all_mapping_candidates
+
+        def truncado(target_id, include_served=True):
+            code, body = original(target_id, include_served=include_served)
+            body["truncated"] = True
+            return code, body
+
+        monkeypatch.setattr(fake_api, "all_mapping_candidates", truncado)
+        dialog._refresh_mapping()
+        assert "catálogo incompleto" in dialog.result_label.text()
+
+    def test_sin_truncar_no_avisa(self, dialog, fake_api):
+        fake_api.served_channels = [_row()]
+        dialog._refresh_mapping()
+        assert "catálogo incompleto" not in dialog.result_label.text()
+
+
+class TestDuplicadosDeCalidadEnLaTabla:
+    """Las variantes descartadas se ven, pero la casilla dice la verdad."""
+
+    def _dos_variantes(self, fake_api):
+        fake_api.served_channels = [
+            dict(_row(name="LA 1 FULL HD", url="http://x/fhd",
+                      tvg_id="La 1 HD"), served=True, duplicate=False),
+            dict(_row(name="LA 1 HD", url="http://x/hd", tvg_id="La 1 HD"),
+                 served=False, duplicate=True),
+        ]
+        fake_api.epg = [{"id": "La 1 HD", "display_name": "La 1 HD"}]
+
+    def test_la_variante_descartada_sale_desmarcada(self, dialog, fake_api):
+        self._dos_variantes(fake_api)
+        dialog._refresh_mapping()
+        w = dialog.epg_mapping
+        assert (w.table.item(0, w.COL_ACTIVE).checkState()
+                == Qt.CheckState.Checked)
+        assert (w.table.item(1, w.COL_ACTIVE).checkState()
+                == Qt.CheckState.Unchecked)
+
+    def test_la_fila_duplicada_explica_por_que_no_se_sirve(self, dialog,
+                                                           fake_api):
+        self._dos_variantes(fake_api)
+        dialog._refresh_mapping()
+        item = dialog.epg_mapping.table.item(1, dialog.epg_mapping.COL_NAME)
+        assert "prioridad de calidad" in item.toolTip()
+        # la que se sirve no lleva el aviso
+        assert dialog.epg_mapping.table.item(
+            0, dialog.epg_mapping.COL_NAME).toolTip() == ""
+
+    def test_el_resumen_cuenta_las_variantes_descartadas(self, dialog,
+                                                         fake_api):
+        self._dos_variantes(fake_api)
+        dialog._refresh_mapping()
+        assert "variantes descartadas por calidad" in dialog.result_label.text()

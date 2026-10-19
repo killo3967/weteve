@@ -8,23 +8,23 @@ from src.application.services.list_manager.models import PipelineTarget
 
 
 class _StubSupervisor(TargetSupervisor):
-    def get_status(self) -> dict:  # type: ignore[override]
+    def get_status(self) -> dict:
         return {"targets": {"t0": {"name": "Mi lista", "running": True,
                                    "channel_count": 5, "port": 8080,
                                    "playlist_url": "http://x/playlist.m3u"}}}
 
-    def run_pipeline(self, target_id: str) -> dict:  # type: ignore[override]
+    def run_pipeline(self, target_id: str) -> dict:
         return {"total_input": 10, "filtered_count": 5, "unmatched_count": 0}
 
-    def metrics(self, target_id: str) -> dict:  # type: ignore[override]
+    def metrics(self, target_id: str) -> dict:
         return {"total_input": 10, "filtered_count": 5, "unmatched_count": 0}
 
-    def has_snapshot(self, target_id: str) -> bool:  # type: ignore[override]
+    def has_snapshot(self, target_id: str) -> bool:
         return True
 
     def list_tv_channels(self, target_id: str, limit: int = 50,
                          offset: int = 0, unmatched_only: bool = False
-                         ) -> dict:  # type: ignore[override]
+                         ) -> dict:
         rows = [{"name": "Canal A", "url": "http://s/1", "group": "G",
                  "tvg_id": None}]
         if unmatched_only:
@@ -42,10 +42,10 @@ class _StubSupervisor(TargetSupervisor):
         return {"suggestions": [{"id": "es.la1", "display_name": "La 1"}],
                 "channel_name": channel_name}
 
-    def reload_target(self, target_id, target=None, epg_path=None) -> bool:  # type: ignore[override]
+    def reload_target(self, target_id, target=None, epg_path=None) -> bool:
         return True
 
-    def stop_target(self, target_id: str) -> bool:  # type: ignore[override]
+    def stop_target(self, target_id: str) -> bool:
         return target_id == "t0"
 
 

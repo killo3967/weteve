@@ -8,6 +8,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 
 import pytest
 
@@ -18,7 +19,7 @@ from src.application.services.daemon.supervisor import TargetSupervisor
 
 
 class _StubSupervisor(TargetSupervisor):
-    def get_status(self) -> dict:  # type: ignore[override]
+    def get_status(self) -> dict:
         return {"targets": {"t0": {"name": "Mi lista", "running": True}}}
 
 
@@ -70,7 +71,7 @@ def _get(url: str, session: str | None = None):
 
 
 @pytest.fixture()
-def transport() -> McpHttpTransport:
+def transport() -> Iterator[McpHttpTransport]:
     core = McpStreamableServer(server_name="weteve-test")
     core.set_tool_registry(build_tool_registry(_StubSupervisor(), _StubStore()))
     t = McpHttpTransport(core, host="127.0.0.1", port=0)

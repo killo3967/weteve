@@ -168,3 +168,29 @@ class TestEpgMappingTable:
         w.load_unmatched(self._channels(), {}, disabled=("http://s/raro",))
         assert w.table.rowCount() == 2
         assert w.get_disabled() == ("http://s/raro",)
+
+
+class TestVentanaYColumnas:
+    """Ventana usada como principal y tabla de mapeo ajustable a mano."""
+
+    def test_la_barra_de_titulo_permite_minimizar_y_maximizar(self, dialog):
+        from PyQt6.QtCore import Qt
+
+        flags = dialog.windowFlags()
+        assert flags & Qt.WindowType.WindowMinimizeButtonHint
+        assert flags & Qt.WindowType.WindowMaximizeButtonHint
+
+    def test_las_columnas_del_mapeado_son_redimensionables(self, dialog):
+        from PyQt6.QtWidgets import QHeaderView
+
+        w = dialog.epg_mapping
+        header = w.table.horizontalHeader()
+        for columna in (w.COL_NAME, w.COL_LOGO, w.COL_EPG, w.COL_ACTIVE):
+            assert (header.sectionResizeMode(columna)
+                    == QHeaderView.ResizeMode.Interactive)
+
+    def test_se_puede_cambiar_el_ancho_de_una_columna(self, dialog):
+        w = dialog.epg_mapping
+        antes = w.table.columnWidth(w.COL_EPG)
+        w.table.setColumnWidth(w.COL_EPG, antes + 60)
+        assert w.table.columnWidth(w.COL_EPG) == antes + 60

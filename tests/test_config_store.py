@@ -172,3 +172,129 @@ class TestStartingNumber:
         path.write_text(BASE, encoding="utf-8")
         assert load_config(path)["targets"][0]["starting_number"] == 1
         assert TargetStore(path).reload("0").starting_number == 1
+
+
+class TestEscrituraSegura:
+    """config.ini no está en git: una escritura a medias lo perdería todo."""
+
+    def _fichero(self, tmp_path: Path) -> Path:
+        path = tmp_path / "config.ini"
+        path.write_text("[DAEMON]\ncontrol_port = 34400\n", encoding="utf-8")
+        return path
+
+    def test_guarda_la_version_anterior_en_bak(self, tmp_path):
+        path = self._fichero(tmp_path)
+        anterior = path.read_text(encoding="utf-8")
+
+        config_store.update(path, lambda p: p.set("DAEMON", "control_port",
+                                                 "35000"))
+
+        assert "35000" in path.read_text(encoding="utf-8")
+        bak = config_store.backup_path(path)
+        assert bak.read_text(encoding="utf-8") == anterior
+
+    def test_no_deja_temporales(self, tmp_path):
+        path = self._fichero(tmp_path)
+        config_store.update(path, lambda p: p.set("DAEMON", "mcp_token", "x"))
+        assert not (tmp_path / "config.ini.tmp").exists()
+        assert sorted(p.name for p in tmp_path.iterdir()) == [
+            "config.ini", "config.ini.bak"]
+
+    def test_un_fallo_a_mitad_deja_el_fichero_intacto(self, tmp_path,
+                                                     monkeypatch):
+        path = self._fichero(tmp_path)
+        anterior = path.read_text(encoding="utf-8")
+
+        def fsync_roto(_fd):
+            raise OSError("disco lleno")
+
+        monkeypatch.setattr(config_store.os, "fsync", fsync_roto)
+        import pytest
+
+        with pytest.raises(OSError):
+            config_store.update(path, lambda p: p.set("DAEMON", "mcp_token",
+                                                      "nuevo"))
+        assert path.read_text(encoding="utf-8") == anterior
+        assert not (tmp_path / "config.ini.tmp").exists()
+
+    def test_primera_escritura_sin_bak(self, tmp_path):
+        path = tmp_path / "nuevo.ini"
+        config_store.update(path, lambda p: p.add_section("DAEMON"))
+        assert path.exists()
+        assert not config_store.backup_path(path).exists()
+
+    def test_borrar_un_target_usa_la_escritura_segura(self, tmp_path):
+        path = self._fichero(tmp_path)
+        store = TargetStore(path)
+        store.load()
+        store.save("9", _target(), epg_path=None)
+        assert "[listmanager.target.9]" in path.read_text(encoding="utf-8")
+
+        assert store.delete("9") is True
+        assert "[listmanager.target.9]" not in path.read_text(encoding="utf-8")
+        assert config_store.backup_path(path).exists()
+
+
+class TestFormatoDeMapeos:
+    """`epg_overrides` legible: un mapeo por línea, y el viejo se sigue leyendo.
+
+    Una sección con la url como clave no vale: configparser parte las opciones
+    por ``=`` y ``:``, y las urls llevan los dos.
+    """
+
+    def _escribe(self, path: Path, overrides: dict[str, str]) -> None:
+        config_store.update(path, lambda p: config_store.write_target(
+            p, 0, name="t", m3u="C:/l.m3u", overrides=overrides))
+
+    def test_un_mapeo_por_linea(self, tmp_path: Path):
+        path = tmp_path / "config.ini"
+        self._escribe(path, {"http://a/1": "es.uno", "http://a/2": "es.dos"})
+        crudo = path.read_text(encoding="utf-8")
+        lineas = [linea.strip() for linea in crudo.splitlines()]
+        assert ";;" not in crudo
+        assert "http://a/1::es.uno" in lineas
+        assert "http://a/2::es.dos" in lineas
+
+    def test_ida_y_vuelta(self, tmp_path: Path):
+        path = tmp_path / "config.ini"
+        overrides = {"http://a/1?h=x&z=&i=1": "es.uno", "http://a/2": "es.dos"}
+        self._escribe(path, overrides)
+        leido = load_config(path)["targets"][0]["epg_overrides"]
+        assert leido == overrides
+
+    def test_el_formato_viejo_de_una_linea_se_lee(self, tmp_path: Path):
+        path = tmp_path / "config.ini"
+        path.write_text(
+            "[listmanager.target.0]\nname = t\n"
+            "epg_overrides = http://a/1::es.uno;;http://a/2::es.dos\n",
+            encoding="utf-8")
+        leido = load_config(path)["targets"][0]["epg_overrides"]
+        assert leido == {"http://a/1": "es.uno", "http://a/2": "es.dos"}
+
+    def test_una_url_con_porcentaje_sobrevive(self, tmp_path: Path):
+        """Sin interpolación: ``%20`` en una ruta no es un error de config."""
+        path = tmp_path / "config.ini"
+        overrides = {"http://a/mi%20lista.m3u": "es.uno"}
+        self._escribe(path, overrides)
+        assert load_config(path)["targets"][0]["epg_overrides"] == overrides
+
+    def test_quitar_un_mapeo_lo_borra_del_fichero(self, tmp_path: Path):
+        path = tmp_path / "config.ini"
+        self._escribe(path, {"http://a/1": "es.uno", "http://a/2": "es.dos"})
+        self._escribe(path, {"http://a/2": "es.dos"})
+        crudo = path.read_text(encoding="utf-8")
+        assert "http://a/1" not in crudo
+        assert load_config(path)["targets"][0]["epg_overrides"] == {
+            "http://a/2": "es.dos"}
+
+    def test_target_store_y_la_gui_leen_lo_mismo(self, tmp_path: Path):
+        """Un solo lector: el demonio y la GUI no pueden divergir."""
+        path = tmp_path / "config.ini"
+        overrides = {"http://a/1?h=1": "es.uno"}
+        self._escribe(path, overrides)
+        store = TargetStore(path)
+        store.load()
+        target = store.get("0")
+        assert target is not None
+        assert target.epg_overrides == load_config(
+            path)["targets"][0]["epg_overrides"] == overrides

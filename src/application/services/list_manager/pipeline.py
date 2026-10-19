@@ -11,6 +11,7 @@ from src.application.services.list_manager.models import (
     MappedChannel,
     PipelineTarget,
 )
+from src.application.services.list_manager.quality import dedupe_variants
 from src.domain.entities.epg import EPGData, Program
 from src.infrastructure.adapters.file_m3u_repository import FileM3URepository
 from src.infrastructure.adapters.xmltv_repository import XMLTVRepository
@@ -41,6 +42,7 @@ class PipelineResult:
         excluded_disabled: list[MappedChannel] | None = None,
         excluded_no_epg: list[MappedChannel] | None = None,
         require_epg: bool = False,
+        excluded_duplicate: list[MappedChannel] | None = None,
     ):
         self.channels = channels
         self.total_input = total_input
@@ -53,6 +55,11 @@ class PipelineResult:
         # mapeo, y sin ellas el usuario no podría asignarles Dummy 1h para
         # rescatarlos. Nunca se sirven en el M3U.
         self.excluded_no_epg = list(excluded_no_epg or [])
+        # Variantes del mismo canal (mismo id EPG y mismo nombre base) que no
+        # se sirven porque otra tiene más prioridad de calidad. Se conservan
+        # para que la tabla de mapeo las muestre y el usuario vea por qué no
+        # están en la lista.
+        self.excluded_duplicate = list(excluded_duplicate or [])
         # True si había fuente EPG y, por tanto, la regla se ha aplicado.
         self.require_epg = require_epg
 
@@ -390,6 +397,10 @@ class ListManagerPipeline:
                     no_epg.append(mapped)
         else:
             served = matched
+        # Variantes de calidad: de cada canal (mismo id EPG y mismo nombre
+        # base) se sirve una sola. Va después del apagado manual, así que
+        # desactivar el 4K a mano deja pasar el HD.
+        served, duplicates = dedupe_variants(served, target.quality_priority)
         # ``unmatched`` es siempre el diagnóstico de la EPG: con la regla
         # activada son los descartados, no los servidos sin guía.
         unmatched = [m.name for m in (no_epg if require_epg else served)]
@@ -407,5 +418,10 @@ class ListManagerPipeline:
             len(unmatched),
             f", {len(no_epg)} descartados" if require_epg else " (sin fuente EPG)",
         )
+        if duplicates:
+            logger.info(
+                "Pipeline '%s': %d variantes descartadas por prioridad de "
+                "calidad (se sirve la mejor de cada canal)", target.name,
+                len(duplicates))
         return PipelineResult(numbered, total_input, unmatched, excluded,
-                              no_epg, require_epg)
+                              no_epg, require_epg, duplicates)

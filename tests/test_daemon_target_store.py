@@ -161,8 +161,10 @@ class TestTargetStoreSelections:
 
         store = TargetStore(path)
         store.load()
+        base = store.get("0")
+        assert base is not None
         t = dataclasses_replace(
-            store.get("0"),
+            base,
             source_refs=(SourceRef("aa", "platero", "C:/l.m3u"),),
             epg_refs=(SourceRef("bb", "TV", "C:/e.xml"),),
         )
@@ -188,7 +190,9 @@ class TestTargetStoreSelections:
 
         store = TargetStore(path)
         store.load()
-        t = dataclasses_replace(store.get("0"))
+        base = store.get("0")
+        assert base is not None
+        t = dataclasses_replace(base)
         store.save("0", t)
         parser = configparser.ConfigParser()
         parser.read(path, encoding="utf-8")

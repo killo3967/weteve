@@ -34,7 +34,10 @@ known-first-party = ["src", "tests"]
 
 [tool.mypy]
 python_version = "3.11"
-files = ["src", "scripts", "main.py", "daemon.py"]
+# Los tests también: si no están aquí, VS Code los sigue comprobando (mypy
+# mira el fichero abierto) y el panel «Problemas» se llena de ruido que el
+# comando de CI nunca ve.
+files = ["src", "scripts", "main.py", "daemon.py", "tests"]
 # El layout importa `src.*` desde la raíz y no hay metadatos de paquete: sin
 # esto mypy no arranca ("source file found twice under different module names").
 explicit_package_bases = true
@@ -53,3 +56,12 @@ module = [
     "src.infrastructure.ui.log_tail_widget",
 ]
 ignore_errors = true
+
+# Los dobles de test (repositorios, clientes y widgets falsos) son más laxos a
+# propósito: sus firmas no tienen por qué coincidir con el original, y los
+# ficheros sin anotar usan diccionarios para construir dataclasses. El resto de
+# comprobaciones (código muerto, `type: ignore` sobrantes, retornos mal usados…)
+# sí se exigen también en tests.
+[[tool.mypy.overrides]]
+module = ["tests.*", "tests"]
+disable_error_code = ["arg-type", "union-attr"]

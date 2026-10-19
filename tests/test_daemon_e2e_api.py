@@ -31,7 +31,7 @@ class TestLecturas:
         assert _names(body) == {"La 1", "La 2", "Teledeporte"}
 
     def test_candidatos_a_mapeo(self, api):
-        code, body = api.mapping_candidates("0")
+        code, body = api.mapping_candidates("0", include_served=False)
         assert code == 200 and body["total"] == 2
         assert _names(body) == {"Canal XXX", "Canal Cine Plus"}
         fila = next(c for c in body["channels"]
@@ -70,12 +70,13 @@ class TestEscrituras:
 
         # el fichero ya tiene los cambios aunque no se ha ejecutado nada
         assert api.get("/targets/0")[1]["target"]["name"] == "e2e-2"
-        assert api.mapping_candidates("0")[1]["total"] == 2  # snapshot viejo
+        assert api.mapping_candidates(
+            "0", include_served=False)[1]["total"] == 2  # snapshot viejo
 
         code, metrics = api.run("0")
         assert code == 200 and metrics["filtered_count"] == 3
         # la regla deja fuera el canal de Cine: solo queda XXX pendiente
-        assert _names(api.mapping_candidates("0")[1]) == {"Canal XXX"}
+        assert _names(api.mapping_candidates("0", include_served=False)[1])             == {"Canal XXX"}
 
     def test_mapeo_rescata_un_canal(self, api):
         code, body = api.set_mappings("0", {
@@ -86,7 +87,8 @@ class TestEscrituras:
         code, metrics = api.run("0")
         assert metrics["filtered_count"] == 4
         assert "Canal Cine Plus" in _names(api.get("/targets/0/channels")[1])
-        assert "Canal Cine Plus" not in _names(api.mapping_candidates("0")[1])
+        assert "Canal Cine Plus" not in _names(
+            api.mapping_candidates("0", include_served=False)[1])
 
     def test_sources_round_trip(self, api, daemon):
         # la config del arnés es legacy: el demonio la migra al arrancar

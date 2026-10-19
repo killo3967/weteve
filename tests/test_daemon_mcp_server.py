@@ -15,11 +15,11 @@ from src.application.services.daemon.supervisor import TargetSupervisor
 class _StubSupervisor(TargetSupervisor):
     """Devuelve datos fijos; suficiente para testear el protocolo MCP."""
 
-    def get_status(self) -> dict:  # type: ignore[override]
+    def get_status(self) -> dict:
         return {"targets": {"t0": {"name": "Mi lista", "running": True,
                                     "channel_count": 5}}}
 
-    def list_definitions(self) -> dict:  # type: ignore[override]
+    def list_definitions(self) -> dict:
         return {"t0": {"name": "Mi lista", "port": 8080}}
 
 

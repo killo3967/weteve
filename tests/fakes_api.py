@@ -30,12 +30,22 @@ class FakeApi:
         return 200, {"name": "test", "running": self.running,
                      "port": 9999, "channel_count": self.served}
 
-    def mapping_candidates(self, target_id: str, limit: int = 1000):
+    def mapping_candidates(self, target_id: str, limit: int = 1000,
+                           include_served: bool = True):
+        self.last_include_served = include_served
         if self.down:
             return 0, {"error": "sin conexión"}
         rows = list(self.served_channels)
         return 200, {"channels": rows, "total": len(rows),
                      "count": len(rows), "offset": 0}
+
+    def all_mapping_candidates(self, target_id: str,
+                               include_served: bool = True):
+        """Misma respuesta que la página única: el fake no pagina."""
+        return self.mapping_candidates(target_id, include_served=include_served)
+
+    def all_epg_channels(self, target_id: str):
+        return self.epg_channels(target_id)
 
     def epg_channels(self, target_id: str, limit: int = 1000):
         if self.down:

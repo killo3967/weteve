@@ -23,7 +23,7 @@ class _StubSupervisor(TargetSupervisor):
         super().__init__()
         self.reload_calls: list[str] = []
 
-    def get_status(self) -> dict:  # type: ignore[override]
+    def get_status(self) -> dict:
         return {
             "targets": {
                 "t0": {
@@ -38,7 +38,7 @@ class _StubSupervisor(TargetSupervisor):
             }
         }
 
-    def reload_target(self, target_id, target=None, epg_path=None) -> bool:  # type: ignore[override]
+    def reload_target(self, target_id, target=None, epg_path=None) -> bool:
         self.reload_calls.append(target_id)
         return True
 

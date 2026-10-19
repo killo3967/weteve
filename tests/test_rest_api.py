@@ -28,8 +28,9 @@ class _FakeService:
         return {"channels": [{"name": "Canal A"}], "total": 1, "count": 1,
                 "offset": offset}
 
-    def mapping_candidates(self, target_id, limit=200, offset=0):
-        self.calls.append(("mapping", limit, offset))
+    def mapping_candidates(self, target_id, limit=200, offset=0,
+                           include_served=False):
+        self.calls.append(("mapping", limit, offset, include_served))
         return {"channels": [], "total": 0, "count": 0, "offset": offset}
 
     def groups(self, target_id: str):
@@ -89,7 +90,14 @@ class TestLecturas:
     def test_mapping_candidates(self, api):
         code, _ = api.handle("GET", "/api/v1/targets/0/mapping-candidates")
         assert code == 200
-        assert api._service.calls[-1] == ("mapping", 200, 0)
+        assert api._service.calls[-1] == ("mapping", 200, 0, False)
+
+    def test_mapping_candidates_incluye_servidos(self, api):
+        """La tabla de mapeo puede pedir también los canales que ya sirven."""
+        code, _ = api.handle(
+            "GET", "/api/v1/targets/0/mapping-candidates?include_served=true")
+        assert code == 200
+        assert api._service.calls[-1] == ("mapping", 200, 0, True)
 
     def test_epg_channels(self, api):
         code, _ = api.handle("GET", "/api/v1/targets/0/epg-channels?limit=5")
@@ -307,3 +315,18 @@ class TestCarteraPorRest:
         code, _ = wapi.handle("PUT", "/api/v1/targets/0/sources",
                               b'{"m3u_sources": "x", "epg_sources": []}')
         assert code == 400
+
+
+class TestApagadoPorLaApi:
+    """El demonio se apaga por la misma API con la que se habla."""
+
+    def test_post_shutdown_llama_al_apagado(self, wapi):
+        apagado = []
+        wapi._on_shutdown = lambda: apagado.append(True)
+        code, body = wapi.handle("POST", "/api/v1/shutdown", b"{}")
+        assert code == 200 and body == {"ok": True}
+        assert apagado == [True]
+
+    def test_shutdown_solo_admite_post(self, wapi):
+        code, _ = wapi.handle("GET", "/api/v1/shutdown")
+        assert code == 405

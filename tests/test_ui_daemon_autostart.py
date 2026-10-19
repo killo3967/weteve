@@ -55,7 +55,7 @@ def _dialog(qtbot, tmp_path, panel: _FakePanel) -> ListManagerDialog:
     d._config_watch.stop()
     # se construye el diálogo real y luego se sustituye el panel: el arranque
     # automático se prueba llamando a la lógica del diálogo
-    d.daemon_panel = panel
+    d.daemon_panel = panel  # type: ignore[assignment]
     d._auto_started_daemon = False
     d._daemon_stopped = False
     return d

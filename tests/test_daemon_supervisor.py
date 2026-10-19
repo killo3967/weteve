@@ -64,6 +64,8 @@ class TestTargetSupervisor:
             canonico = sup.playlist_route("/weteve/0/playlist.m3u")
             corto = sup.playlist_route("/weteve/playlist.m3u")
             heredado = sup.playlist_route("/playlist.m3u")
+            assert canonico is not None and corto is not None
+            assert heredado is not None
             assert canonico == corto == heredado
             assert canonico[0] == 200 and canonico[2] == "audio/x-mpegurl"
         finally:
@@ -71,7 +73,9 @@ class TestTargetSupervisor:
 
     def test_playlist_de_target_inexistente_404(self) -> None:
         sup = TargetSupervisor(base_url=BASE)
-        status, _body, _ctype = sup.playlist_route("/weteve/9/playlist.m3u")
+        ruta = sup.playlist_route("/weteve/9/playlist.m3u")
+        assert ruta is not None
+        status, _body, _ctype = ruta
         assert status == 404
 
     def test_ruta_que_no_es_playlist(self) -> None:
@@ -96,7 +100,8 @@ class TestTargetSupervisor:
             sup.start_target("t0", _target(m3u))
             assert sup.stop_target("t0") is True
             assert sup.get_status()["targets"]["t0"]["running"] is False
-            assert sup.playlist_route("/weteve/t0/playlist.m3u")[0] == 404
+            parada = sup.playlist_route("/weteve/t0/playlist.m3u")
+            assert parada is not None and parada[0] == 404
             # parar de nuevo es idempotente
             assert sup.stop_target("t0") is False
         finally:
@@ -197,3 +202,39 @@ class TestSupervisorMultiFuente:
             assert "A.Canal" not in body and "B.Canal" not in body
         finally:
             sup.stop_all()
+
+
+class TestDuplicadosDeCalidad:
+    """El daemon marca en la tabla qué fila se sirve y cuál es duplicada."""
+
+    def _supervisor_con_duplicado(self):
+        from src.application.services.list_manager.models import MappedChannel
+        from src.application.services.list_manager.pipeline import PipelineResult
+
+        servido = MappedChannel("LA 1 FULL HD", "http://x/fhd",
+                                matched_epg_id="La 1 HD", chno=1)
+        duplicado = MappedChannel("LA 1 HD", "http://x/hd",
+                                  matched_epg_id="La 1 HD")
+        sup = TargetSupervisor()
+        sup._results["t0"] = PipelineResult(
+            [servido], 2, [], excluded_duplicate=[duplicado])
+        return sup
+
+    def test_el_duplicado_se_lista_como_no_servido(self):
+        sup = self._supervisor_con_duplicado()
+        page = sup.mapping_candidates("t0", include_served=True)
+        filas = {c["url"]: c for c in page["channels"]}
+        assert filas["http://x/fhd"]["served"] is True
+        assert filas["http://x/fhd"]["duplicate"] is False
+        assert filas["http://x/hd"]["served"] is False
+        assert filas["http://x/hd"]["duplicate"] is True
+
+    def test_el_duplicado_sale_tambien_sin_pedir_servidos(self):
+        sup = self._supervisor_con_duplicado()
+        page = sup.mapping_candidates("t0", include_served=False)
+        assert [c["url"] for c in page["channels"]] == ["http://x/hd"]
+        assert page["total"] == 1
+
+    def test_las_metricas_cuentan_los_duplicados(self):
+        sup = self._supervisor_con_duplicado()
+        assert sup.metrics("t0")["duplicates_count"] == 1

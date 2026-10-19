@@ -23,8 +23,10 @@ class _StubSupervisor:
         self.calls.append(("channels", target_id, limit, offset, unmatched_only))
         return {"channels": [], "total": 0, "count": 0, "offset": offset}
 
-    def mapping_candidates(self, target_id, limit=200, offset=0) -> dict:
-        self.calls.append(("mapping", target_id, limit, offset))
+    def mapping_candidates(self, target_id, limit=200, offset=0,
+                           include_served=False) -> dict:
+        self.calls.append(("mapping", target_id, limit, offset,
+                           include_served))
         return {"channels": [], "total": 0, "count": 0, "offset": offset}
 
     def list_epg_channels(self, target_id, limit=200, offset=0) -> dict:
@@ -148,7 +150,12 @@ class TestLecturas:
     def test_mapping_candidates_delega(self):
         service = _service()
         service.mapping_candidates("0", limit=7, offset=1)
-        assert service._supervisor.calls[-1] == ("mapping", "0", 7, 1)
+        assert service._supervisor.calls[-1] == ("mapping", "0", 7, 1, False)
+
+    def test_mapping_candidates_con_servidos(self):
+        service = _service()
+        service.mapping_candidates("0", include_served=True)
+        assert service._supervisor.calls[-1][4] is True
 
     def test_epg_channels_delega(self):
         service = _service()

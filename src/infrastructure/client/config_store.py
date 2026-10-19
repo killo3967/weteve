@@ -12,7 +12,10 @@ escritura, para que un guardado en lote no reescriba el fichero N veces.
 """
 
 import configparser
+import io
 import logging
+import os
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 
@@ -29,17 +32,57 @@ DAEMON_SECTION = "DAEMON"
 # -- lectura / escritura del fichero -------------------------------------------
 
 def parse(path: Path) -> configparser.ConfigParser:
-    """Parser con el contenido actual del fichero (vacío si no existe)."""
-    parser = configparser.ConfigParser()
+    """Parser con el contenido actual del fichero (vacío si no existe).
+
+    Sin interpolación (``%``): las ubicaciones son URLs y un ``%20`` o un
+    ``%C3%A9`` en una ruta no son un error de configuración.
+    """
+    parser = configparser.ConfigParser(interpolation=None)
     if path.exists():
         parser.read(path, encoding="utf-8")
     return parser
 
 
-def dump(parser: configparser.ConfigParser, path: Path) -> None:
+def backup_path(path: Path) -> Path:
+    """Copia de la última versión buena: ``config.ini.bak``."""
+    return path.with_name(path.name + ".bak")
+
+
+def write_atomic(path: Path, text: str) -> None:
+    """Escribe ``text`` de forma atómica y guarda la versión anterior.
+
+    Se escribe en ``<nombre>.tmp``, se fuerza a disco y se reemplaza con
+    ``os.replace`` (atómico en el mismo volumen). Antes de reemplazar se copia
+    el fichero actual a ``<nombre>.bak``. Si algo falla a mitad, el original
+    queda intacto y el temporal se borra.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        parser.write(f)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        if path.exists():
+            try:
+                shutil.copy2(path, backup_path(path))
+            except OSError:  # la copia es una red de seguridad, no un requisito
+                logger.warning("no se pudo copiar %s a %s", path,
+                               backup_path(path), exc_info=True)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def dump(parser: configparser.ConfigParser, path: Path) -> None:
+    """Escribe el parser completo (config.ini) con la escritura atómica."""
+    buffer = io.StringIO()
+    parser.write(buffer)
+    write_atomic(path, buffer.getvalue())
 
 
 def update(path: Path, mutate: Callable[[configparser.ConfigParser], None]) -> None:
@@ -61,6 +104,24 @@ def selection_ids(refs, catalog: SourceCatalog) -> str:
             logger.warning("Ref %s (%s) sin fila en la cartera: no se persiste",
                            ref.id, getattr(ref, "name", ""))
     return ",".join(ids)
+
+
+def parse_overrides(raw: str | None) -> dict[str, str]:
+    """``url -> channel-id`` desde el valor de ``epg_overrides``.
+
+    Acepta el formato actual (un par por línea) y el viejo (todo en una línea
+    separado por ``;;``): un config.ini de antes se sigue leyendo igual.
+    """
+    pairs: dict[str, str] = {}
+    for line in (raw or "").replace(";;", "\n").splitlines():
+        line = line.strip()
+        if "::" not in line:
+            continue
+        url, cid = line.split("::", 1)
+        url, cid = url.strip(), cid.strip()
+        if url and cid:
+            pairs[url] = cid
+    return pairs
 
 
 def _rules_str(rules) -> str:
@@ -98,8 +159,10 @@ def write_target(
         "custom_epg": str(epg_path or ""),
         "epg_source": str(epg_source if epg_source is not None else -1),
         "rules": _rules_str(rules),
-        "epg_overrides": ";;".join(
-            f"{url}::{cid}" for url, cid in (overrides or {}).items()),
+        # Un mapeo por línea (configparser escribe las líneas siguientes
+        # indentadas): el fichero queda legible y cada cambio se ve en el diff.
+        "epg_overrides": "".join(
+            f"\n{url}::{cid}" for url, cid in (overrides or {}).items()),
         "disabled_channels": "||".join(
             str(u) for u in (disabled or ()) if u),
         "port": str(port),

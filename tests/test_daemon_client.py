@@ -12,10 +12,10 @@ from src.infrastructure.client.daemon_client import DaemonClient
 
 
 class _StubSupervisor(TargetSupervisor):
-    def get_status(self) -> dict:  # type: ignore[override]
+    def get_status(self) -> dict:
         return {"targets": {"t0": {"name": "A", "running": True}}}
 
-    def reload_target(self, target_id, target=None, epg_path=None) -> bool:  # type: ignore[override]
+    def reload_target(self, target_id, target=None, epg_path=None) -> bool:
         return target_id == "t0"
 
 

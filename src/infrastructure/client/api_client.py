@@ -118,9 +118,18 @@ class ApiClient:
     def target_status(self, target_id: str) -> tuple[int, dict]:
         return self.get(f"/targets/{target_id}/status")
 
+    def shutdown(self) -> tuple[int, dict]:
+        """Pide al demonio que se apague (mismo puerto, misma API)."""
+        return self.post("/shutdown")
+
     def service(self, target_id: str, action: str) -> tuple[int, dict]:
-        """Arranca o para el servidor del target en el daemon."""
-        return self.post(f"/targets/{target_id}/service", {"action": action})
+        """Arranca o para el servidor del target en el daemon.
+
+        Arrancar ejecuta el pipeline (segundos): espera larga, o la GUI corta
+        a los 5 s y avisa de un fallo que no ha ocurrido.
+        """
+        return self.post(f"/targets/{target_id}/service",
+                         {"action": action}, timeout=PIPELINE_TIMEOUT)
 
     def sources(self) -> tuple[int, dict]:
         return self.get("/sources")
@@ -143,12 +152,64 @@ class ApiClient:
                          "reload": reload})
 
     def mapping_candidates(self, target_id: str,
-                           limit: int = 1000) -> tuple[int, dict]:
-        """Canales que necesitan atención (sin guía o desactivados)."""
-        return self.get(f"/targets/{target_id}/mapping-candidates", limit=limit)
+                           limit: int = 1000, offset: int = 0,
+                           include_served: bool = True) -> tuple[int, dict]:
+        """Una página de canales para la tabla de mapeo.
 
-    def epg_channels(self, target_id: str, limit: int = 1000) -> tuple[int, dict]:
-        return self.get(f"/targets/{target_id}/epg-channels", limit=limit)
+        Por defecto incluye también los ya servidos con guía: sin ellos no se
+        puede revisar ni cambiar la EPG de un canal que ya funciona.
+        """
+        return self.get(f"/targets/{target_id}/mapping-candidates",
+                        limit=limit, offset=offset,
+                        include_served="true" if include_served else "false")
+
+    def all_mapping_candidates(self, target_id: str,
+                               include_served: bool = True) -> tuple[int, dict]:
+        """Todos los canales de la tabla, paginando hasta ``total``."""
+        return self._all_pages(
+            lambda offset: self.mapping_candidates(
+                target_id, offset=offset, include_served=include_served))
+
+    def epg_channels(self, target_id: str, limit: int = 1000,
+                     offset: int = 0) -> tuple[int, dict]:
+        return self.get(f"/targets/{target_id}/epg-channels",
+                        limit=limit, offset=offset)
+
+    def all_epg_channels(self, target_id: str) -> tuple[int, dict]:
+        """Catálogo EPG completo: un desplegable no puede perder canales."""
+        return self._all_pages(
+            lambda offset: self.epg_channels(target_id, offset=offset))
+
+    def _all_pages(self, fetch,
+                   max_pages: int = 100) -> tuple[int, dict]:
+        """Recorre las páginas hasta ``total`` y devuelve una sola respuesta.
+
+        ``truncated`` avisa si el daemon no dejó seguir (respuesta corta o
+        tope de páginas): la UI lo dice en vez de perder canales en silencio.
+        """
+        rows: list = []
+        first: dict = {}
+        offset = 0
+        for _ in range(max_pages):
+            code, body = fetch(offset)
+            if code != 200:
+                return code, body
+            if not first:
+                first = dict(body)
+            chunk = body.get("channels") or []
+            rows.extend(chunk)
+            total = int(body.get("total") or 0)
+            offset += len(chunk)
+            if offset >= total:
+                break
+            if not chunk:
+                break  # el daemon no avanza: no insistir
+        out = dict(first)
+        out["channels"] = rows
+        out["count"] = len(rows)
+        out["offset"] = 0
+        out["truncated"] = offset < int(out.get("total") or 0)
+        return 200, out
 
     def groups(self, target_id: str) -> tuple[int, dict]:
         return self.get(f"/targets/{target_id}/groups")
