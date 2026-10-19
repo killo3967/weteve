@@ -17,8 +17,10 @@ import re
 
 from src.application.services.list_manager.models import FilterRule
 
-_REGEXP_YES = re.compile(r"[{]+[^.]+[}]")
-_REGEXP_NO = re.compile(r"!+[{]+[^.]+[}]")
+# Los nombres reales llevan puntos ("C. TORREVISION HD", "A.3", "Antena3.TV"):
+# el contenido entre llaves admite cualquier carácter salvo la llave de cierre.
+_REGEXP_YES = re.compile(r"[{]+([^}]+)[}]")
+_REGEXP_NO = re.compile(r"!+[{]+([^}]+)[}]")
 
 
 def _matches_pattern(haystack: str, needle: str) -> bool:
@@ -67,6 +69,10 @@ def evaluate_channel(
     #    basta con que una pase. Sin reglas "or", resultan solo las "and".
     def _rule_pass(rule: FilterRule) -> bool:
         included, excluded, base = _split_rule(rule)
+        if base.startswith("!"):
+            # Exclusión no reconocida (sin llave de cierre, p. ej.): vale como
+            # "todo lo no excluido" en vez de como inclusión imposible.
+            return True
         if included and base:
             return (
                 _rule_matches(rule, base, name, group, groups)
@@ -74,9 +80,11 @@ def evaluate_channel(
             )
         if included:
             return _rule_matches(rule, included, name, group, groups)
-        if not base:
-            # Patrón solo de exclusión (p. ej. "!{XXX}"): incluye todo lo
-            # no excluido.
+        if not base or base.startswith("!"):
+            # Patrón solo de exclusión (p. ej. "!{XXX}"), incluso si el
+            # !{...} no se pudo extraer: incluye todo lo no excluido. Sin
+            # esto, una exclusión mal formada actuaría como inclusión y
+            # dejaría la lista vacía.
             return True
         return _rule_matches(rule, base, name, group, groups)
 

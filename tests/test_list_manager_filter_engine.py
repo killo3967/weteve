@@ -114,3 +114,35 @@ def test_casos_proyecto(pattern, name, group, expected):
     """Casos derivados del campo ``filter`` del config.ini existente."""
     rule = FilterRule(field="custom-filter", pattern=pattern)
     assert evaluate_channel(name, group, "", [rule]) is expected
+
+
+class TestNombresConPunto:
+    """'C. TORREVISION HD' y compañía: el punto no puede romper las llaves.
+
+    Las regex de `!{...}`/`{...}` excluían el punto, así que la exclusión no se
+    reconocía y actuaba como inclusión: la regla AND fallaba para TODOS los
+    canales y la lista quedaba a cero.
+    """
+
+    def _pasa(self, nombre, *reglas):
+        from src.application.services.list_manager.filter_engine import (
+            evaluate_channel,
+        )
+        from src.application.services.list_manager.models import FilterRule
+
+        rules = [FilterRule.parse(r) for r in reglas]
+        return evaluate_channel(nombre, "SPAIN", "", rules,
+                                channel_groups={"group-title": ["SPAIN"]})
+
+    def test_exclusion_con_punto_excluye_solo_ese_canal(self):
+        assert not self._pasa("C. TORREVISION HD",
+                              "group-title:SPAIN:0:and",
+                              "custom-filter:!{C. TORREVISION HD}:0:and")
+        assert self._pasa("LA 1 HD", "group-title:SPAIN:0:and",
+                          "custom-filter:!{C. TORREVISION HD}:0:and")
+
+    def test_inclusion_con_punto(self):
+        assert self._pasa("Canal.1", "custom-filter:{Canal.1}:0:and")
+
+    def test_una_exclusion_mal_formada_no_vacia_la_lista(self):
+        assert self._pasa("LA 1 HD", "custom-filter:!{sin cerrar:0:and")
