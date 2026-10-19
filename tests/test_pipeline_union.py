@@ -40,7 +40,7 @@ class _MultiEpgRepo:
     def __init__(self, by_location: dict[str, EPGData]):
         self._by = by_location
 
-    def load_epg(self, source: str) -> EPGData:
+    def load_epg(self, source: str, fresh: bool = False) -> EPGData:
         return self._by.get(source, EPGData())
 
 

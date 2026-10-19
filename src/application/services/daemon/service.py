@@ -453,6 +453,22 @@ class TargetService:
 
     # -- ejecución -----------------------------------------------------------
 
+    def refresh_epg(self, target_id: str) -> dict:
+        """Vuelve a leer las guías del target (descarga si son URLs).
+
+        Es la única operación que descarga guías aparte del planificador:
+        filtrar, mapear o desactivar canales reutiliza la que ya está cargada.
+        """
+        t = self._definition(target_id)
+        if t is None:
+            return {"error": f"target {target_id} no existe"}
+        epg_path = (self._store.get_epg_path(target_id)
+                    if self._store is not None else None)
+        if not self._supervisor.reload_target(
+                target_id, t, epg_path=epg_path, refresh_epg=True):
+            return {"error": f"target {target_id} no recargó las guías"}
+        return {"ok": True, "metrics": self._supervisor.metrics(target_id)}
+
     def run(self, target_id: str) -> dict:
         """Ejecuta el pipeline con la definición fresca y devuelve métricas."""
         t = self._definition(target_id)

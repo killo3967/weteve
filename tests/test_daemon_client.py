@@ -15,7 +15,8 @@ class _StubSupervisor(TargetSupervisor):
     def get_status(self) -> dict:
         return {"targets": {"t0": {"name": "A", "running": True}}}
 
-    def reload_target(self, target_id, target=None, epg_path=None) -> bool:
+    def reload_target(self, target_id, target=None, epg_path=None,
+                      refresh_epg=False) -> bool:
         return target_id == "t0"
 
 

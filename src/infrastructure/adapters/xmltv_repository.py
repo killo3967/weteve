@@ -52,10 +52,14 @@ class XMLTVRepository(IEPGRepository):
             return ("file-ausente", source)
         return ("file", stat.st_mtime_ns, stat.st_size)
 
-    def load_epg(self, source: str) -> EPGData:
-        """Carga, descarga y parsea una fuente XMLTV (con cache)."""
+    def load_epg(self, source: str, fresh: bool = False) -> EPGData:
+        """Carga, descarga y parsea una fuente XMLTV (con cache).
+
+        ``fresh=True`` ignora la cache y vuelve a leer la fuente: es lo que
+        piden el planificador de recargas y el botón «Actualizar guías».
+        """
         signature = self._signature(source)
-        cached = self._cache.get(source)
+        cached = None if fresh else self._cache.get(source)
         if cached is not None and cached[0] == signature:
             return cached[1]
         try:

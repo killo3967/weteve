@@ -221,6 +221,9 @@ class RestApi:
                 return 400, {"error": "rules debe ser una lista"}
             result = self._service.preview(target_id, payload["rules"])
             return _status_for(result), result
+        elif method == "POST" and action == "refresh-epg":
+            result = self._service.refresh_epg(target_id)
+            return _status_for(result), result
         elif method == "POST" and action == "run":
             result = self._service.run(target_id)
         elif method == "POST" and action == "service":

@@ -128,6 +128,10 @@ class FakeApi:
         return 200, {"ok": True,
                      "status": {"running": self.running, "port": 9999}}
 
+    def refresh_epg(self, target_id: str):
+        self.calls.append(("refresh_epg", target_id))
+        return 200, {"ok": True, "metrics": {"filtered_count": self.served}}
+
     def run(self, target_id: str):
         self.calls.append(("run", target_id))
         return 200, {"filtered_count": self.served}

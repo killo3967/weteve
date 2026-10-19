@@ -596,6 +596,8 @@ class EpgMappingWidget(QWidget):
     # «Filtrar canal» del menú contextual: nombres elegidos, para añadirlos a
     # la pestaña de reglas.
     filter_requested = pyqtSignal(list)
+    # «Actualizar guías»: descarga de nuevo el XMLTV del target.
+    refresh_guides_requested = pyqtSignal()
 
     # Columnas de la tabla
     COL_NAME, COL_URL, COL_LOGO, COL_EPG, COL_ACTIVE = range(5)
@@ -626,7 +628,17 @@ class EpgMappingWidget(QWidget):
             "Oculta los canales que ya se sirven con su guía.")
         self.only_pending_check.stateChanged.connect(
             lambda _state: self.filter_changed.emit())
-        layout.addWidget(self.only_pending_check)
+        filtro_row = QHBoxLayout()
+        filtro_row.addWidget(self.only_pending_check)
+        filtro_row.addStretch(1)
+        self.refresh_guides_btn = QPushButton("&Actualizar guías")
+        self.refresh_guides_btn.setToolTip(
+            "Vuelve a descargar las guías EPG del target. Filtrar o mapear "
+            "no las descarga: reutiliza la que ya está cargada.")
+        self.refresh_guides_btn.clicked.connect(
+            lambda: self.refresh_guides_requested.emit())
+        filtro_row.addWidget(self.refresh_guides_btn)
+        layout.addLayout(filtro_row)
 
         self.table = QTableWidget(0, 5, self)
         self.table.setHorizontalHeaderLabels(
@@ -1216,6 +1228,7 @@ class ListManagerDialog(QDialog):
         self.epg_mapping = EpgMappingWidget()
         self.epg_mapping.filter_changed.connect(self._refresh_mapping)
         self.epg_mapping.filter_requested.connect(self._filter_channels)
+        self.epg_mapping.refresh_guides_requested.connect(self._refresh_guides)
         epg_layout.addWidget(self.epg_mapping)
         self.result_label = QLabel("")
         epg_layout.addWidget(self.result_label)
@@ -1407,6 +1420,39 @@ class ListManagerDialog(QDialog):
             self.target_combo.setCurrentIndex(max(idx, 0))
         finally:
             self._loading_targets = False
+
+    def _refresh_guides(self) -> None:
+        """«Actualizar guías»: descarga de nuevo el XMLTV y reejecuta.
+
+        Es la única vía manual de traer guías frescas; filtrar o mapear
+        reutiliza la que ya está en memoria.
+        """
+        if self._saving:
+            self.result_label.setText(
+                "Hay un guardado en curso: actualiza las guías al terminar.")
+            return
+        client = self._api_client()
+        if client is None:
+            return
+        target_id = self._target_id()
+        self._saving = True
+        self._save_pending = {"refresh_guides": True}
+        self._config_watch.stop()
+        if self._save_button is not None:
+            self._save_button.setEnabled(False)
+        self.result_label.setText("Descargando guías EPG…")
+
+        def job() -> dict:
+            code, body = client.refresh_epg(target_id)
+            if code == 0 or code >= 400 or "error" in body:
+                return {"ok": False, "body": body, "code": code,
+                        "label": "guías"}
+            metrics = (body or {}).get("metrics") or {}
+            return {"ok": True, "served": metrics.get("filtered_count")}
+
+        self._save_pool.submit(job).add_done_callback(
+            lambda fut: self.save_finished.emit(fut.result())
+            if not fut.cancelled() else None)
 
     def _apply_rules_now(self) -> None:
         """«Aplicar» de Filtros iptv: guarda las reglas y reejecuta el pipeline.
@@ -1724,6 +1770,10 @@ class ListManagerDialog(QDialog):
             self.result_label.setText(
                 f"Guardado en el demonio: {served if served is not None else '—'} "
                 f"canales servidos (puerto {payload.get('port')}).")
+        elif payload.get("refresh_guides"):
+            self.result_label.setText(
+                f"Guías actualizadas: {served if served is not None else '—'} "
+                "canales servidos.")
         else:
             self.result_label.setText(
                 f"Filtros aplicados: {served if served is not None else '—'} "

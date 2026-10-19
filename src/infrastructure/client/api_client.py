@@ -231,6 +231,11 @@ class ApiClient:
         """Vista previa de canales con esas reglas (no persiste nada)."""
         return self.post(f"/targets/{target_id}/preview", {"rules": rules})
 
+    def refresh_epg(self, target_id: str) -> tuple[int, dict]:
+        """Vuelve a leer las guías del target (descarga): espera al pipeline."""
+        return self.post(f"/targets/{target_id}/refresh-epg",
+                         timeout=PIPELINE_TIMEOUT)
+
     def run(self, target_id: str) -> tuple[int, dict]:
         """Ejecuta el pipeline. Espera larga: es la llamada lenta del guardado."""
         return self.post(f"/targets/{target_id}/run", timeout=PIPELINE_TIMEOUT)

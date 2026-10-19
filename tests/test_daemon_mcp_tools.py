@@ -42,7 +42,8 @@ class _StubSupervisor(TargetSupervisor):
         return {"suggestions": [{"id": "es.la1", "display_name": "La 1"}],
                 "channel_name": channel_name}
 
-    def reload_target(self, target_id, target=None, epg_path=None) -> bool:
+    def reload_target(self, target_id, target=None, epg_path=None,
+                      refresh_epg=False) -> bool:
         return True
 
     def stop_target(self, target_id: str) -> bool:

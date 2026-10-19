@@ -38,7 +38,8 @@ class _StubSupervisor(TargetSupervisor):
             }
         }
 
-    def reload_target(self, target_id, target=None, epg_path=None) -> bool:
+    def reload_target(self, target_id, target=None, epg_path=None,
+                      refresh_epg=False) -> bool:
         self.reload_calls.append(target_id)
         return True
 

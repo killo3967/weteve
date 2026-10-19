@@ -64,18 +64,24 @@ class TargetSupervisor:
         epg_xml = build_xmltv(result.channels, epg)
         return playlist, epg_xml
 
-    def _ensure_source(self, target: PipelineTarget, epg_path: str | None) -> None:
+    def _ensure_source(self, target: PipelineTarget, epg_path: str | None,
+                       refresh_epg: bool = False) -> None:
         """Registra la(s) fuente(s) del target en el pipeline.
 
         Con cartera (source_refs) registra la unión multi-fuente; sin ella,
         el flujo antiguo de fuente única (custom_m3u/custom_epg).
+
+        ``refresh_epg`` solo lo piden el planificador y la actualización
+        manual: cambiar reglas o mapeos reutiliza la guía ya cargada.
         """
         if target.source_refs:
             self._pipeline.register_merged(target.source_index,
-                                           target.source_refs, target.epg_refs)
+                                           target.source_refs, target.epg_refs,
+                                           refresh_epg=refresh_epg)
         else:
             m3u = str(target.source_index)
-            self._pipeline.register_source(target.source_index, m3u, epg_path)
+            self._pipeline.register_source(target.source_index, m3u, epg_path,
+                                           refresh_epg=refresh_epg)
 
     def _remember(self, target_id: str, result) -> None:
         self._results[target_id] = result
@@ -149,8 +155,8 @@ class TargetSupervisor:
         return 200, epg_xml, "application/xml; charset=utf-8"
 
     def _scheduled_reload(self, target_id: str) -> None:
-        """Ciclo del scheduler: reejecutar el pipeline del target."""
-        self.reload_target(target_id)
+        """Ciclo del scheduler: reejecutar el pipeline releyendo las guías."""
+        self.reload_target(target_id, refresh_epg=True)
 
     # -- ciclo de vida -------------------------------------------------------
 
@@ -195,7 +201,7 @@ class TargetSupervisor:
 
     def reload_target(
         self, target_id: str, target: PipelineTarget | None = None,
-        epg_path: str | None = None,
+        epg_path: str | None = None, refresh_epg: bool = False,
     ) -> bool:
         """Reejecuta el pipeline; si el target estaba sirviendo, actualiza el contenido.
 
@@ -213,7 +219,7 @@ class TargetSupervisor:
                         epg_path or self._epg_paths.get(target_id))
                 current_epg = self._epg_paths.get(target_id)
             try:
-                self._ensure_source(tgt, current_epg)
+                self._ensure_source(tgt, current_epg, refresh_epg=refresh_epg)
                 result = self._pipeline.run(tgt)
             except Exception as e:
                 logger.error("Pipeline falló al recargar %s: %s", target_id, e)

@@ -330,3 +330,21 @@ class TestApagadoPorLaApi:
     def test_shutdown_solo_admite_post(self, wapi):
         code, _ = wapi.handle("GET", "/api/v1/shutdown")
         assert code == 405
+
+
+class TestRefrescoDeGuias:
+    """POST /targets/{id}/refresh-epg: única vía de descargar guías a mano."""
+
+    def test_llama_al_servicio(self, wapi):
+        visto = {}
+        wapi._service.refresh_epg = (
+            lambda tid: visto.update(tid=tid) or {"ok": True,
+                                                  "metrics": {"filtered_count": 3}})
+        code, body = wapi.handle("POST", "/api/v1/targets/0/refresh-epg", b"{}")
+        assert code == 200 and body["ok"] is True
+        assert visto == {"tid": "0"}
+
+    def test_error_del_servicio_es_400(self, wapi):
+        wapi._service.refresh_epg = lambda tid: {"error": "no recargó"}
+        code, body = wapi.handle("POST", "/api/v1/targets/0/refresh-epg", b"{}")
+        assert code == 400 and "error" in body

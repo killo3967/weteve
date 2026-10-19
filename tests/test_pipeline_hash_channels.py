@@ -21,7 +21,7 @@ class _FakeM3URepo:
 
 
 class _FakeEpgRepo:
-    def load_epg(self, source):
+    def load_epg(self, source, fresh=False):
         from src.domain.entities.epg import EPGData
         return EPGData()
 

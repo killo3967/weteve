@@ -69,7 +69,7 @@ class _FakeEpg:
     def __init__(self, epg):
         self._epg = epg
 
-    def load_epg(self, source):
+    def load_epg(self, source, fresh=False):
         return self._epg
 
 

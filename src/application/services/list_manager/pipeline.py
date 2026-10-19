@@ -92,37 +92,62 @@ class ListManagerPipeline:
         self._epg_lists: dict[int | str, dict[str, tuple[str, ...]]] = {}
         # cache de canales por fuente para get_groups (evita re-descargar)
         self._channel_cache: dict[int | str, list] = {}
+        # ruta de guía registrada por fuente (fuente única): detecta cambios
+        self._source_epg_path: dict[int | str, str] = {}
 
-    def register_source(self, index: int | str, m3u_path: str, epg_path: str | None) -> None:
-        """Registra (sin descargar) la fuente M3U y su EPG opcional."""
+    def register_source(self, index: int | str, m3u_path: str,
+                        epg_path: str | None,
+                        refresh_epg: bool = False) -> None:
+        """Registra la fuente M3U y su EPG opcional.
+
+        ``refresh_epg=False`` (por defecto) reutiliza la guía ya cargada: un
+        cambio de reglas o de mapeos no tiene por qué volver a descargarla.
+        Con ``refresh_epg=True`` (planificador, botón «Actualizar guías») se
+        vuelve a leer.
+        """
         # registrar invalida la cache de canales: el fichero/URL puede haber
         # cambiado desde la última lectura y la vista previa debe ver lo mismo
         # que el pipeline completo.
         self._channel_cache.pop(index, None)
+        previous = self._sources.get(index)
+        epg_previa = previous[1] if previous is not None else None
+        ruta_previa = self._source_epg_path.get(index)
+        self._source_epg_path[index] = str(epg_path or "")
         self._sources[index] = (m3u_path, None)
-        self._epg_lists.pop(index, None)
-        if epg_path:
-            epg = self._epg_repo.load_epg(epg_path)
-            self._sources[index] = (m3u_path, epg)
-            if epg is not None:
-                label = Path(str(epg_path)).name or str(epg_path)
-                self._epg_lists[index] = {cid: (label,)
-                                          for cid in epg.channel_names}
+        if not epg_path:
+            self._epg_lists.pop(index, None)
+            return
+        if epg_previa is not None and not refresh_epg                 and ruta_previa == str(epg_path):
+            self._sources[index] = (m3u_path, epg_previa)
+            return
+        epg = self._epg_repo.load_epg(epg_path, fresh=refresh_epg)
+        self._sources[index] = (m3u_path, epg)
+        if epg is not None:
+            label = Path(str(epg_path)).name or str(epg_path)
+            self._epg_lists[index] = {cid: (label,)
+                                      for cid in epg.channel_names}
 
     def register_merged(self, index: int | str, source_refs: tuple,
-                        epg_refs: tuple) -> None:
+                        epg_refs: tuple, refresh_epg: bool = False) -> None:
         """Registra un target multi-fuente (cartera global de listas).
 
         ``source_refs``/``epg_refs`` son tuplas de SourceRef (id, name,
         location). Los canales no se descargan hasta el primer uso; la EPG
         se fusiona en un solo EPGData (unión por id de canal).
+
+        La guía se reutiliza salvo que ``refresh_epg`` lo pida o que cambien
+        las fuentes de guía: filtrar un canal no puede costar una descarga.
         """
         self._channel_cache.pop(index, None)
+        previous = self._merged.get(index)
+        mismas_guias = previous is not None and tuple(epg_refs) == previous[1]
         self._merged[index] = (tuple(source_refs), tuple(epg_refs))
-        # la EPG fusionada se calcula aquí (register_source también carga la
-        # suya de forma anticipada): run() y get_epg() la leen de la cache
-        self._merged_epg[index], self._epg_lists[index] = self._merge_epgs(
-            self._merged[index][1])
+        if (refresh_epg or not mismas_guias
+                or index not in self._merged_epg):
+            # la EPG fusionada se calcula aquí (register_source también carga
+            # la suya de forma anticipada): run() y get_epg() la leen de cache
+            self._merged_epg[index], self._epg_lists[index] = self._merge_epgs(
+                self._merged[index][1], fresh=refresh_epg)
         # clave visible en _sources para que run()/get_groups() la encuentren;
         # el primer location sirve de placeholder para la carga por clave.
         self._sources.setdefault(index,
@@ -276,7 +301,7 @@ class ListManagerPipeline:
             )
         return self._finish(target, kept, total_input, epg)
 
-    def _merge_epgs(self, epg_refs: tuple
+    def _merge_epgs(self, epg_refs: tuple, fresh: bool = False
                     ) -> tuple[EPGData | None, dict[str, tuple[str, ...]]]:
         """Unión de las guías activas: programas suman y nombres se completan.
 
@@ -293,7 +318,7 @@ class ListManagerPipeline:
         names: dict[str, str] = {}
         origins: dict[str, list[str]] = {}
         for ref in epg_refs:
-            epg = self._epg_repo.load_epg(ref.location)
+            epg = self._epg_repo.load_epg(ref.location, fresh=fresh)
             if epg is None:
                 continue
             label = str(getattr(ref, "name", "") or "") or Path(

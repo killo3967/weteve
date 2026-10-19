@@ -390,3 +390,20 @@ class TestFiltroEncolado:
         wait_save(dialog)
         puts = [c[2] for c in fake_api.calls if c[0] == "put"]
         assert any(p.get("reload") is True for p in puts)
+
+
+class TestActualizarGuias:
+    """El botón del mapeo descarga guías explícitamente."""
+
+    def test_el_boton_llama_a_la_api(self, dialog, fake_api, wait_save):
+        assert dialog.epg_mapping.refresh_guides_btn.text() == "&Actualizar guías"
+        dialog.epg_mapping.refresh_guides_btn.click()
+        wait_save(dialog)
+        assert ("refresh_epg", "0") in fake_api.calls
+        assert "Guías actualizadas" in dialog.result_label.text()
+
+    def test_si_hay_guardado_en_curso_no_se_lanza(self, dialog, fake_api):
+        dialog._saving = True
+        dialog.epg_mapping.refresh_guides_btn.click()
+        assert not [c for c in fake_api.calls if c[0] == "refresh_epg"]
+        assert "guardado en curso" in dialog.result_label.text()

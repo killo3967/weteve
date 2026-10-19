@@ -33,7 +33,7 @@ class _FakeEpgRepo(XMLTVRepository):
     def __init__(self, epg: EPGData | None = None):
         self._epg = epg
 
-    def load_epg(self, source: str) -> EPGData:
+    def load_epg(self, source: str, fresh: bool = False) -> EPGData:
         return self._epg or EPGData()
 
 
