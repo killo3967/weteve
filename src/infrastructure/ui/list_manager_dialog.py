@@ -1134,6 +1134,9 @@ class ListManagerDialog(QDialog):
         # hacerlo en el hilo de la GUI congelaba la ventana.
         self._saving = False
         self._save_pending: dict | None = None
+        # Un «Filtrar canal» pulsado con un guardado en curso se aplica al
+        # terminar (no se puede solapar otro lote).
+        self._pending_apply = False
         self._save_pool = ThreadPoolExecutor(max_workers=1,
                                             thread_name_prefix="weteve-save")
         self._save_button = None
@@ -1437,18 +1440,21 @@ class ListManagerDialog(QDialog):
             if code == 0 or code >= 400 or "error" in body:
                 return {"ok": False, "body": body, "code": code,
                         "label": "filtros"}
-            return {"ok": True, "served": (body or {}).get("filtered_count")}
+            # la respuesta trae las métricas del pipeline recién ejecutado
+            metrics = (body or {}).get("metrics") or {}
+            return {"ok": True, "served": metrics.get("filtered_count")}
 
         self._save_pool.submit(job).add_done_callback(
             lambda fut: self.save_finished.emit(fut.result())
             if not fut.cancelled() else None)
 
     def _filter_channels(self, names: list[str]) -> None:
-        """Excluye del listado los canales elegidos en el mapeo.
+        """Excluye del mapeado los canales elegidos y lo aplica al momento.
 
-        Se añaden a «Filtros iptv» como reglas ``!{nombre}`` con operador AND
-        (exclusión, igual que la regla que crea «Añadir regla»): así dejan de
-        servirse y desaparecen también del mapeado.
+        Añade una regla ``!{nombre}`` con operador AND (exclusión) por canal y
+        la manda al demonio sin salir de la pestaña: el canal desaparece de la
+        lista cuando termina el pipeline. Antes había que ir a «Filtros iptv» y
+        pulsar «Aplicar», y era fácil quedarse a medias.
         """
         elegidos = [nombre for nombre in dict.fromkeys(names) if nombre]
         if not elegidos:
@@ -1461,8 +1467,13 @@ class ListManagerDialog(QDialog):
             for nombre in elegidos
         ]
         self.rules_widget.add_rules(reglas)
-        self.tabs.setCurrentWidget(self.tab_filters)
         self._schedule_filter_preview()
+        if self._saving:
+            self._pending_apply = True
+            self.result_label.setText(
+                "Filtro añadido: se aplicará al terminar el guardado en curso…")
+        else:
+            self._apply_rules_now()
 
     def _load_priorities(self) -> None:
         """Pinta la prioridad de calidad del target activo (fichero o fábrica)."""
@@ -1717,6 +1728,10 @@ class ListManagerDialog(QDialog):
             self.result_label.setText(
                 f"Filtros aplicados: {served if served is not None else '—'} "
                 "canales servidos.")
+        if self._pending_apply:
+            # había un filtro esperando: se manda ahora, con las reglas al día
+            self._pending_apply = False
+            self._apply_rules_now()
 
     def _mapping_changes(self, current: dict[str, str]) -> list[dict]:
         """Mapeos a enviar: los asignados ahora y los borrados explícitos.

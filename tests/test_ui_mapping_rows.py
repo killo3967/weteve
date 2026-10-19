@@ -324,10 +324,18 @@ class TestFiltrarCanalDesdeElMenu:
             "custom-filter:!{LA 1 HD}:0:and",
             "custom-filter:!{LA 2 HD}:0:and"]
 
-    def test_salta_a_la_pestaña_de_filtros(self, dialog, fake_api):
+    def test_no_salta_de_pestaña_y_aplica_al_momento(self, dialog, fake_api,
+                                                     wait_save):
+        """Sin cambiar de pestaña: se añade la regla y se manda al demonio."""
         self._con_dos(dialog, fake_api)
+        antes = dialog.tabs.currentIndex()
         dialog.epg_mapping.row_menu([0]).actions()[-1].trigger()
-        assert dialog.tabs.currentWidget() is dialog.tab_filters
+        wait_save(dialog)
+        assert dialog.tabs.currentIndex() == antes
+        puts = {c[1]: c[2] for c in fake_api.calls if c[0] == "put"}
+        enviado = puts["/targets/0/rules"]
+        assert enviado["reload"] is True
+        assert "custom-filter:!{LA 1 HD}:0:and" in enviado["rules"]
 
     def test_los_nombres_repetidos_se_añaden_una_vez(self, dialog, fake_api):
         self._con_dos(dialog, fake_api)
@@ -362,3 +370,23 @@ class TestAplicarFiltros:
         dialog._apply_rules_now()
         assert not [c for c in fake_api.calls if c[0] == "put"]
         dialog._saving = False
+
+
+class TestFiltroEncolado:
+    """Un «Filtrar canal» durante un guardado se aplica al terminar."""
+
+    def test_encola_y_aplica_despues(self, dialog, fake_api, wait_save):
+        dialog._saving = True
+        dialog._filter_channels(["AndaluciaTV"])
+        assert "se aplicará" in dialog.result_label.text()
+        assert not [c for c in fake_api.calls if c[0] == "put"]
+
+        dialog._saving = False
+        dialog._save_pending = {"name": "x", "port": 8080,
+                                "rules_objects": dialog.rules_widget.get_rules(),
+                                "quality_priority": {}, "overrides": {},
+                                "disabled": []}
+        dialog._on_save_finished({"ok": True, "served": 3})
+        wait_save(dialog)
+        puts = [c[2] for c in fake_api.calls if c[0] == "put"]
+        assert any(p.get("reload") is True for p in puts)
