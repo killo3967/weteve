@@ -7,6 +7,7 @@ en el pipeline (application) y en el servidor (infrastructure/web).
 import logging
 import re
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -661,6 +662,12 @@ class _EpgComboWidget(QWidget):
         return self._combo.currentText().strip()
 
 
+def _sin_acentos(texto: str) -> str:
+    """Minúsculas y sin acentos: «Aragón» coincide con «aragon». """
+    plano = unicodedata.normalize("NFKD", str(texto or ""))
+    return "".join(c for c in plano if not unicodedata.combining(c)).lower()
+
+
 class EpgMappingWidget(QWidget):
     """Editor manual de asociación EPG con control de activación por canal.
 
@@ -718,6 +725,16 @@ class EpgMappingWidget(QWidget):
         filtro_row = QHBoxLayout()
         filtro_row.addWidget(self.only_pending_check)
         filtro_row.addStretch(1)
+        # Filtro de vista por nombre: no pide nada al demonio ni cambia el
+        # mapeo, solo oculta las filas que no contienen el texto.
+        self.name_filter = QLineEdit(self)
+        self.name_filter.setPlaceholderText("Filtrar por nombre de canal…")
+        self.name_filter.setClearButtonEnabled(True)
+        self.name_filter.setFixedWidth(220)
+        self.name_filter.setToolTip(
+            "Muestra solo los canales cuyo nombre contiene este texto.")
+        self.name_filter.textChanged.connect(lambda _texto: self._apply_name_filter())
+        filtro_row.addWidget(self.name_filter)
         self.refresh_guides_btn = QPushButton("&Actualizar guías")
         self.refresh_guides_btn.setToolTip(
             "Vuelve a descargar las guías EPG del target. Filtrar o mapear "
@@ -968,6 +985,26 @@ class EpgMappingWidget(QWidget):
                 self.table.setItem(row, self.COL_ACTIVE, active_item)
         finally:
             self._loading = False
+        self._apply_name_filter()
+
+    def _apply_name_filter(self) -> None:
+        """Oculta las filas cuyo nombre no contiene el texto del filtro.
+
+        Es un filtro de vista: no cambia el mapeo, no relee el demonio y no
+        altera qué canales se guardan. Al repoblar la tabla se vuelve a
+        aplicar, así que el texto escrito sobrevive a un «Actualizar guías».
+        """
+        buscado = _sin_acentos(self.name_filter.text().strip())
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, self.COL_NAME)
+            nombre = item.text() if item is not None else ""
+            visible = not buscado or buscado in _sin_acentos(nombre)
+            self.table.setRowHidden(row, not visible)
+
+    def visible_rows(self) -> int:
+        """Filas visibles con el filtro puesto (la GUI no lo muestra, se testea)."""
+        return sum(1 for row in range(self.table.rowCount())
+                   if not self.table.isRowHidden(row))
 
     # ------------------------------------------------------------------
     # Casilla 'Activo'
