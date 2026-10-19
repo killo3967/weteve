@@ -240,12 +240,15 @@ class McpHttpTransport:
                                self.path, self.client_address[0])
                 self._json(405, {"error": "GET no soportado (sin stream SSE)"})
 
-            def _text(self, status: int, body: str, ctype: str) -> None:
-                """Respuesta de texto (playlist/EPG)."""
-                data = body.encode("utf-8")
+            def _text(self, status: int, body: str | bytes, ctype: str) -> None:
+                """Respuesta de texto (playlist/EPG) o binaria (logo)."""
+                data = body.encode("utf-8") if isinstance(body, str) else body
                 self.send_response(status)
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(data)))
+                if not isinstance(body, str):
+                    # un logo no cambia: que el reproductor no lo repita
+                    self.send_header("Cache-Control", "public, max-age=86400")
                 self.end_headers()
                 self.wfile.write(data)
                 time.sleep(0.02)  # ver _rest: el cierre inmediato da RST

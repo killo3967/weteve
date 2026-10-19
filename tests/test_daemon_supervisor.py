@@ -19,6 +19,7 @@ def _playlist(sup: TargetSupervisor, target_id: str = "t0") -> str:
     assert route is not None, "ruta de playlist no reconocida"
     status, body, _ctype = route
     assert status == 200, body
+    assert isinstance(body, str)  # la playlist es texto; el logo es lo binario
     return body
 
 

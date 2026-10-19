@@ -35,3 +35,6 @@ src/cache/
 .pi/
 .atl/
 *.bak
+
+# Logos descargados por el demonio (se regeneran solos)
+assets/logos/

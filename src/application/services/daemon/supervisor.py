@@ -20,9 +20,12 @@ registra en el pipeline junto a la fuente, igual que hace el diálogo Qt.
 import logging
 import threading
 import time
+from dataclasses import replace as dataclasses_replace
+from pathlib import Path
 
 from src.application.services.daemon.scheduler import RefreshScheduler, target_interval_min
 from src.application.services.list_manager.epg_matcher import EpgMatcher
+from src.application.services.list_manager.logo_store import LogoStore
 from src.application.services.list_manager.models import PipelineTarget
 from src.application.services.list_manager.pipeline import (
     ListManagerPipeline,
@@ -32,17 +35,22 @@ from src.application.services.list_manager.playlist_builder import (
     build_m3u,
     build_xmltv,
 )
+from src.infrastructure.web.playlist_server import LOGOS_PREFIX, url_base_for
 
 logger = logging.getLogger(__name__)
 
 class TargetSupervisor:
     """Gestiona N targets: pipeline cacheado + servidor HTTP por target."""
 
-    def __init__(self, catalog_fn=None, base_url: str = "") -> None:
+    def __init__(self, catalog_fn=None, base_url: str = "",
+                 logo_store: LogoStore | None = None) -> None:
         # dos locks: estado (lecturas) y ejecución (pipeline). Ver docstring.
         self._lock = threading.RLock()
         self._run_lock = threading.RLock()
         self._pipeline = ListManagerPipeline()
+        # copia local de los logos: la lista no depende de terceros
+        self._logos = (logo_store if logo_store is not None
+                       else LogoStore(self._render_default_logos_dir()))
         self._targets: dict[str, PipelineTarget] = {}
         self._epg_paths: dict[str, str | None] = {}
         # contenido servido por target: (playlist_m3u, epg_xml). Su presencia es
@@ -61,16 +69,45 @@ class TargetSupervisor:
     # -- helpers internos ----------------------------------------------------
 
     @staticmethod
-    def _render(result, epg) -> tuple[str, str]:
+    def _render_default_logos_dir() -> Path:
+        """``assets/logos`` en la raíz del proyecto."""
+        return Path(__file__).resolve().parents[4] / "assets" / "logos"
+
+    def _render(self, target, result, epg) -> tuple[str, str]:
         """Convierte un PipelineResult en (playlist, epg_xml) listos para servir."""
         t0 = time.perf_counter()
-        playlist = build_m3u(result.channels)
+        canales = self._channels_with_local_logos(target, result.channels)
+        playlist = build_m3u(canales)
         t1 = time.perf_counter()
         epg_xml = build_xmltv(result.channels, epg)
         t2 = time.perf_counter()
         logger.info("render: playlist=%.2fs epg=%.2fs (%d canales servidos)",
                     t1 - t0, t2 - t1, len(result.channels))
         return playlist, epg_xml
+
+    def _channels_with_local_logos(self, target, channels):
+        """Sustituye la URL remota del logo por la copia que sirve el demonio.
+
+        Un logo de un tercero puede cambiar o desaparecer; el que ya está en
+        ``assets/logos`` se sirve desde ``/logos/<fichero>``, así que la lista
+        que ve el reproductor depende solo de este equipo. Los que no se
+        pueden bajar conservan su URL remota.
+        """
+        urls = [ch.logo_url for ch in channels if ch.logo_url]
+        if not urls or self._logos is None:
+            return channels
+        locales = self._logos.ensure(urls)
+        if not locales:
+            return channels
+        # La lista la sirve el demonio (``/weteve/{id}/playlist.m3u``), no el
+        # puerto histórico del target: el logo tiene que apuntar al mismo sitio
+        # desde el que el reproductor descarga la lista.
+        base = self._base_url or url_base_for(
+            getattr(target, "bind", "") or "127.0.0.1",
+            int(getattr(target, "port", 0) or 0))
+        return [dataclasses_replace(ch, logo_url=f"{base}{LOGOS_PREFIX}{locales[ch.logo_url]}")
+                if ch.logo_url in locales else ch
+                for ch in channels]
 
     def _ensure_source(self, target: PipelineTarget, epg_path: str | None,
                        refresh_epg: bool = False) -> None:
@@ -128,17 +165,25 @@ class TargetSupervisor:
         self._base_url = base_url.rstrip("/")
         self._port = port
 
-    def playlist_route(self, path: str) -> tuple[int, str, str] | None:
-        """Resuelve una ruta de playlist/EPG: (status, cuerpo, content-type).
+    def playlist_route(self, path: str) -> tuple[int, str | bytes, str] | None:
+        """Resuelve una ruta de playlist/EPG/logo: (status, cuerpo, content-type).
 
         Acepta ``/weteve/{id}/playlist.m3u``, ``/weteve/{id}/epg.xml``, las
         formas cortas ``/weteve/playlist.m3u`` (target 0) y los alias antiguos
         ``/playlist.m3u`` y ``/epg.xml`` para no romper reproductores ya
-        configurados. ``None`` si la ruta no es de playlist.
+        configurados. Los logos salen de ``assets/logos`` (``/logos/<fichero>``)
+        y se devuelven como bytes, porque son imágenes. ``None`` si la ruta no
+        es de playlist.
         """
         clean = (path or "").split("?", 1)[0].rstrip("/")
         parts = [p for p in clean.split("/") if p]
         target_id = "0"
+        if "logos" in parts:
+            # /logos/<fichero>, /weteve/logos/<fichero>, /weteve/{id}/logos/<f>
+            indice = parts.index("logos")
+            if len(parts) != indice + 2:
+                return None
+            return self.logo_route(parts[indice + 1])
         if parts[:1] == ["weteve"]:
             rest = parts[1:]
             if len(rest) == 1:
@@ -161,6 +206,21 @@ class TargetSupervisor:
         if name == "playlist.m3u":
             return 200, playlist, "audio/x-mpegurl"
         return 200, epg_xml, "application/xml; charset=utf-8"
+
+    def logo_route(self, nombre: str) -> tuple[int, bytes | str, str]:
+        """Logo local por nombre de fichero (sin salirse del directorio)."""
+        import mimetypes
+        from urllib.parse import unquote
+
+        limpio = unquote(nombre or "").split("?")[0].strip()
+        if not limpio or "/" in limpio or "\\" in limpio or ".." in limpio:
+            return 404, "logo no disponible", "text/plain; charset=utf-8"
+        try:
+            datos = (self._logos.directory / limpio).read_bytes()
+        except OSError:
+            return 404, "logo no disponible", "text/plain; charset=utf-8"
+        tipo = mimetypes.guess_type(limpio)[0] or "application/octet-stream"
+        return 200, datos, tipo
 
     def _scheduled_reload(self, target_id: str) -> None:
         """Ciclo del scheduler: reejecutar el pipeline releyendo las guías."""
@@ -190,7 +250,7 @@ class TargetSupervisor:
                     self._drop_content(target_id)
                 return False
             epg = self._pipeline.get_epg(target.source_index)
-            content = self._render(result, epg)
+            content = self._render(target, result, epg)
             with self._lock:
                 self._remember(target_id, result)
                 self._schedule_refresh(target_id, target)
@@ -238,7 +298,7 @@ class TargetSupervisor:
                     self._state[target_id] = {"error": str(e)}
                 return False
             epg = self._pipeline.get_epg(tgt.source_index)
-            content = self._render(result, epg)
+            content = self._render(tgt, result, epg)
             t_render = time.perf_counter()
             self._timings[target_id] = {
                 "fuentes": round(t_pipeline - t_fuentes, 3),

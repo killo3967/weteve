@@ -16,6 +16,7 @@ import logging
 import socket
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from src.infrastructure.web.http_common import AccessLogMixin, NoReuseServer
 
@@ -23,6 +24,25 @@ logger = logging.getLogger(__name__)
 
 PLAYLIST_PATH = "/playlist.m3u"
 EPG_PATH = "/epg.xml"
+#: Prefijo de los logos que sirve el propio demonio (copia local en disco).
+LOGOS_PREFIX = "/logos/"
+
+
+def url_base_for(host: str, port: int) -> str:
+    """URL con la que un reproductor alcanza el servidor de un target.
+
+    ``0.0.0.0`` no es una dirección navegable: para la lista se usa la IP del
+    equipo en la red local, que es lo que necesita el cliente IPTV.
+    """
+    display_host = str(host or "127.0.0.1")
+    if display_host in ("0.0.0.0", "::"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                display_host = s.getsockname()[0]
+        except OSError:
+            display_host = "127.0.0.1"
+    return f"http://{display_host}:{int(port)}"
 
 
 def port_in_use(host: str, port: int) -> bool:
@@ -72,12 +92,15 @@ def find_port_owner(port: int, host: str = "127.0.0.1") -> str | None:
 class PlaylistServer:
     """Servidor HTTP local que expone la M3U y el EPG de un target."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8080):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8080,
+                 logos_dir: Path | str | None = None):
         self._host = host
         self._port = port
         self._server: ThreadingHTTPServer | None = None
         self._playlist: str = ""
         self._epg: str = ""
+        # logos servidos desde disco: la lista no depende de terceros
+        self._logos_dir = Path(logos_dir) if logos_dir is not None else None
 
     @property
     def host(self) -> str:
@@ -89,18 +112,7 @@ class PlaylistServer:
 
     @property
     def url_base(self) -> str:
-        # 0.0.0.0 no es una IP navegable: mostrar la del equipo en la red local.
-        display_host = self._host
-        if self._host in ("0.0.0.0", "::"):
-            try:
-                import socket
-
-                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                    s.connect(("8.8.8.8", 80))
-                    display_host = s.getsockname()[0]
-            except OSError:
-                display_host = "<ip-local>"
-        return f"http://{display_host}:{self.port}"
+        return url_base_for(self._host, self.port)
 
     @property
     def is_running(self) -> bool:
@@ -111,13 +123,32 @@ class PlaylistServer:
         self._playlist = playlist
         self._epg = epg
 
-    def route(self, path: str) -> tuple[str, str] | None:
+    def route(self, path: str) -> tuple[str | bytes, str] | None:
         """Resuelve una ruta a (cuerpo, content-type). None si desconocida."""
         if path.rstrip("/") == PLAYLIST_PATH:
             return self._playlist, "audio/x-mpegurl"
         if path.rstrip("/") == EPG_PATH:
             return self._epg, "application/xml"
+        if path.startswith(LOGOS_PREFIX):
+            return self._logo(path[len(LOGOS_PREFIX):])
         return None
+
+    def _logo(self, nombre: str) -> tuple[bytes, str] | None:
+        """Logo de ``assets/logos``; el nombre no puede salirse del directorio."""
+        import mimetypes
+        from urllib.parse import unquote
+
+        if self._logos_dir is None:
+            return None
+        limpio = unquote(nombre).split("?")[0].strip()
+        if not limpio or "/" in limpio or "\\" in limpio or ".." in limpio:
+            return None
+        try:
+            datos = (self._logos_dir / limpio).read_bytes()
+        except OSError:
+            return None
+        tipo = mimetypes.guess_type(limpio)[0] or "application/octet-stream"
+        return datos, tipo
 
     def start(self) -> bool:
         """Arranca el servidor en un hilo daemon. False si el puerto está ocupado."""
@@ -163,10 +194,17 @@ class PlaylistServer:
                     self.send_error(404)
                     return
                 body, ctype = resolved
-                data = body.encode("utf-8")
+                if isinstance(body, str):
+                    data = body.encode("utf-8")
+                    ctype = f"{ctype}; charset=utf-8"
+                else:
+                    data = body
                 self.send_response(200)
-                self.send_header("Content-Type", f"{ctype}; charset=utf-8")
+                self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(data)))
+                if not isinstance(body, str):
+                    # un logo no cambia: que el reproductor no lo repida
+                    self.send_header("Cache-Control", "public, max-age=86400")
                 self.end_headers()
                 self.wfile.write(data)
                 # Cerrar con datos recién escritos da RST intermitente en el
