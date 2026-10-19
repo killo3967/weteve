@@ -39,6 +39,23 @@ from src.infrastructure.web.playlist_server import LOGOS_PREFIX, url_base_for
 
 logger = logging.getLogger(__name__)
 
+
+def _nombre_con_codigo(channel_id: str, nombre: str) -> str:
+    """Nombre del desplegable; añade el código interno si lo parece.
+
+    Movistar usa el código de la cadena como id, y ese código sobrevive al
+    cambio de marca: ``BBDRA`` hoy se llama «BBC Series» pero era «BBC Drama»,
+    y ``UCL`` es «UEFA Champions League». Sin el código, buscar el canal por su
+    nombre viejo en el desplegable es imposible.
+    """
+    cid = str(channel_id or "").strip()
+    visible = str(nombre or "").strip()
+    if not cid or not visible or cid.lower() == visible.lower():
+        return visible or cid
+    if " " in cid or len(cid) > 8 or not cid.isupper():
+        return visible
+    return f"{visible} ({cid})"
+
 class TargetSupervisor:
     """Gestiona N targets: pipeline cacheado + servidor HTTP por target."""
 
@@ -466,7 +483,7 @@ class TargetSupervisor:
         items = sorted(epg.channel_names.items())
         total = len(items)
         page = items[int(offset):int(offset) + int(limit)]
-        return {"channels": [{"id": cid, "display_name": name,
+        return {"channels": [{"id": cid, "display_name": _nombre_con_codigo(cid, name),
                               "lists": list(lists.get(cid, ()))}
                              for cid, name in page],
                 "total": total, "count": len(page), "offset": int(offset)}

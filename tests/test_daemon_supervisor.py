@@ -239,3 +239,21 @@ class TestDuplicadosDeCalidad:
     def test_las_metricas_cuentan_los_duplicados(self):
         sup = self._supervisor_con_duplicado()
         assert sup.metrics("t0")["duplicates_count"] == 1
+
+
+class TestNombreDelDesplegable:
+    """El código interno va en la etiqueta: sobrevive al cambio de marca."""
+
+    def test_un_codigo_se_anade_entre_parentesis(self):
+        from src.application.services.daemon.supervisor import _nombre_con_codigo
+
+        # BBDRA era «BBC Drama» y hoy se llama «BBC Series»
+        assert _nombre_con_codigo("BBDRA", "BBC Series") == "BBC Series (BBDRA)"
+        assert _nombre_con_codigo("UCL", "UCL") == "UCL"
+
+    def test_un_id_legible_no_ensucia_la_etiqueta(self):
+        from src.application.services.daemon.supervisor import _nombre_con_codigo
+
+        assert _nombre_con_codigo("La 1 HD", "La 1 HD") == "La 1 HD"
+        assert _nombre_con_codigo("la.1.hd", "La 1") == "La 1"
+        assert _nombre_con_codigo("", "La 1") == "La 1"
