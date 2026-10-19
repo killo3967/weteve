@@ -413,6 +413,88 @@ class FilterRulesWidget(QWidget):
         return rules
 
 
+class QualityPriorityWidget(QWidget):
+    """Tabla «calidad → prioridad» del target (0 = nunca, 1 = último recurso).
+
+    Los tokens son abiertos: además de los de fábrica se pueden añadir otros
+    (``h265``, ``fhd``…). El token vacío se muestra como «(sin etiqueta)».
+    """
+
+    changed = pyqtSignal()
+
+    SIN_ETIQUETA = "(sin etiqueta)"
+    COL_CALIDAD, COL_PRIORIDAD = 0, 1
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.table = QTableWidget(0, 2, self)
+        self.table.setHorizontalHeaderLabels(["Calidad", "Prioridad"])
+        header = self.table.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(self.COL_CALIDAD,
+                                        QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(self.COL_PRIORIDAD,
+                                        QHeaderView.ResizeMode.ResizeToContents)
+        self.table.itemChanged.connect(lambda _item: self.changed.emit())
+        layout.addWidget(self.table)
+        botones = QHBoxLayout()
+        add_btn = QPushButton("&Añadir calidad")
+        add_btn.clicked.connect(lambda: self._add_row("", 0))
+        reset_btn = QPushButton("&Restaurar")
+        reset_btn.clicked.connect(self.reset)
+        botones.addWidget(add_btn)
+        botones.addWidget(reset_btn)
+        botones.addStretch(1)
+        layout.addLayout(botones)
+        self.reset()
+
+    # -- filas ---------------------------------------------------------------
+    def _add_row(self, token: str, peso: int) -> None:
+        fila = self.table.rowCount()
+        self.table.insertRow(fila)
+        self.table.setItem(fila, self.COL_CALIDAD, QTableWidgetItem(token))
+        self.table.setItem(fila, self.COL_PRIORIDAD, QTableWidgetItem(str(peso)))
+
+    def set_values(self, values: dict[str, int]) -> None:
+        """Pinta la tabla; vacío = prioridades de fábrica."""
+        from src.application.services.list_manager.quality import DEFAULT_PRIORITY
+
+        tabla = values or DEFAULT_PRIORITY
+        self.table.blockSignals(True)
+        try:
+            self.table.setRowCount(0)
+            for token, peso in tabla.items():
+                self._add_row(self.SIN_ETIQUETA if token == "" else str(token),
+                              int(peso))
+        finally:
+            self.table.blockSignals(False)
+
+    def values(self) -> dict[str, int]:
+        """Token -> peso; las filas sin calidad se ignoran."""
+        out: dict[str, int] = {}
+        for fila in range(self.table.rowCount()):
+            token_item = self.table.item(fila, self.COL_CALIDAD)
+            peso_item = self.table.item(fila, self.COL_PRIORIDAD)
+            token = (token_item.text() if token_item else "").strip()
+            if not token:
+                continue
+            if token == self.SIN_ETIQUETA:
+                token = ""
+            try:
+                peso = int((peso_item.text() if peso_item else "0").strip())
+            except ValueError:
+                peso = 0
+            out[token] = max(0, min(9, peso))
+        return out
+
+    def reset(self) -> None:
+        """Vuelve a las prioridades de fábrica."""
+        self.set_values({})
+        self.changed.emit()
+
+
 class _EpgComboWidget(QWidget):
     """Widget con un QComboBox editable para elegir canal EPG.
 
@@ -1128,6 +1210,22 @@ class ListManagerDialog(QDialog):
         config_tab_layout = QVBoxLayout(self.tab_config)
         config_tab_layout.addWidget(service_group)
 
+        # Target activo y su prioridad de calidad (una sola fuente: este
+        # fichero, escrito por el demonio).
+        target_group = QGroupBox("Target y prioridad de calidad")
+        target_form = QFormLayout(target_group)
+        self.target_combo = QComboBox()
+        self.target_combo.currentIndexChanged.connect(self._on_target_selected)
+        target_form.addRow("&Target:", self.target_combo)
+        self.priority_widget = QualityPriorityWidget()
+        self.priority_widget.setToolTip(
+            "De cada canal repetido se sirve la variante con más prioridad. "
+            "0 = no servir nunca; 1 = último recurso.")
+        target_form.addRow(QLabel(
+            "De cada canal repetido (HD/FULL HD/SD) se sirve una variante."))
+        target_form.addRow(self.priority_widget)
+        config_tab_layout.addWidget(target_group)
+
         # Sección [DAEMON]: API de control + endpoint MCP. Se persiste aparte
         # (sección [DAEMON] de config.ini) vía save_daemon_config en _on_save.
         from src.application.services.daemon.config import (
@@ -1208,6 +1306,8 @@ class ListManagerDialog(QDialog):
         self.rules_widget.refresh_group_options()
         self._sync_service_url()
         self.status_panel.refresh()
+        self._reload_target_choices()
+        self._load_priorities()
 
         # Refresco desde disco: config.ini lo escriben también el daemon y sus
         # herramientas MCP (listas, filtros, mapeos). Sin vigilarlo, la ventana
@@ -1246,6 +1346,59 @@ class ListManagerDialog(QDialog):
             return
         self._config_signature = signature
         self._apply_config_from_disk()
+
+    def _reload_target_choices(self) -> None:
+        """Rellena el selector con los targets que conoce el demonio."""
+        actual = self._target_id()
+        items: list[tuple[str, str]] = []
+        client = self._api_client()
+        if client is not None:
+            code, body = client.targets()
+            if code == 200:
+                for tid, target in (body.get("targets") or {}).items():
+                    items.append((str(tid), str(target.get("name") or tid)))
+        if not items:
+            items = [(actual, str(self._config.get("name") or actual))]
+        self._loading_targets = True
+        try:
+            self.target_combo.clear()
+            for tid, name in sorted(items):
+                self.target_combo.addItem(f"{tid} — {name}", tid)
+            idx = self.target_combo.findData(actual)
+            self.target_combo.setCurrentIndex(max(idx, 0))
+        finally:
+            self._loading_targets = False
+
+    def _load_priorities(self) -> None:
+        """Pinta la prioridad de calidad del target activo (fichero o fábrica)."""
+        values = self._config.get("quality_priority") or {}
+        path = self._config.get("_config_path")
+        if path is not None:
+            try:
+                from src.infrastructure.client.persistencia import load_config
+
+                fresh = load_config(Path(path)).get("targets", {}).get(
+                    int(self._config.get("target_id", 0)), {})
+                values = fresh.get("quality_priority") or values
+            except Exception:  # noqa: BLE001 - fichero ilegible: de fábrica
+                logger.debug("sin prioridades legibles en %s", path,
+                             exc_info=True)
+        self._config["quality_priority"] = values
+        self.priority_widget.set_values(values)
+
+    def _on_target_selected(self, _index: int) -> None:
+        """Cambia el target activo de TODA la ventana (reglas, cartera, mapeo)."""
+        if getattr(self, "_loading_targets", False):
+            return
+        target_id = self.target_combo.currentData()
+        if target_id is None or str(target_id) == self._target_id():
+            return
+        self._config["target_id"] = str(target_id)
+        self._apply_config_from_disk()
+        self.name_edit.setText(str(self._config.get("name") or ""))
+        self._load_priorities()
+        self._sync_service_url()
+        self.status_panel.refresh()
 
     def _apply_config_from_disk(self) -> None:
         """Relee ``daemon.toml`` y repinta listas, filtros y mapeos."""
@@ -1329,6 +1482,7 @@ class ListManagerDialog(QDialog):
         """Campos del target tal como se acaban de mandar (sin releer widgets)."""
         return {"name": payload["name"], "port": payload["port"],
                 "rules": payload["rules_objects"],
+                "quality_priority": payload["quality_priority"],
                 "epg_overrides": payload["overrides"],
                 "disabled_channels": payload["disabled"]}
 
@@ -1361,6 +1515,7 @@ class ListManagerDialog(QDialog):
             "port": self._config.get("port"),
             "rules": [r.serialize() for r in self.rules_widget.get_rules()],
             "rules_objects": self.rules_widget.get_rules(),
+            "quality_priority": self.priority_widget.values(),
             "overrides": overrides,
             "mapping_changes": self._mapping_changes(overrides),
             "disabled": list(self._disabled_now()),
@@ -1404,7 +1559,9 @@ class ListManagerDialog(QDialog):
                 target_id, payload["m3u_ids"], payload["epg_ids"],
                 reload=False)),
             ("ajustes", client.put(f"/targets/{target_id}/settings", {
-                "name": payload["name"], "reload": False})),
+                "name": payload["name"],
+                "quality_priority": payload["quality_priority"],
+                "reload": False})),
             ("filtros", client.put(f"/targets/{target_id}/rules", {
                 "rules": payload["rules"], "reload": False})),
             ("mapeos", client.put(f"/targets/{target_id}/mappings", {

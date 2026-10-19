@@ -205,7 +205,7 @@ class TestEscrituras:
         assert code == 200 and body["ok"] is True
         assert wapi._service.calls[-1] == (
             "settings", "0", {"name": "n", "port": 9998, "bind": None,
-                              "reload": True})
+                              "quality_priority": None, "reload": True})
 
     def test_settings_sin_reload(self, wapi):
         wapi.handle("PUT", "/api/v1/targets/0/settings",

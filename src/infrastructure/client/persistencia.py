@@ -40,6 +40,7 @@ def load_config(path: Path) -> dict:
             "rules": list(target.rules),
             "epg_overrides": dict(target.epg_overrides),
             "disabled_channels": list(target.disabled_channels),
+            "quality_priority": dict(target.quality_priority or {}),
             "port": target.port,
             "starting_number": target.starting_number,
             "bind": str(raw.get("bind") or "127.0.0.1"),

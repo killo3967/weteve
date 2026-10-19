@@ -36,6 +36,7 @@ def serialize_target(t: PipelineTarget) -> dict:
         "rules": [r.serialize() for r in t.rules],
         "epg_overrides": dict(t.epg_overrides),
         "disabled_channels": list(t.disabled_channels),
+        "quality_priority": dict(t.quality_priority or {}),
         "port": t.port,
         "starting_number": t.starting_number,
         "source_refs": [{"id": r.id, "name": r.name, "location": r.location}
@@ -342,8 +343,9 @@ class TargetService:
         return out
 
     def update_settings(self, target_id: str, *, name=None, port=None,
-                        bind=None, reload: bool = True) -> dict:
-        """Cambia nombre, puerto o bind del target."""
+                        bind=None, quality_priority=None,
+                        reload: bool = True) -> dict:
+        """Cambia nombre, puerto, bind o prioridad de calidad del target."""
         t = self._definition(target_id)
         if t is None:
             return {"error": f"target {target_id} no existe"}
@@ -360,6 +362,19 @@ class TargetService:
             changes["port"] = port
         if bind is not None and str(bind) not in ("127.0.0.1", "0.0.0.0"):
             return {"error": "bind debe ser 127.0.0.1 o 0.0.0.0"}
+        if quality_priority is not None:
+            if not isinstance(quality_priority, dict):
+                return {"error": "quality_priority debe ser un objeto"}
+            tabla: dict[str, int] = {}
+            for token, peso in quality_priority.items():
+                try:
+                    valor = int(peso)
+                except (TypeError, ValueError):
+                    return {"error": f"prioridad no numérica para {token!r}"}
+                if not 0 <= valor <= 9:
+                    return {"error": "las prioridades van de 0 a 9"}
+                tabla[str(token)] = valor
+            changes["quality_priority"] = tabla or None
         new = replace(t, **changes)
         return self._write(target_id, new, reload, bind=bind)
 

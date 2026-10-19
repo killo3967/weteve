@@ -190,7 +190,9 @@ class RestApi:
         if method == "PUT" and action == "settings":
             result = self._service.update_settings(
                 target_id, name=payload.get("name"), port=payload.get("port"),
-                bind=payload.get("bind"), reload=reload)
+                bind=payload.get("bind"),
+                quality_priority=payload.get("quality_priority"),
+                reload=reload)
         elif method == "PUT" and action == "rules":
             if not isinstance(payload.get("rules"), list):
                 return 400, {"error": "rules debe ser una lista"}

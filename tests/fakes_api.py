@@ -20,6 +20,8 @@ class FakeApi:
         self.preview_names: list[str] = []
         self.preview_total = 0
         self.running = True
+        #: targets que devuelve GET /targets (id -> nombre)
+        self.targets_map: dict[str, str] = {"0": "test"}
         self.calls: list[tuple] = []
 
     # -- lecturas ------------------------------------------------------------
@@ -38,6 +40,12 @@ class FakeApi:
         rows = list(self.served_channels)
         return 200, {"channels": rows, "total": len(rows),
                      "count": len(rows), "offset": 0}
+
+    def targets(self):
+        if self.down:
+            return 0, {"error": "sin conexión"}
+        return 200, {"targets": {tid: {"name": name}
+                                 for tid, name in self.targets_map.items()}}
 
     def all_mapping_candidates(self, target_id: str,
                                include_served: bool = True):

@@ -151,6 +151,10 @@ class ApiClient:
                         {"m3u_sources": m3u_ids, "epg_sources": epg_ids,
                          "reload": reload})
 
+    def targets(self) -> tuple[int, dict]:
+        """Lista de targets del demonio (para el selector de Configuración)."""
+        return self.get("/targets")
+
     def mapping_candidates(self, target_id: str,
                            limit: int = 1000, offset: int = 0,
                            include_served: bool = True) -> tuple[int, dict]:
