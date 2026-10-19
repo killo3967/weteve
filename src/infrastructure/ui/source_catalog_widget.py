@@ -23,13 +23,15 @@ from PyQt6.QtWidgets import (
 
 from src.application.services.list_manager.source_catalog import (
     SourceCatalog,
+    infer_source_type,
     new_source_id,
 )
 
 logger = logging.getLogger(__name__)
 
 _COLS = ("Nombre", "Tipo de origen", "URL o fichero", "Refresco (min)", "Activa")
-_TYPE_LABELS = {"file": "Fichero local", "url": "URL remota"}
+_TYPE_LABELS = {"file": "Fichero local", "url": "URL remota",
+                "movistar": "Movistar+ (web)"}
 
 
 class _EditorSignals(QObject):
@@ -62,8 +64,7 @@ class LocationDelegate(QStyledItemDelegate):
 
     @staticmethod
     def infer_source_type(location: str) -> str:
-        loc = (location or "").strip().lower()
-        return "url" if loc.startswith(("http://", "https://")) else "file"
+        return infer_source_type(location)
 
     def createEditor(self, parent, option, index):
         editor = QWidget(parent)

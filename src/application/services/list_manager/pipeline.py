@@ -12,9 +12,10 @@ from src.application.services.list_manager.models import (
     PipelineTarget,
 )
 from src.application.services.list_manager.quality import dedupe_variants
-from src.domain.entities.epg import EPGData, Program
+from src.domain.entities.epg import ChannelInfo, EPGData, Program
+from src.domain.ports.i_epg_repo import IEPGRepository
+from src.infrastructure.adapters.epg_repository_router import EPGRepositoryRouter
 from src.infrastructure.adapters.file_m3u_repository import FileM3URepository
-from src.infrastructure.adapters.xmltv_repository import XMLTVRepository
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +79,10 @@ class ListManagerPipeline:
     def __init__(
         self,
         m3u_repository: FileM3URepository | None = None,
-        epg_repository: XMLTVRepository | None = None,
+        epg_repository: IEPGRepository | None = None,
     ):
         self._m3u_repo = m3u_repository or FileM3URepository()
-        self._epg_repo = epg_repository or XMLTVRepository()
+        self._epg_repo = epg_repository or EPGRepositoryRouter()
         # cache de fuentes resueltas por clave: índice (modo app) o ruta (custom)
         self._sources: dict[int | str, tuple[str, EPGData | None]] = {}
         # cartera: refs de un target multi-fuente (clave -> (source_refs, epg_refs))
@@ -319,6 +320,7 @@ class ListManagerPipeline:
             return None, {}
         programs: list[Program] = []
         names: dict[str, str] = {}
+        info: dict[str, ChannelInfo] = {}
         origins: dict[str, list[str]] = {}
         for ref in epg_refs:
             epg = self._epg_repo.load_epg(ref.location, fresh=fresh)
@@ -332,10 +334,19 @@ class ListManagerPipeline:
                     names[cid] = name
                 if label and label not in origins.setdefault(cid, []):
                     origins[cid].append(label)
+            # Dial y logo: gana el primero que los publique, y una segunda
+            # guía puede completar el que falte (una trae dial y otra logo).
+            for cid, meta in epg.channel_info.items():
+                previo = info.get(cid) or ChannelInfo()
+                info[cid] = ChannelInfo(
+                    dial=previo.dial if previo.dial is not None else meta.dial,
+                    logo=previo.logo or meta.logo,
+                )
         lists = {cid: tuple(labels) for cid, labels in origins.items()}
         if not programs and not names:
             return None, lists
-        return EPGData(programs=programs, channel_names=names), lists
+        return EPGData(programs=programs, channel_names=names,
+                       channel_info=info), lists
 
     def _run_single(self, target: PipelineTarget, m3u_path: str,
                     epg: EPGData | None) -> PipelineResult:
@@ -453,10 +464,7 @@ class ListManagerPipeline:
         # ``unmatched`` es siempre el diagnóstico de la EPG: con la regla
         # activada son los descartados, no los servidos sin guía.
         unmatched = [m.name for m in (no_epg if require_epg else served)]
-        numbered = [
-            dataclasses_replace(m, chno=i)
-            for i, m in enumerate(served, start=target.starting_number)
-        ]
+        numbered = self._finalize(served, target, epg)
 
         logger.info(
             "Pipeline '%s': %d canales entrada -> %d tras filtros, "
@@ -474,3 +482,48 @@ class ListManagerPipeline:
                 len(duplicates))
         return PipelineResult(numbered, total_input, unmatched, excluded,
                               no_epg, require_epg, duplicates)
+
+    def _finalize(self, served: list[MappedChannel], target: PipelineTarget,
+                  epg: EPGData | None) -> list[MappedChannel]:
+        """Pone logo y número final: dial real si la guía lo publica.
+
+        - **Logo** por capas: el de la fuente de guía (el que el proveedor
+          usa ahora) y, si no lo publica, el que traía la lista M3U.
+        - **Número**: ``tvg-chno`` sale del ``dial`` del canal cuando existe
+          (1, 2, 3, 4, 7…, con los huecos de la parrilla real) y de un
+          contador que empieza **después del último dial** para los que no
+          tienen número propio. Meterlos en los huecos intermedios dejaría un
+          local en el 7 de «Movistar Plus», y el dial dejaría de parecerse a
+          la realidad.
+
+        Antes de este cambio la numeración era la posición en la lista; ahora
+        es el dial, y la lista sale ordenada por él para que el reproductor
+        muestre el mismo orden que la parrilla del proveedor.
+        """
+        info = epg.channel_info if epg is not None else {}
+        con_dial: list[MappedChannel] = []
+        sin_dial: list[MappedChannel] = []
+        usados: set[int] = set()
+        for mapped in served:
+            meta = info.get(mapped.matched_epg_id or "")
+            logo = (meta.logo if meta is not None else None) or mapped.logo_url
+            canal = dataclasses_replace(mapped, logo_url=logo)
+            dial = meta.dial if meta is not None else None
+            # Un dial repetido (dos canales apuntando al mismo id de guía) no
+            # puede duplicar el número: el segundo cae al contador.
+            if dial is not None and dial not in usados:
+                usados.add(dial)
+                con_dial.append(dataclasses_replace(canal, chno=dial))
+            else:
+                sin_dial.append(canal)
+        # Sin dial propio, el canal va después del último dial: los números
+        # bajos son de canales reales y no se reutilizan.
+        siguiente = (max(max(usados) + 1, target.starting_number) if usados
+                     else target.starting_number)
+        for canal in sin_dial:
+            while siguiente in usados:
+                siguiente += 1
+            usados.add(siguiente)
+            con_dial.append(dataclasses_replace(canal, chno=siguiente))
+            siguiente += 1
+        return sorted(con_dial, key=lambda m: (m.chno or 0, m.name))

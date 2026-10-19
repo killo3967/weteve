@@ -1,8 +1,10 @@
 """Asociación M3U <-> EPG (XMLTV) del gestor de listas.
 
-Match automático en dos fases (especificación: odd/tasks/list-manager.md):
+Match automático en tres fases (especificación: odd/tasks/list-manager.md):
   1. ``tvg-id`` exacto del canal contra los channel-ids del XMLTV.
   2. Fallback por nombre normalizado (sin acentos, lowercase, sin puntuación).
+  3. Fallback por nombre base, sin la etiqueta de calidad: el proveedor lista
+     ``LA 1 HD``/``LA 1 FHD`` y la guía los anuncia como ``LA 1``.
 Sin match: el canal queda sin EPG y el editor manual puede asignarlo mediante
 ``epg_overrides`` (persistidos con prioridad sobre el automático).
 """
@@ -10,6 +12,7 @@ Sin match: el canal queda sin EPG y el editor manual puede asignarlo mediante
 import difflib
 import unicodedata
 
+from src.application.services.list_manager.quality import base_name
 from src.domain.entities.epg import EPGData
 
 
@@ -33,6 +36,10 @@ class EpgMatcher:
 
     def __init__(self, epg: EPGData):
         self._epg = epg
+        # Ids de la guía que publica dial/logo (Movistar+): cuando dos guías
+        # anuncian el mismo canal, gana la que aporta los metadatos, porque es
+        # la única que puede dar número real y logo.
+        self._con_metadatos = set(epg.channel_info)
         # Normaliza los channel-ids del XMLTV para match por tvg-id
         # case-insensitive.
         self._ids_by_normalized_id: dict[str, str] = {}
@@ -40,12 +47,25 @@ class EpgMatcher:
             norm = channel_id.strip().lower()
             if norm and norm not in self._ids_by_normalized_id:
                 self._ids_by_normalized_id[norm] = channel_id
-        # nombre normalizado -> channel-id (primer id que llegue)
+        # nombre normalizado -> channel-id, y nombre sin la etiqueta de
+        # calidad -> channel-id (el proveedor lista "LA 1 HD"/"LA 1 FHD" y la
+        # guía los anuncia como "LA 1").
         self._id_by_normalized_name: dict[str, str] = {}
+        self._id_by_base_name: dict[str, str] = {}
         for channel_id, display_name in epg.channel_names.items():
             norm_name = normalize_channel_name(display_name)
-            if norm_name and norm_name not in self._id_by_normalized_name:
-                self._id_by_normalized_name[norm_name] = channel_id
+            if norm_name:
+                self._preferir(self._id_by_normalized_name, norm_name, channel_id)
+            base = base_name(display_name)
+            if base:
+                self._preferir(self._id_by_base_name, base, channel_id)
+
+    def _preferir(self, mapa: dict[str, str], clave: str, channel_id: str) -> None:
+        """Guarda el id para ``clave``; gana el de la guía con metadatos."""
+        previo = mapa.get(clave)
+        if previo is None or (channel_id in self._con_metadatos
+                              and previo not in self._con_metadatos):
+            mapa[clave] = channel_id
 
     def match(self, tvg_id: str | None, name: str) -> str | None:
         """Devuelve el channel-id del XMLTV para un canal, o None."""
@@ -54,7 +74,20 @@ class EpgMatcher:
             if norm_id in self._ids_by_normalized_id:
                 return self._ids_by_normalized_id[norm_id]
         norm_name = normalize_channel_name(name)
-        return self._id_by_normalized_name.get(norm_name)
+        base = base_name(name)
+        candidatos = [
+            self._id_by_normalized_name.get(norm_name),
+            self._id_by_base_name.get(base) if base else None,
+        ]
+        # El nombre exacto manda; pero si esa guía no publica dial/logo y la
+        # otra sí, se prefiere la que los publica.
+        for candidato in candidatos:
+            if candidato and candidato in self._con_metadatos:
+                return candidato
+        for candidato in candidatos:
+            if candidato:
+                return candidato
+        return None
 
     def suggestions(self, name: str, limit: int = 5) -> list[tuple[str, str]]:
         """Hasta ``limit`` sugerencias (channel-id, nombre) por similitud."""

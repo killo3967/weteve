@@ -73,13 +73,29 @@ en la tabla de mapeo para poder reactivarlos.
 |---|---|---|
 | `name` | texto | etiqueta para el filtro `source` |
 | `kind` | `m3u` \| `epg` | |
-| `source_type` | `file` \| `url` | se infiere de `location` si falta |
-| `location` | ruta o URL http(s) | una URL sin host (`http://`) se rechaza |
+| `source_type` | `file` \| `url` \| `movistar` | se infiere de `location` si falta |
+| `location` | ruta, URL http(s) o `movistar://epg` | una URL sin host (`http://`) se rechaza |
 | `refresh_min` | entero ≥ 0 | minutos entre recargas; `0` = estática |
 | `enabled` | `1` \| `0` | fila disponible para los targets |
 
 Cada target elige filas con `m3u_sources` / `epg_sources` (ids separados por
 coma). Sin ninguna fila seleccionada, el target usa `custom_m3u`/`custom_epg`.
+
+### Guía de Movistar+ (`movistar`)
+
+`location = "movistar://epg"` (o `movistar://epg?span=7`, de 1 a 7 días; por
+defecto 3, que son 4 días de parrilla). No es XMLTV: son dos endpoints JSON de
+la API OTT de Movistar+, y además de los programas publica el **dial** y el
+**logo** de cada canal.
+
+Eso cambia la lista servida: `tvg-chno` pasa a ser el dial real (1, 2, 3, 4, 7…,
+con sus huecos) y `tvg-logo`, el logo vigente del proveedor. Los canales sin
+dial (los que no están en el dial de Movistar+) se numeran a continuación del
+último dial. Cuando dos guías anuncian el mismo canal, gana la que publica
+dial y logo, aunque la otra lo anuncie con un nombre exacto.
+
+Un mapeo manual (`epg_overrides`) sigue mandando: si apunta a un id de otra
+guía, ese canal deja de recibir dial y logo de Movistar+.
 
 ## Migración automática
 

@@ -87,3 +87,55 @@ class TestOverridesEnPipeline:
         matcher = EpgMatcher(epg)
         assert epg.channel_names["es.la1"] == "La 1"
         assert "es.la1" in matcher.match("es.la1", "x")
+
+
+class TestMatchPorNombreBase:
+    """El proveedor etiqueta la calidad en el nombre y la guía no la lleva."""
+
+    def test_canal_con_hd_casa_con_la_guia_sin_hd(self):
+        matcher = EpgMatcher(_epg())
+        assert matcher.match(None, "La 1 HD") == "es.la1"
+        assert matcher.match(None, "LA 1 FULL HD") == "es.la1"
+
+    def test_el_nombre_exacto_gana_al_nombre_base(self):
+        epg = EPGData(
+            programs=[Program("P", datetime(2026, 10, 8, 12), datetime(2026, 10, 8, 13), cid)
+                      for cid in ("es.la1", "es.la1hd")],
+            channel_names={"es.la1": "La 1", "es.la1hd": "La 1 HD"},
+        )
+        matcher = EpgMatcher(epg)
+        assert matcher.match(None, "La 1 HD") == "es.la1hd"
+        assert matcher.match(None, "La 1") == "es.la1"
+
+    def test_sin_coincidencia_sigue_devolviendo_none(self):
+        matcher = EpgMatcher(_epg())
+        assert matcher.match(None, "Canal Inventado HD") is None
+
+
+class TestPrioridadDeLaGuiaConMetadatos:
+    """Dos guías anuncian el mismo canal: gana la que trae dial y logo."""
+
+    def test_gana_la_guia_que_publica_dial_y_logo(self):
+        from src.domain.entities.epg import ChannelInfo
+
+        epg = EPGData(
+            programs=[Program("P", datetime(2026, 10, 8, 12),
+                              datetime(2026, 10, 8, 13), cid)
+                      for cid in ("doble.la1hd", "TVE")],
+            # La guía general lo anuncia con la etiqueta de calidad; la de
+            # Movistar+ sin ella, pero con dial y logo.
+            channel_names={"doble.la1hd": "La 1 HD", "TVE": "LA 1"},
+            channel_info={"TVE": ChannelInfo(dial=1, logo="http://l/tve.png")},
+        )
+        matcher = EpgMatcher(epg)
+        assert matcher.match(None, "LA 1 HD") == "TVE"
+
+    def test_sin_metadatos_manda_el_nombre_exacto(self):
+        epg = EPGData(
+            programs=[Program("P", datetime(2026, 10, 8, 12),
+                              datetime(2026, 10, 8, 13), cid)
+                      for cid in ("doble.la1hd", "otra.la1")],
+            channel_names={"doble.la1hd": "La 1 HD", "otra.la1": "LA 1"},
+        )
+        matcher = EpgMatcher(epg)
+        assert matcher.match(None, "LA 1 HD") == "doble.la1hd"

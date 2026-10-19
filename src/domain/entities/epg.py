@@ -12,6 +12,19 @@ def normalize_name(name: str) -> str:
     return normalized
 
 @dataclass(frozen=True)
+class ChannelInfo:
+    """Metadatos de canal que publica la propia guía.
+
+    ``dial`` es el número de canal real (lo que el reproductor muestra en su
+    dial y lo que acaba en ``tvg-chno``) y ``logo`` la imagen vigente. Solo
+    las fuentes que los publican los rellenan (la API de Movistar+); el
+    resto deja el mapa vacío y el pipeline numera como siempre.
+    """
+    dial: int | None = None
+    logo: str | None = None
+
+
+@dataclass(frozen=True)
 class Program:
     """Entidad que representa un programa individual en la EPG."""
     title: str
@@ -28,9 +41,12 @@ class Program:
 
 class EPGData:
     """Agregado que gestiona la colección de programas."""
-    def __init__(self, programs: list[Program] | None = None, channel_names: dict[str, str] | None = None):
+    def __init__(self, programs: list[Program] | None = None,
+                 channel_names: dict[str, str] | None = None,
+                 channel_info: dict[str, ChannelInfo] | None = None):
         self._programs = programs or []
         self._channel_names: dict[str, str] = dict(channel_names or {})
+        self._channel_info: dict[str, ChannelInfo] = dict(channel_info or {})
         # Mapa de channel_id -> nombre normalizado (opcional, para ayudar al matching)
         self._channel_id_to_normalized_name = {
             cid: normalize_name(name) for cid, name in (channel_names or {}).items()
@@ -90,6 +106,11 @@ class EPGData:
     def channel_names(self) -> dict[str, str]:
         """Copia del mapa channel_id -> nombre mostrado del XMLTV."""
         return dict(self._channel_names)
+
+    @property
+    def channel_info(self) -> dict[str, ChannelInfo]:
+        """Copia del mapa channel_id -> dial/logo, si la fuente los publica."""
+        return dict(self._channel_info)
 
     def programs_by_channel_ids(self) -> list[str]:
         """Channel-ids distintos presentes en la EPG (con o sin programas)."""

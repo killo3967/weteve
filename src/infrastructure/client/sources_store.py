@@ -26,7 +26,7 @@ _SOURCE_PREFIX = "source."
 _TARGET_PREFIX = "listmanager.target."
 _TRUE = ("1", "true", "yes", "on")
 _VALID_KIND = ("m3u", "epg")
-_VALID_TYPE = ("file", "url")
+_VALID_TYPE = ("file", "url", "movistar")
 
 
 def _parse_bool(raw: str, default: bool = True) -> bool:

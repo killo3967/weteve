@@ -13,7 +13,24 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 SourceKind = Literal["m3u", "epg"]
-SourceType = Literal["file", "url"]
+# "movistar" no es una URL ni un fichero: es la API OTT de Movistar+, que
+# publica dial (``Dial``) y logo además de la parrilla. El esquema de la
+# ubicación (``movistar://epg?span=7``) es lo que la distingue.
+SourceType = Literal["file", "url", "movistar"]
+
+
+def infer_source_type(location: str) -> SourceType:
+    """Tipo de origen deducido de la ubicación (única fuente de verdad).
+
+    La usan la validación de la API, la escritura de la cartera y la UI, para
+    que un mismo texto no se clasifique distinto según por dónde entre.
+    """
+    loc = str(location or "").strip().lower()
+    if loc.startswith("movistar:"):
+        return "movistar"
+    if loc.startswith(("http://", "https://")):
+        return "url"
+    return "file"
 
 
 def new_source_id() -> str:

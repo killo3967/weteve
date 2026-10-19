@@ -23,6 +23,7 @@ from src.application.services.list_manager.source_catalog import (
     SourceEntry,
     SourceKind,
     SourceType,
+    infer_source_type,
     new_source_id,
 )
 
@@ -205,9 +206,8 @@ class TargetService:
         if error:
             return None, error
         source_type = str(raw.get("source_type") or "").strip().lower()
-        if source_type not in ("file", "url"):
-            source_type = ("url" if location.lower().startswith(
-                ("http://", "https://")) else "file")
+        if source_type not in ("file", "url", "movistar"):
+            source_type = infer_source_type(location)
         source_type = cast(SourceType, source_type)
         try:
             refresh = max(0, int(raw.get("refresh_min") or 0))
@@ -282,9 +282,7 @@ class TargetService:
             if error:
                 return {"error": error}
             changes["location"] = str(location).strip()
-            changes["source_type"] = ("url" if changes["location"].lower()
-                                      .startswith(("http://", "https://"))
-                                      else "file")
+            changes["source_type"] = infer_source_type(changes["location"])
         if refresh_min is not None:
             changes["refresh_min"] = max(0, int(refresh_min))
         if enabled is not None:
