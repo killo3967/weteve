@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -684,6 +684,11 @@ class EpgMappingWidget(QWidget):
     # Columnas de la tabla
     COL_NAME, COL_URL, COL_LOGO, COL_EPG, COL_ACTIVE = range(5)
 
+    # Logo de la fila: grande de verdad, que es lo que se mira para saber si
+    # el mapeo es el bueno. La columna es 4x el icono anterior (56 px).
+    LOGO_ICON_PX = 64
+    LOGO_COLUMN_PX = 224
+
     # La listas XMLTV tipo TV.xml escriben el sufijo separado por punto
     # ('La1.TV', 'Antena3.Internacional.TV'). Solo se quita ese sufijo exacto:
     # 'La1TV' no lo es y 'HD'/'Internacional' no son ruido que podamos borrar
@@ -736,7 +741,11 @@ class EpgMappingWidget(QWidget):
             header.setSectionResizeMode(columna,
                                         QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(self.COL_NAME, 320)
-        self.table.setColumnWidth(self.COL_LOGO, 56)
+        self.table.setColumnWidth(self.COL_LOGO, self.LOGO_COLUMN_PX)
+        self.table.setIconSize(QSize(self.LOGO_ICON_PX, self.LOGO_ICON_PX))
+        # alto de fila fijo: con 1711 filas, medir una a una no es gratis
+        self.table.verticalHeader().setDefaultSectionSize(
+            self.LOGO_ICON_PX + 8)
         self.table.setColumnWidth(self.COL_EPG, 220)
         self.table.setColumnWidth(self.COL_ACTIVE, 72)
         header.setMinimumSectionSize(40)
@@ -2167,9 +2176,11 @@ class ListManagerDialog(QDialog):
         pixmap = QPixmap(path)
         if pixmap.isNull():
             return
-        # Escalar a icono de fila (16x16) para no inflar el alto de fila.
+        # Escalar al tamaño de icono de la columna (el alto de fila lo fija
+        # LOGO_ICON_PX, así que no se infla al repintar).
         self.epg_mapping.set_logo(url, pixmap.scaled(
-            16, 16, Qt.AspectRatioMode.KeepAspectRatio,
+            self.epg_mapping.LOGO_ICON_PX, self.epg_mapping.LOGO_ICON_PX,
+            Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation))
 
     def _maybe_stop_daemon(self) -> None:
