@@ -13,6 +13,8 @@ import http.client
 import json
 import logging
 
+from src.infrastructure.client.net_utils import connect_host
+
 logger = logging.getLogger(__name__)
 
 class DaemonClient:
@@ -21,7 +23,7 @@ class DaemonClient:
     def __init__(self, host: str = "127.0.0.1", port: int = 34400,
                  token: str = "", timeout: float = 5.0,
                  retries: int = 3, retry_delay: float = 0.2) -> None:
-        self._host = host
+        self._host = connect_host(host)
         self._port = port
         self._base = f"http://{host}:{port}"
         self._token = token
@@ -32,6 +34,19 @@ class DaemonClient:
         # reintenta durante unos segundos (la UI debe abrir con el demonio parado).
         self._down_until = 0.0
         self._down_seconds = 5.0
+
+    @property
+    def host(self) -> str:
+        """Dirección configurada (ya normalizada para conectar)."""
+        return self._host
+
+    @property
+    def port(self) -> int:
+        return self._port
+
+    @property
+    def token(self) -> str:
+        return self._token
 
     @property
     def base_url(self) -> str:
@@ -72,7 +87,17 @@ class DaemonClient:
                     # el demonio responde pero rechaza: token, ruta o target
                     logger.warning("daemon %s %s -> HTTP %d en %s",
                                    method, path, resp.status, self._base)
-                return resp.status, (json.loads(raw) if raw else None)
+                try:
+                    return resp.status, (json.loads(raw) if raw else None)
+                except ValueError:
+                    # Otro servicio en ese host:puerto (xTeVe responde
+                    # "Locked [423]"): no es el demonio. Sin esto la ventana
+                    # se cerraba al arrancar.
+                    # "No disponible" también si el otro servicio responde
+                    # 200: xTeVe sirve su web en cualquier ruta.
+                    return 0, {
+                        "error": f"{self._base} no es el demonio: "
+                                 "respuesta no JSON"}
             except (ConnectionRefusedError, TimeoutError) as e:
                 # nada escuchando o sin respuesta: reintentar no cambia nada (y
                 # en Windows cada intento a loopback tarda ~2 s)

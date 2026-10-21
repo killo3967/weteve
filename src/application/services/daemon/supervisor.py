@@ -18,6 +18,7 @@ registra en el pipeline junto a la fuente, igual que hace el diálogo Qt.
 """
 
 import logging
+import re
 import threading
 import time
 from dataclasses import replace as dataclasses_replace
@@ -26,10 +27,15 @@ from pathlib import Path
 from src.application.services.daemon.scheduler import RefreshScheduler, target_interval_min
 from src.application.services.list_manager.epg_matcher import EpgMatcher
 from src.application.services.list_manager.logo_store import LogoStore
-from src.application.services.list_manager.models import PipelineTarget
+from src.application.services.list_manager.models import (
+    ChannelProfile,
+    PipelineTarget,
+)
 from src.application.services.list_manager.pipeline import (
     ListManagerPipeline,
     PipelineResult,
+    channel_identity,
+    profile_of,
 )
 from src.application.services.list_manager.playlist_builder import (
     build_m3u,
@@ -39,6 +45,10 @@ from src.application.services.list_manager.quality import base_name
 from src.infrastructure.web.playlist_server import LOGOS_PREFIX, url_base_for
 
 logger = logging.getLogger(__name__)
+
+#: Id de perfil aceptado en ``/m3u/weteve_<id>.m3u``: números en producción,
+#: pero sin barras ni puntos para que no se pueda salir del directorio.
+_ID_PERFIL = re.compile(r"[A-Za-z0-9_-]{1,32}")
 
 
 def _parece_codigo(channel_id: str, nombre: str) -> bool:
@@ -83,6 +93,10 @@ class TargetSupervisor:
         # lo que significa "el target está sirviendo": no hay socket por target.
         self._content: dict[str, tuple[str, str]] = {}
         self._results: dict[str, PipelineResult] = {}  # último resultado por target
+        # Contador por perfil: sube con cada cambio de lo que se sirve. La GUI
+        # lo consulta en /status y solo repinta la tabla cuando cambia, en vez
+        # de pedir las 855 filas cada segundo y medio.
+        self._revision: dict[str, int] = {}
         self._state: dict[str, dict] = {}       # channel_count, error
         self._base_url = base_url.rstrip("/")
         self._port: int | None = None
@@ -99,13 +113,21 @@ class TargetSupervisor:
         """``assets/logos`` en la raíz del proyecto."""
         return Path(__file__).resolve().parents[4] / "assets" / "logos"
 
-    def _render(self, target, result, epg) -> tuple[str, str]:
-        """Convierte un PipelineResult en (playlist, epg_xml) listos para servir."""
+    def _render(self, target, result, epg, target_id: str = "") -> tuple[str, str]:
+        """Convierte un PipelineResult en (playlist, epg_xml) listos para servir.
+
+        La playlist lleva ``url-tvg`` en la cabecera con la URL de su guía: es
+        lo que permite a las apps descargarla solas, sin configurarla a mano.
+        """
         t0 = time.perf_counter()
         canales = self._channels_with_local_logos(target, result.channels)
-        playlist = build_m3u(canales)
+        url_tvg = None
+        if self._base_url and str(target_id):
+            url_tvg = f"{self._base_url}/xmltv/weteve_{target_id}.xml"
+        playlist = build_m3u(canales, url_tvg=url_tvg)
         t1 = time.perf_counter()
-        epg_xml = build_xmltv(result.channels, epg)
+        epg_xml = build_xmltv(result.channels, epg,
+                              light=bool(getattr(target, "light_epg", True)))
         t2 = time.perf_counter()
         logger.info("render: playlist=%.2fs epg=%.2fs (%d canales servidos)",
                     t1 - t0, t2 - t1, len(result.channels))
@@ -131,9 +153,19 @@ class TargetSupervisor:
         base = self._base_url or url_base_for(
             getattr(target, "bind", "") or "127.0.0.1",
             int(getattr(target, "port", 0) or 0))
-        return [dataclasses_replace(ch, logo_url=f"{base}{LOGOS_PREFIX}{locales[ch.logo_url]}")
-                if ch.logo_url in locales else ch
-                for ch in channels]
+        salida = []
+        for ch in channels:
+            # Un logo elegido a mano ya está en assets/logos: se sirve tal cual,
+            # sin descargarlo ni pasar por el cache.
+            if ch.logo_file:
+                salida.append(dataclasses_replace(
+                    ch, logo_url=f"{base}{LOGOS_PREFIX}{ch.logo_file}"))
+            elif ch.logo_url in locales:
+                salida.append(dataclasses_replace(
+                    ch, logo_url=f"{base}{LOGOS_PREFIX}{locales[ch.logo_url]}"))
+            else:
+                salida.append(ch)
+        return salida
 
     def _ensure_source(self, target: PipelineTarget, epg_path: str | None,
                        refresh_epg: bool = False) -> None:
@@ -156,6 +188,7 @@ class TargetSupervisor:
 
     def _remember(self, target_id: str, result) -> None:
         self._results[target_id] = result
+        self._revision[target_id] = self._revision.get(target_id, 0) + 1
         st = self._state.setdefault(target_id, {})
         st["channel_count"] = result.filtered_count
         st["total_input"] = result.total_input
@@ -192,46 +225,46 @@ class TargetSupervisor:
         self._port = port
 
     def playlist_route(self, path: str) -> tuple[int, str | bytes, str] | None:
-        """Resuelve una ruta de playlist/EPG/logo: (status, cuerpo, content-type).
+        """Resuelve una ruta de guía/lista/logo: (status, cuerpo, content-type).
 
-        Acepta ``/weteve/{id}/playlist.m3u``, ``/weteve/{id}/epg.xml``, las
-        formas cortas ``/weteve/playlist.m3u`` (target 0) y los alias antiguos
-        ``/playlist.m3u`` y ``/epg.xml`` para no romper reproductores ya
-        configurados. Los logos salen de ``assets/logos`` (``/logos/<fichero>``)
-        y se devuelven como bytes, porque son imágenes. ``None`` si la ruta no
-        es de playlist.
+        Formato único, el que usan xTeVe y Threadfin (y reconocen sus apps):
+
+        - ``/m3u/weteve_<perfil>.m3u``
+        - ``/xmltv/weteve_<perfil>.xml``
+
+        Los logos salen de ``assets/logos`` (``/logos/<fichero>``) y se
+        devuelven como bytes, porque son imágenes. ``None`` si la ruta no es
+        de este servidor.
         """
         clean = (path or "").split("?", 1)[0].rstrip("/")
         parts = [p for p in clean.split("/") if p]
-        target_id = "0"
         if "logos" in parts:
-            # /logos/<fichero>, /weteve/logos/<fichero>, /weteve/{id}/logos/<f>
             indice = parts.index("logos")
             if len(parts) != indice + 2:
                 return None
             return self.logo_route(parts[indice + 1])
-        if parts[:1] == ["weteve"]:
-            rest = parts[1:]
-            if len(rest) == 1:
-                name = rest[0]          # forma corta: /weteve/playlist.m3u
-            elif len(rest) == 2:
-                target_id, name = rest  # canónica: /weteve/{id}/playlist.m3u
-            else:
-                return None
-        elif len(parts) == 1:
-            name = parts[0]  # alias legacy: /playlist.m3u y /epg.xml
+        if len(parts) != 2:
+            return None
+        carpeta, fichero = parts
+        if carpeta == "m3u" and fichero.startswith("weteve_") \
+                and fichero.endswith(".m3u"):
+            target_id, contenido = fichero[len("weteve_"):-len(".m3u")], "playlist"
+        elif carpeta == "xmltv" and fichero.startswith("weteve_") \
+                and fichero.endswith(".xml"):
+            target_id, contenido = fichero[len("weteve_"):-len(".xml")], "epg"
         else:
             return None
-        if name not in ("playlist.m3u", "epg.xml"):
+        if not _ID_PERFIL.fullmatch(target_id):
             return None
         with self._lock:
-            content = self._content.get(target_id)
-        if content is None:
-            return 404, "target no disponible", "text/plain; charset=utf-8"
-        playlist, epg_xml = content
-        if name == "playlist.m3u":
+            par = self._content.get(target_id)
+        if par is None:
+            return 404, "perfil no disponible", "text/plain; charset=utf-8"
+        playlist, epg_xml = par
+        if contenido == "playlist":
             return 200, playlist, "audio/x-mpegurl"
         return 200, epg_xml, "application/xml; charset=utf-8"
+
 
     def logo_route(self, nombre: str) -> tuple[int, bytes | str, str]:
         """Logo local por nombre de fichero (sin salirse del directorio)."""
@@ -276,7 +309,7 @@ class TargetSupervisor:
                     self._drop_content(target_id)
                 return False
             epg = self._pipeline.get_epg(target.source_index)
-            content = self._render(target, result, epg)
+            content = self._render(target, result, epg, target_id)
             with self._lock:
                 self._remember(target_id, result)
                 self._schedule_refresh(target_id, target)
@@ -291,7 +324,11 @@ class TargetSupervisor:
 
     def _drop_content(self, target_id: str) -> bool:
         """Deja de servir el target (el pipeline y su cache se conservan)."""
-        return self._content.pop(target_id, None) is not None
+        habia = self._content.pop(target_id, None) is not None
+        if habia:
+            # lo servido cambió (a nada): la tabla del perfil debe repintarse
+            self._revision[target_id] = self._revision.get(target_id, 0) + 1
+        return habia
 
     def reload_target(
         self, target_id: str, target: PipelineTarget | None = None,
@@ -324,7 +361,7 @@ class TargetSupervisor:
                     self._state[target_id] = {"error": str(e)}
                 return False
             epg = self._pipeline.get_epg(tgt.source_index)
-            content = self._render(tgt, result, epg)
+            content = self._render(tgt, result, epg, target_id)
             t_render = time.perf_counter()
             self._timings[target_id] = {
                 "fuentes": round(t_pipeline - t_fuentes, 3),
@@ -380,11 +417,16 @@ class TargetSupervisor:
         funcionan), para poder revisarles o cambiarles la EPG. No reejecuta el
         pipeline: si nunca se ejecutó, devuelve vacío.
         """
+        epg = None
+        target = None
         with self._lock:
             result = self._results.get(target_id)
             if result is None:
                 return {"channels": [], "total": 0, "count": 0,
                         "offset": int(offset)}
+            target = self._targets.get(target_id)
+            if target is not None:
+                epg = self._pipeline.get_epg(target.source_index)
             disabled = {ch.url for ch in result.excluded_disabled}
             servidos = {c.url for c in result.channels}
             duplicados = {c.url for c in result.excluded_duplicate}
@@ -396,22 +438,52 @@ class TargetSupervisor:
             candidates = list(result.channels) if include_served else []
             rows = []
             seen: set[str] = set()
+            info = epg.channel_info if epg is not None else {}
+            nombres = epg.channel_names if epg is not None else {}
             for ch in (pendientes + candidates):
                 if ch.url in seen:
                     continue
                 seen.add(ch.url)
+                interno = ch.internal_name or ch.name
+                canonico = ch.canonical_id or ""
+                meta = info.get(canonico)
+                de_guia = nombres.get(canonico) or ""
+                # la guía solo publica el código como nombre: no se usa
+                if de_guia == canonico:
+                    de_guia = ""
+                perfil = (profile_of(target, canonico, ch.url, interno)
+                          if target is not None else ChannelProfile())
+                # La tabla pinta ``logo_url``: si hay logo elegido a mano se
+                # publica el que sirve el demonio, no la URL remota (que puede
+                # estar muerta, como las de orangetv.orange.es).
+                logo = (f"{self._base_url}/logos/{ch.logo_file}"
+                        if ch.logo_file and self._base_url else ch.logo_url)
                 rows.append({
                     "name": ch.name,
+                    "internal_name": interno,
                     "url": ch.url,
                     "group": ch.group,
                     "tvg_id": ch.matched_epg_id or "",
-                    "logo_url": ch.logo_url or "",
+                    "logo_url": logo or "",
+                    "logo_file": ch.logo_file or "",
                     "disabled": ch.url in disabled,
                     # el daemon decide si la fila se sirve: un duplicado de
                     # calidad tiene guía pero no sale en la lista
                     "served": ch.url in servidos,
                     "duplicate": ch.url in duplicados,
+                    # lo que la tabla necesita para editar sin adivinar
+                    "identity": channel_identity(canonico, ch.url, interno),
+                    "dial": ch.chno,
+                    "dial_auto": meta.dial if meta is not None else None,
+                    "display_auto": de_guia,
+                    "profile": {"dial": perfil.dial,
+                                "display": perfil.display,
+                                "logo": perfil.logo},
                 })
+        # Orden de la tabla: por número los que lo tienen (el mismo orden que
+        # verá el reproductor) y al final los que aún no tienen dial.
+        rows.sort(key=lambda r: (r["dial"] is None, r["dial"] or 0,
+                                 str(r["internal_name"] or "").lower()))
         total = len(rows)
         page = rows[int(offset):int(offset) + int(limit)]
         return {"channels": page, "total": total, "count": len(page),
@@ -426,9 +498,8 @@ class TargetSupervisor:
                 running = tid in self._content
                 playlist_url = epg_url = None
                 if running and self._base_url:
-                    base = f"{self._base_url}/weteve/{tid}"
-                    playlist_url = f"{base}/playlist.m3u"
-                    epg_url = f"{base}/epg.xml"
+                    playlist_url = f"{self._base_url}/m3u/weteve_{tid}.m3u"
+                    epg_url = f"{self._base_url}/xmltv/weteve_{tid}.xml"
                 out[tid] = {
                     "name": tgt.name,
                     "running": running,
@@ -437,6 +508,8 @@ class TargetSupervisor:
                     "error": st.get("error"),
                     "playlist_url": playlist_url,
                     "epg_url": epg_url,
+                    # cambia con cada guardado o recarga de este perfil
+                    "revision": self._revision.get(tid, 0),
                 }
             return {"targets": out}
 
@@ -504,7 +577,8 @@ class TargetSupervisor:
         Sale de los metadatos de canal que publica la guía (``channel_info``),
         no de la lista servida: es el dialecto real del proveedor, con sus
         códigos (``BBDRA``, ``UCL``) y sus huecos. ``served`` dice qué canales
-        de ese catálogo están hoy en la lista del target.
+        de ese catálogo están hoy en la lista del target, por identidad
+        canónica o por el id que resolvió la parrilla.
         """
         epg = None
         lists: dict[str, tuple[str, ...]] = {}
@@ -517,10 +591,15 @@ class TargetSupervisor:
                 lists = self._pipeline.epg_lists(target.source_index)
                 result = self._results.get(target_id)
                 if result is not None:
+                    # «En la lista» va por identidad: el canal canónico cuenta
+                    # aunque su parrilla venga de otra guía (un mapeo a Koala
+                    # dejaba el canal de Movistar como si no estuviera).
                     servidos = {c.matched_epg_id for c in result.channels
                                 if c.matched_epg_id}
-                    # Un mapeo manual puede apuntar a otra guía: el canal de
-                    # Movistar sigue estando «en la lista» por nombre.
+                    servidos |= {c.canonical_id for c in result.channels
+                                 if c.canonical_id}
+                    # Un mapeo manual puede apuntar a una guía con otro
+                    # nombre: el canal sigue estando «en la lista» por nombre.
                     nombres_servidos = {base_name(c.name)
                                         for c in result.channels}
         if epg is None:

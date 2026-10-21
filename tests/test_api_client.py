@@ -8,6 +8,40 @@ from src.infrastructure.client.api_client import ApiClient
 from src.infrastructure.web.rest_api import RestApi
 
 
+def test_respuesta_que_no_es_json_no_tumba_el_cliente(monkeypatch):
+    """Otro servicio en el puerto no puede cerrar la ventana al arrancar.
+
+    Con ``control_host`` apuntando a una máquina donde escucha xTeVe, la API
+    responde ``Locked [423]`` en texto plano; antes el ``json.loads`` lanzaba y
+    ``StatusPanel.refresh`` mataba la aplicación en su constructor.
+    """
+    import http.client as http_client
+
+    class _Respuesta:
+        status = 423
+
+        def read(self) -> bytes:
+            return b"Locked [423]"
+
+    class _Conexion:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def request(self, *args, **kwargs) -> None:
+            pass
+
+        def getresponse(self) -> _Respuesta:
+            return _Respuesta()
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(http_client, "HTTPConnection", _Conexion)
+    codigo, cuerpo = ApiClient(retries=0).status()
+    assert codigo == 0            # "no es el demonio" = no disponible
+    assert "no es el demonio" in cuerpo["error"]
+
+
 class _FakeService:
     def __init__(self) -> None:
         self.running = False
@@ -197,7 +231,7 @@ class TestFastFail:
 class TestPaginacion:
     """La GUI no puede truncar el catálogo: se piden todas las páginas."""
 
-    def test_epg_channels_recorre_todas_las_paginas(self, monkeypatch):
+    def test_epg_channels_recorre_todas_las_paginas(self, monkeypatch) -> None:
         filas = [{"id": f"id{i}"} for i in range(7)]
         pedidos: list[int] = []
 

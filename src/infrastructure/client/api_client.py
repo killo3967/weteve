@@ -20,6 +20,8 @@ import json
 import time
 import urllib.parse
 
+from src.infrastructure.client.net_utils import connect_host
+
 # El pipeline reejecuta la M3U y las guías completas (decenas de miles de
 # canales, dos XMLTV): la llamada que lo dispara espera a que termine en vez
 # de cortar al timeout corto del resto de peticiones.
@@ -32,7 +34,7 @@ class ApiClient:
     def __init__(self, host: str = "127.0.0.1", port: int = 34401,
                  token: str = "", timeout: float = 5.0, retries: int = 2,
                  retry_delay: float = 0.05) -> None:
-        self._host = host
+        self._host = connect_host(host)
         self._port = port
         self._token = token
         self._timeout = timeout
@@ -77,9 +79,20 @@ class ApiClient:
                 conn.request(method, "/api/v1" + path, body=body,
                              headers=headers)
                 resp = conn.getresponse()
-                raw = resp.read().decode("utf-8")
+                raw = resp.read().decode("utf-8", "replace")
                 self._down_until = 0.0  # el demonio responde otra vez
-                return resp.status, (json.loads(raw) if raw else {})
+                try:
+                    return resp.status, (json.loads(raw) if raw else {})
+                except ValueError:
+                    # En ese host:puerto hay otro servicio (xTeVe responde
+                    # "Locked [423]") o un proxy: no es el demonio. Antes la
+                    # excepción subía y cerraba la ventana al arrancar.
+                    # Se trata como "no disponible" (status 0): un 200 de
+                    # otro servicio (xTeVe sirve su web en cualquier ruta) no
+                    # puede pasar por el demonio.
+                    return 0, {
+                        "error": f"{self.root_url} no es el demonio: "
+                                 f"respuesta no JSON (HTTP {resp.status})"}
             except (ConnectionRefusedError, TimeoutError) as e:
                 # no escucha o no contesta: reintentar no cambia nada (y cada
                 # intento cuesta ~2 s en Windows)
@@ -237,6 +250,16 @@ class ApiClient:
         """Un mapeo suelto (para lotes, usa ``put`` directamente)."""
         return self.put(f"/targets/{target_id}/mappings",
                         {"mappings": [mapping], "reload": reload})
+
+    def set_channels(self, target_id: str, channels: list[dict],
+                     reload: bool = True) -> tuple[int, dict]:
+        """Dial, nombre mostrado y logo a mano, en lote.
+
+        Cada entrada: ``{identity, url, dial, display, logo}``. Un dial
+        repetido vuelve como error con la lista de conflictos.
+        """
+        return self.put(f"/targets/{target_id}/channels",
+                        {"channels": channels, "reload": reload})
 
     def preview(self, target_id: str, rules: list[str]) -> tuple[int, dict]:
         """Vista previa de canales con esas reglas (no persiste nada)."""

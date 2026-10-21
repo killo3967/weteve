@@ -1,115 +1,112 @@
 # Arquitectura y decisiones
 
-**Respuesta corta**: hay un solo motor (el demonio) con un solo escritor de
-configuración, y N frontends tontos. La GUI de Qt no ejecuta pipeline ni sirve
-playlists: pregunta y ordena por HTTP.
+weteve tiene tres piezas: un **demonio** que posee los datos y sirve la lista,
+una **ventana Qt** que es su frontend, y una **capa de dominio** *Qt-free* que
+hace el trabajo (parsear, filtrar, emparejar, numerar).
 
 ## Piezas
 
 ```
-GUI Qt ──REST──┐
-CLI ───control─┤
-agentes ──MCP──┤
-               ▼
-        McpHttpTransport  (control + /api/v1 + /mcp + /weteve/…, UN puerto)
-               │
-        TargetService  ← la lógica de dominio, sin HTTP ni Qt
-          │         │
-   TargetStore   TargetSupervisor ──► Pipeline ──► contenido en memoria
-   (config_store)      │                           (M3U + XMLTV por target)
-                       └── snapshot en memoria del último resultado
+main.py ── Qt ─────────────► ApiClient ──HTTP──┐
+                                               │
+daemon.py ──► TargetService ──► TargetSupervisor ──► ListManagerPipeline
+                    │                   │                    │
+              TargetStore          PlaylistServer      filtros · EPG · calidad
+                    │                   │
+               daemon.toml          /m3u · /xmltv · /logos
 ```
 
-| Capa | Responsabilidad |
-|---|---|
-| `src/domain` | entidades (`Channel`, `EPGData`) y puertos; sin dependencias |
-| `src/application/services/list_manager` | pipeline: parseo M3U → filtros → EPG → M3U/XMLTV de salida |
-| `src/application/services/daemon` | `TargetService`, `TargetSupervisor`, `TargetStore`, REST/MCP |
-| `src/infrastructure` | adaptadores: ficheros, HTTP, Qt, clientes |
-
-REST y MCP son **adaptadores finos**: traducen y delegan en `TargetService`. Si
-una ruta y una herramienta hacen lo mismo, la lógica está una sola vez.
+- **Dominio** (`src/domain`, `list_manager`): entidades y pipeline puro; se
+  testea sin red ni Qt.
+- **Servicios** (`daemon/`): supervisor (ciclo de vida + snapshot), servicio de
+  dominio (`TargetService`) y adaptadores (REST, MCP, control).
+- **Infraestructura**: HTTP único, cliente de la API, persistencia y widgets.
 
 ## Decisiones y por qué
 
-### Un único escritor de `config.ini`
+### Un fichero por escritor
 
-Todo pasa por `config_store` (targets, cartera y `[DAEMON]`). Antes escribían
-cuatro módulos con serializadores distintos, y eso provocó pérdidas reales: la
-GUI guardaba desde su estado en memoria y borraba mapeos hechos por MCP. Hoy
-Guardar es un lote REST y el fichero lo escribe el demonio.
+`daemon.toml` (datos) lo escribe solo el demonio; `weteve.ini` (arranque) solo
+la GUI. Así no hay dos procesos reescribiendo el mismo TOML y perdiendo cambios.
 
 ### Lecturas desde snapshot; escrituras con recarga diferida
 
-- Leer (`GET …`) nunca ejecuta el pipeline: se sirve el último resultado.
-- Escribir acepta `"reload": false`; la GUI manda cartera + fuentes + ajustes +
-  reglas + mapeos y ejecuta **una vez** con `POST /run`. Un pipeline con 37.000
-  canales tarda 3-8 s; multiplicarlo por cada cambio era lo que congelaba la UI.
+Las lecturas de estado no reejecutan el pipeline: el supervisor guarda el último
+`PipelineResult`. Un guardado puede mandar varios cambios con `reload: false` y
+reejecutar **una vez** al final (el pipeline tarda segundos con listas grandes).
 
 ### Dos locks en el supervisor
 
-`_lock` protege el estado (targets, resultados, servidores) y es el único que
-tocan las lecturas; `_run_lock` serializa la ejecución del pipeline. Con un solo
-lock, `GET /status` esperaba detrás de una recarga completa.
+`_lock` protege el estado (respuestas rápidas) y `_run_lock` serializa la
+ejecución del pipeline, que no es reentrante. Responder estado no espera a una
+recarga.
+
+### Instancia única
+
+El puerto solo impedía dos demonios en el **mismo** puerto. Ahora el arranque
+toma un bloqueo del sistema sobre `weteve.lock` y anota `pid host:puerto` en
+`weteve.pid` antes de leer la configuración; si ya está tomado, consulta
+`/health` y sale con `ya está en marcha en …` (exit 0). Cubre también dos
+`control_port` distintos, que escribirían el mismo `daemon.toml`.
 
 ### Un solo puerto y un solo bind
 
-Control, REST, MCP y playlists comparten `[DAEMON] control_port`. Ventajas: una
-URL base, un chequeo de «puerto ocupado», sin `port`/`bind` por target. Coste: un
-único bind, así que publicar la playlist en la LAN expone también la API y el MCP
-(de ahí el token obligatorio fuera de loopback). La playlist se sirve **sin**
-token porque los reproductores IPTV no mandan `Authorization`; los alias
-`/playlist.m3u` y `/epg.xml` se mantienen para no romper URLs ya configuradas.
+Control, REST, MCP, playlists y logos comparten `control_port` (34400 por
+defecto). Menos firewalls, menos URLs que explicar. El host se elige en un
+desplegable (loopback, IP de la red, otras interfaces, `0.0.0.0`); con `0.0.0.0`
+se **anuncia** la IP de la red, porque `0.0.0.0` no es una dirección de destino.
 
-### La GUI es un frontend
+### Identidad del canal
 
-No tiene pipeline, ni servidor, ni escritura de configuración. Sus pestañas se
-pintan con `mapping-candidates`, `epg-channels`, `groups` y `preview`. Si el
-demonio no responde lo dice y no inventa estado.
+Cada guía bautiza al mismo canal a su manera (`M+ LaLigaTVHD`, `M+ LALIGA TV HD`,
+`M+ LaLiga`, `M+ LALIGA`). La identidad se resuelve contra la guía que **publica
+dial** (solo Movistar lo hace) con un matcher por marca: el sufijo numérico tiene
+que coincidir y el ganador necesita margen. Las guías XMLTV solo traen logo, y
+tomarlas por canónicas partía el canal en dos.
 
-### Fallar cerrado en lo peligroso
+### Ficha del canal
 
-- `control_host` fuera de loopback sin `mcp_token` → el demonio no arranca.
-- `PUT /sources` con una entrada inválida → rechaza el lote entero (no vacía la
-  cartera a medias).
-- Ids de cartera desconocidos en `set_target_sources` → 400 (antes se perdían en
-  silencio).
-- Una URL sin host (`http://`) se rechaza: era el caso de la fila `abilio`.
+Lo que el usuario fija a mano (dial, nombre mostrado, logo) vive en
+`[targets.channels."<identidad>"]`, con la identidad como clave (código de guía,
+o `url-<hash>` / `name-<base>` si no hay). El EPG asignado y el apagado siguen en
+`overrides`/`disabled` por url: migrarlos es un cambio aparte, no una capa nueva.
 
-### Detalles de plataforma (Windows)
+### Dos nombres
 
-- Cerrar un socket HTTP recién escrito provoca RST intermitente en loopback
-  (~50 % medido): los servidores duermen ~20 ms antes de cerrar. Esto eliminó los
-  fallos intermitentes de la suite y los resets a reproductores.
-- Una conexión a puerto cerrado tarda ~2 s en esta máquina: los clientes no
-  reintentan `ConnectionRefusedError`.
+El **interno** (el de la lista) manda en dedupe y en los pesos de calidad; el
+**mostrado** es cosmético y sale del nombre de la guía (`LA 1 HD` → `LA 1`).
+Editar el interno cambiaría qué variante se sirve.
 
-## Flujo completo de un «Guardar»
+### Guía ligera
 
-1. La GUI calcula el lote y llama a `PUT /sources` (cartera visible).
-2. `PUT /targets/{id}/sources` (selección), `/settings`, `/rules`, `/mappings`
-   (con `epg_id: null` para lo que el usuario quitó) y `/disabled`, todas con
-   `"reload": false`.
-3. `POST /targets/{id}/run` → el demonio relee la definición de disco, ejecuta el
-   pipeline y regenera el contenido servido.
-4. La GUI vuelve a pedir `mapping-candidates` y `preview`. Si algo falla antes
-   del paso 3, avisa y no se ha escrito nada más.
+El `epg.xml` con descripciones pesa ~9 MB y muchas televisiones cortan la guía
+por tamaño (síntoma: EPG hasta cierto canal y nada después). Sin `<desc>` ni
+`<category>` baja a ~3 MB y la ven entera. Es un campo del perfil, activo por
+defecto.
+
+### Revisión por perfil
+
+La ventana no puede permitirse pedir 855 filas cada segundo y medio. El demonio
+lleva un contador `revision` por perfil que sube con cada guardado o recarga; la
+GUI sondea `/status` (cientos de bytes) y solo repinta la tabla cuando cambia.
+
+### Fail closed en lo peligroso
+
+Guardar fuera de loopback sin token no se permite (y el demonio tampoco
+arrancaría). Un dial repetido no se guarda. Un logo que no existe o no se puede
+descargar es un error, no un aviso silencioso.
+
+## Flujo de un «Guardar»
+
+1. La GUI arma un lote: cartera, fuentes del perfil, ajustes, reglas, mapeos,
+   desactivados y fichas, todo con `reload: false`.
+2. Un hilo lo manda a la API; el demonio guarda una vez y reejecuta el pipeline
+   al final (`run`).
+3. El supervisor actualiza el snapshot y sube `revision`; la GUI repinta el
+   mapeado y el estado.
 
 ## Modelo de datos del canal
 
-`Channel` (parseado) → `MappedChannel` (con `matched_epg_id` y `chno`). El
-emparejamiento EPG es automático (`tvg-id`, luego nombre normalizado) y **no se
-persiste**; lo manual (`epg_overrides`) sí, y gana sobre el automático. Los
-separadores de sección (`### TOP ###`) se descartan siempre. Con fuente EPG, un
-canal sin guía no se sirve: queda en `excluded_no_epg` y aparece en la tabla de
-mapeo para rescatarlo (EPG real o `Dummy 1h`).
-
-## Deuda y límites actuales
-
-| Tema | Estado |
-|---|---|
-| `mypy` en dos widgets Qt heredados | en `[[tool.mypy.overrides]]` (`ignore_errors`) por `findChildren`/`header` Optional |
-| Empaquetado (`pip install -e .`) | no hay `[project]`; imports `src.*` desde la raíz |
-| `scripts/healthcheck.py` | fuera de CI (necesita daemon vivo) |
-| Tests `network` | dependen de las fuentes URL de tu `config.ini`; `abilio` está roto (`http://`) y el EPG de Doble_M supera el guard de 20 MB del test |
-| SPA web | la API está lista para un frontend externo; CORS abierto solo a loopback |
+`Channel` (de la lista) → filtros → `MappedChannel` (con `matched_epg_id` para la
+parrilla y `canonical_id` para la identidad) → dedupe por calidad → `_finalize`
+aplica dial, nombre mostrado y logo → M3U + XMLTV.

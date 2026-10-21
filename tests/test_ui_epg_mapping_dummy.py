@@ -134,18 +134,17 @@ class TestDummyPrimero:
         assert _texts(widget) == ["", DUMMY_LABEL]
 
     def test_elegir_dummy_guarda_un_id_propio_del_canal(self, widget):
-        """El id dummy se deriva de la url del canal. Si se derivara del
+        """El id dummy se deriva de la identidad del canal. Si se derivara del
         nombre, dos canales homónimos compartirían parrilla."""
         widget.load_unmatched(_channels(), {})
         _select(widget, 1, DUMMY_LABEL)
         assert widget.get_overrides() == {
-            "http://s/a3int": build_dummy_epg_id("http://s/a3int",
-                                                 "Antena 3 Internacional")}
+            "http://s/a3int": build_dummy_epg_id("http://s/a3int")}
 
     def test_un_id_dummy_persistido_se_muestra_como_dummy(self, widget):
         """Al reabrir, config.ini trae 'weteve-dummy-ab12...' y la casilla debe
         leerse como 'Dummy 1h', no como un id ilegible."""
-        dummy = build_dummy_epg_id("http://s/la1", "La 1 HD")
+        dummy = build_dummy_epg_id("http://s/la1")
         widget.load_unmatched(_channels(), {"http://s/la1": dummy})
         assert widget.table.cellWidget(0, widget.COL_EPG).current_value() == DUMMY_LABEL
         assert widget.get_overrides() == {"http://s/la1": dummy}
@@ -180,7 +179,7 @@ class TestDummyPrimero:
         traer un canal llamado 'Dummy 1h', un id sintético guardado antes deja
         de ser dummy y apunta a ese canal. Es preferible a ofrecer dos opciones
         idénticas; el usuario lo ve porque la casilla sigue marcada."""
-        dummy_id = build_dummy_epg_id("http://s/la1", "La 1 HD")
+        dummy_id = build_dummy_epg_id("http://s/la1")
         widget.set_epg(_epg({"otro.TV": DUMMY_LABEL}))
         widget.load_unmatched(_channels(), {"http://s/la1": dummy_id})
         # la etiqueta mostrada sigue siendo 'Dummy 1h' (es un id dummy)...

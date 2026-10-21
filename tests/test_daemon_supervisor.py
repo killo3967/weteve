@@ -15,7 +15,7 @@ BASE = "http://127.0.0.1:34400"
 
 
 def _playlist(sup: TargetSupervisor, target_id: str = "t0") -> str:
-    route = sup.playlist_route(f"/weteve/{target_id}/playlist.m3u")
+    route = sup.playlist_route(f"/m3u/weteve_{target_id}.m3u")
     assert route is not None, "ruta de playlist no reconocida"
     status, body, _ctype = route
     assert status == 200, body
@@ -50,31 +50,34 @@ class TestTargetSupervisor:
             assert sup.start_target("t0", _target(m3u))
             info = sup.get_status()["targets"]["t0"]
             assert info["running"] is True
-            assert info["playlist_url"] == f"{BASE}/weteve/t0/playlist.m3u"
+            assert info["playlist_url"] == f"{BASE}/m3u/weteve_t0.m3u"
             body = _playlist(sup)
             assert "Canal A" in body   # G0 pasa el filtro {G0}
             assert "Canal B" not in body
         finally:
             sup.stop_all()
 
-    def test_alias_de_playlist_para_el_target_0(self, tmp_path: Path) -> None:
+    def test_formato_unico_y_cabecera_url_tvg(self, tmp_path: Path) -> None:
+        """Solo existe /m3u/weteve_<perfil>.m3u, y anuncia su guía."""
         m3u = _write_m3u(tmp_path / "src.m3u", ["Canal A"])
         sup = TargetSupervisor(base_url=BASE)
         try:
             sup.start_target("0", _target(m3u))
-            canonico = sup.playlist_route("/weteve/0/playlist.m3u")
-            corto = sup.playlist_route("/weteve/playlist.m3u")
-            heredado = sup.playlist_route("/playlist.m3u")
-            assert canonico is not None and corto is not None
-            assert heredado is not None
-            assert canonico == corto == heredado
+            canonico = sup.playlist_route("/m3u/weteve_0.m3u")
+            assert canonico is not None
             assert canonico[0] == 200 and canonico[2] == "audio/x-mpegurl"
+            assert f'url-tvg="{BASE}/xmltv/weteve_0.xml"' in str(canonico[1])
+            # el formato viejo ya no existe
+            assert sup.playlist_route("/weteve/0/playlist.m3u") is None
+            assert sup.playlist_route("/weteve/playlist.m3u") is None
+            assert sup.playlist_route("/playlist.m3u") is None
+            assert sup.playlist_route("/xmltv/weteve_0.xml") is not None
         finally:
             sup.stop_all()
 
     def test_playlist_de_target_inexistente_404(self) -> None:
         sup = TargetSupervisor(base_url=BASE)
-        ruta = sup.playlist_route("/weteve/9/playlist.m3u")
+        ruta = sup.playlist_route("/m3u/weteve_9.m3u")
         assert ruta is not None
         status, _body, _ctype = ruta
         assert status == 404
@@ -82,7 +85,7 @@ class TestTargetSupervisor:
     def test_ruta_que_no_es_playlist(self) -> None:
         sup = TargetSupervisor(base_url=BASE)
         assert sup.playlist_route("/api/v1/status") is None
-        assert sup.playlist_route("/weteve/0/otra.xml") is None
+        assert sup.playlist_route("/m3u/weteve_0.otra") is None
 
     def test_start_twice_replaces_content(self, tmp_path: Path) -> None:
         m3u = _write_m3u(tmp_path / "src.m3u", ["Canal A", "Canal B"])
@@ -101,7 +104,7 @@ class TestTargetSupervisor:
             sup.start_target("t0", _target(m3u))
             assert sup.stop_target("t0") is True
             assert sup.get_status()["targets"]["t0"]["running"] is False
-            parada = sup.playlist_route("/weteve/t0/playlist.m3u")
+            parada = sup.playlist_route("/m3u/weteve_t0.m3u")
             assert parada is not None and parada[0] == 404
             # parar de nuevo es idempotente
             assert sup.stop_target("t0") is False
@@ -184,6 +187,22 @@ class TestTargetSupervisor:
             sup.stop_all()
 
 
+class TestRevision:
+    """Un contador por perfil: la GUI solo repinta cuando cambia."""
+
+    def test_la_revision_sube_al_servir_y_al_parar(self, tmp_path: Path) -> None:
+        m3u = _write_m3u(tmp_path / "rev.m3u", ["Canal A"])
+        sup = TargetSupervisor(base_url=BASE)
+        try:
+            sup.start_target("t0", _target(m3u))
+            primera = sup.get_status()["targets"]["t0"]["revision"]
+            assert primera >= 1
+            sup.stop_target("t0")
+            assert sup.get_status()["targets"]["t0"]["revision"] > primera
+        finally:
+            sup.stop_all()
+
+
 class TestSupervisorMultiFuente:
     def test_target_con_refs_sirve_la_union(self, tmp_path: Path) -> None:
         m1 = _write_m3u(tmp_path / "a.m3u", ["Canal A"])
@@ -257,3 +276,37 @@ class TestNombreDelDesplegable:
         assert _nombre_con_codigo("La 1 HD", "La 1 HD") == "La 1 HD"
         assert _nombre_con_codigo("la.1.hd", "La 1") == "La 1"
         assert _nombre_con_codigo("", "La 1") == "La 1"
+
+
+class TestCatalogoPorIdentidad:
+    """«En tu lista» va por identidad, no por el id de la parrilla."""
+
+    def _supervisor(self):
+        from src.application.services.list_manager.pipeline import ListManagerPipeline
+        from src.domain.entities.channel import Channel
+        from src.domain.entities.epg import ChannelInfo, EPGData
+
+        class _M3U:
+            def get_channels(self, source: str):
+                return [Channel("M+ LaLigaTVHD", "http://x/1", "SPAIN")]
+
+        class _Epg:
+            def load_epg(self, source: str, fresh: bool = False) -> EPGData:
+                return EPGData(programs=[],
+                               channel_names={"MLIGA": "M+ LALIGA"},
+                               channel_info={"MLIGA": ChannelInfo(dial=54)})
+
+        sup = TargetSupervisor()
+        sup._pipeline = ListManagerPipeline(m3u_repository=_M3U(),
+                                            epg_repository=_Epg())
+        return sup
+
+    def test_el_canal_mapeado_a_otra_guia_cuenta_como_servido(self):
+        """El mapeo apunta a Koala; el canal de Movistar sigue en la lista."""
+        sup = self._supervisor()
+        target = PipelineTarget(name="t", source_index="0",
+                                epg_overrides={"http://x/1": "M+ LALIGA TV HD"})
+        assert sup.start_target("t0", target, epg_path="guia.xml")
+        filas = {f["id"]: f for f in sup.epg_catalog("t0")["channels"]}
+        assert filas["MLIGA"]["served"] is True
+        assert filas["MLIGA"]["dial"] == 54

@@ -20,23 +20,26 @@ cualquier reproductor externo.
    guardan con la sintaxis compatible de xTeVe (`{incluir}`, `!{excluir}`), así que
    el formato podrá crecer sin perder lo ya configurado.
 3. **EPG**: la app asocia cada canal con su guía buscando primero por `tvg-id` y,
-   si falla, por nombre normalizado (sin acentos ni mayúsculas). Los canales que
-   quedan sin guía se revisan en un editor donde la app propone sugerencias y tú
-   confirmas la correcta; tu corrección se recuerda para siempre.
+   si falla, por nombre normalizado (sin acentos ni mayúsculas) y por parecido de
+   marca (con el número de canal como parte del nombre: `M+ LaLiga 2` no es
+   `M+ LaLiga`). Cada canal tiene además una identidad única —el canal del
+   proveedor, con su dial y su logo— aunque su parrilla venga de otra guía. Los
+   canales que quedan sin guía se revisan en un editor donde la app propone
+   sugerencias y tú confirmas la correcta; tu corrección se recuerda para siempre.
 
 ## El servicio web
 
 Con un clic inicias una mini-web (por defecto `http://127.0.0.1:8080`) que
 expone:
 
-- `/playlist.m3u` — tu lista ya filtrada, lista para cargar en VLC u otro reproductor.
+- `/m3u/weteve_<perfil>.m3u` — tu lista ya filtrada, lista para cargar en VLC u otro reproductor.
 - `/epg.xml` — la guía correspondiente, solo con los canales de tu lista.
 
 El grupo **Servicio web** del asistente permite elegir el alcance:
 
 - **Solo este equipo (127.0.0.1)** — por defecto; nada accesible desde fuera.
 - **Toda la red local (0.0.0.0)** — VLC de tu móvil, tablet u otro PC de la red
-  puede cargar la lista con la IP de tu equipo (p. ej. `http://192.168.1.50:8080/playlist.m3u`).
+  puede cargar la lista con la IP de tu equipo (p. ej. `http://192.168.1.50:34000/m3u/weteve_0.m3u`).
   Al iniciar el servicio se muestra la URL navegable con tu IP real.
 
 La elección se recuerda junto al puerto en `config.ini`. Si al iniciar con

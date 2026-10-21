@@ -43,17 +43,26 @@ def is_dummy_id(channel_id: str | None) -> bool:
     return bool(channel_id and channel_id.startswith(DUMMY_ID_PREFIX))
 
 
-def make_dummy_id(url: str, name: str) -> str:
-    """Id de relleno estable para un canal.
+def dummy_id_for(identity: str) -> str:
+    """Id de relleno estable para un canal, derivado de su identidad.
 
-    Clave: la url cuando existe (identifica el stream aunque cambie el nombre),
-    y el nombre como respaldo para canales sin url. Se trunca el hash a 12
-    caracteres: es suficiente para no colisionar en listas de miles de canales
-    y mantiene legible el ``epg.xml``.
+    La identidad es el código de la guía o, si no lo hay, la clave de la ficha
+    (hash de la url / del nombre). Derivarlo de la url era frágil: el mismo
+    canal llega con varias urls y la deduplicación puede cambiar de variante,
+    así que el id cambiaba y el reproductor lo veía como un canal nuevo.
+    """
+    digest = hashlib.sha1((identity or "").strip().encode("utf-8", "replace"))
+    return f"{DUMMY_ID_PREFIX}{digest.hexdigest()[:12]}"
+
+
+def make_dummy_id(url: str, name: str) -> str:
+    """Id de relleno a partir de una url (o del nombre si no hay url).
+
+    Se mantiene para los mapeos ya guardados y para quien no conozca la
+    identidad del canal; el camino nuevo es ``dummy_id_for``.
     """
     key = (url or "").strip() or (name or "").strip()
-    digest = hashlib.sha1(key.encode("utf-8", "replace")).hexdigest()[:12]
-    return f"{DUMMY_ID_PREFIX}{digest}"
+    return dummy_id_for(key)
 
 
 def build_dummy_channel(name: str, channel_id: str, now=None) -> list[Program]:

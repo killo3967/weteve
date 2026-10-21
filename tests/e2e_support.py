@@ -39,6 +39,7 @@ EXPECTED_TOOLS = {
     "add_source", "list_sources", "update_source", "remove_source",
     "set_target_sources",
     "create_filter", "delete_filter", "modify_mapping", "modify_mappings",
+    "modify_channels",
 }
 
 
@@ -121,11 +122,22 @@ class DaemonHandle:
     def status(self) -> dict:
         return self.service.status()["targets"][TARGET]
 
+    def playlist_path(self) -> str:
+        """Ruta de la lista del perfil de pruebas."""
+        return f"/m3u/weteve_{TARGET}.m3u"
+
+    def epg_path(self) -> str:
+        """Ruta de la guía del perfil de pruebas."""
+        return f"/xmltv/weteve_{TARGET}.xml"
+
     def playlist_url(self) -> str:
         return self.status()["playlist_url"]
 
     def fetch(self, path: str, attempts: int = 5) -> tuple[int, str]:
-        """GET al servidor de playlist del target (con reintentos de loopback)."""
+        """GET al servidor del perfil, en el formato ``/m3u``/``/xmltv``."""
+        ruta = {"playlist.m3u": self.playlist_path(),
+                "epg.xml": self.epg_path()}.get(path.lstrip("/"), path)
+        path = ruta
         url = self.playlist_url()
         host_port, _, _ = url.partition("://")[2].partition("/")
         host, _, port = host_port.partition(":")

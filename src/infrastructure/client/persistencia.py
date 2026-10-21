@@ -41,6 +41,11 @@ def load_config(path: Path) -> dict:
             "epg_overrides": dict(target.epg_overrides),
             "disabled_channels": list(target.disabled_channels),
             "quality_priority": dict(target.quality_priority or {}),
+            "serve_without_epg": bool(target.serve_without_epg),
+            "light_epg": bool(target.light_epg),
+            "channels": {clave: {"alias": f.alias, "dial": f.dial,
+                                 "display": f.display, "logo": f.logo}
+                         for clave, f in target.channels.items()},
             "port": target.port,
             "starting_number": target.starting_number,
             "bind": str(raw.get("bind") or "127.0.0.1"),

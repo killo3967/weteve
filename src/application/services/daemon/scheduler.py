@@ -8,6 +8,7 @@ sin fin).
 
 import logging
 import threading
+from collections.abc import Callable
 
 from src.application.services.list_manager.source_catalog import SourceCatalog
 
@@ -38,14 +39,21 @@ def target_interval_min(catalog: SourceCatalog, target) -> int | None:
 class RefreshScheduler:
     """Hilos de recarga periódica por target."""
 
-    def __init__(self, reload_fn, clock=None):
+    def __init__(self, reload_fn: Callable[[str], None],
+                 clock: Callable[[threading.Event, float], bool] | None = None,
+                 ) -> None:
         """``reload_fn(target_id)`` se llama en cada ciclo; ``clock`` permite
-        inyectar una función de espera en tests (por defecto ``Event.wait``)."""
+        inyectar una función de espera en tests (por defecto ``Event.wait``).
+
+        ``clock(evento, segundos)`` espera y devuelve False cuando hay que
+        parar.
+        """
         self._reload = reload_fn
         self._threads: dict[str, threading.Thread] = {}
         self._stops: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
-        self._clock = clock or (lambda ev, sec: not ev.wait(sec))
+        self._clock: Callable[[threading.Event, float], bool] = clock or (
+            lambda ev, sec: not ev.wait(sec))
 
     def schedule(self, target_id: str, interval_min: int) -> None:
         """(Re)programa la recarga de un target; detiene el ciclo anterior."""

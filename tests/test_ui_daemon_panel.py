@@ -13,6 +13,10 @@ from src.infrastructure.ui.daemon_panel import DaemonPanel
 class _FakeClient:
     """DaemonClient falso: respuestas programables."""
 
+    host = "127.0.0.1"
+    port = 34400
+    token = ""
+
     def __init__(self, alive: bool = True) -> None:
         self.alive = alive
         self.base_url = "http://127.0.0.1:34400"
@@ -38,11 +42,23 @@ class _FakeClient:
 
 
 class _FakeLauncher:
-    def __init__(self) -> None:
+    def __init__(self, address: str | None = None) -> None:
         self.launched = 0
+        self.address = address
+
+    def daemon_address(self) -> str | None:
+        return self.address
 
     def launch(self) -> bool:
         self.launched += 1
+        return True
+
+    def start_and_wait(self, client, timeout: float = 12.0):
+        self.launched += 1
+        return True, ""
+
+    def stop_running(self, timeout: float = 8.0) -> bool:
+        self.detenidos = getattr(self, "detenidos", 0) + 1
         return True
 
 
@@ -63,7 +79,17 @@ class TestLifecycleButtons:
         p._launcher = launcher
         p.start_daemon()
         assert launcher.launched == 1
-        assert "arrancando" in p.status_label.text().lower()
+        assert "arrancado" in p.status_label.text().lower()
+
+    def test_start_con_candado_en_otro_puerto_no_lanza(self, panel) -> None:
+        """El candado dice dónde está el que corre: no se abre un segundo."""
+        p, client, _ = panel
+        client.alive = False
+        launcher = _FakeLauncher(address="127.0.0.1:39999")
+        p._launcher = launcher
+        p.start_daemon()
+        assert launcher.launched == 0
+        assert "39999" in p.status_label.text()
 
     def test_start_si_ya_vivo_no_lanza(self, panel) -> None:
         p, client, _ = panel

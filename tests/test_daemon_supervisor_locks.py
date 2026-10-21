@@ -121,9 +121,11 @@ class TestSnapshot:
         runs = supervisor._pipeline.runs
         data = supervisor.mapping_candidates("0")
         assert data["total"] == 3
-        names = [c["name"] for c in data["channels"]]
-        assert names == ["Canal B", "Descartado", "Apagado"]
-        assert data["channels"][2]["disabled"] is True
+        # la tabla ordena por dial (aquí ninguno lo tiene): lo que importa es
+        # que salen los tres del snapshot, sin reejecutar
+        filas = {c["name"]: c for c in data["channels"]}
+        assert set(filas) == {"Canal B", "Descartado", "Apagado"}
+        assert filas["Apagado"]["disabled"] is True
         assert supervisor._pipeline.runs == runs
 
     def test_mapping_candidates_sin_ejecutar_vacio(self, supervisor):

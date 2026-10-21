@@ -39,7 +39,7 @@ class TestDialogSaveViaApi:
         assert "Guardado" in d.result_label.text()
 
     def test_sin_daemon_no_se_guarda_nada(self, dialog_with_daemon, fake_api,
-                                          monkeypatch, wait_save):
+                                          monkeypatch, wait_save) -> None:
         from PyQt6.QtWidgets import QDialogButtonBox, QMessageBox
 
         avisos: list = []

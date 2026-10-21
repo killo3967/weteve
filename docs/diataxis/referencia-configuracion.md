@@ -1,105 +1,110 @@
-# Referencia de `config.ini`
+# Referencia de configuración
 
-Tres tipos de sección. El fichero lo escribe **solo el demonio** (serializador
-único `config_store`); la GUI únicamente escribe `[DAEMON]`, que el demonio lee
-al arrancar. `config.ini` no se versiona (sí `config.ini.example`).
+Dos ficheros, cada uno con su escritor:
 
-## `[DAEMON]` — cómo escucha el demonio
-
-| Clave | Default | Descripción |
+| Fichero | Contenido | Escribe |
 |---|---|---|
-| `control_host` | `127.0.0.1` | **único** bind: control, REST, MCP y playlists |
-| `control_port` | `34400` | **único** puerto de todo |
-| `mcp_port` | *(ignorado)* | legado: se registra un aviso si difiere de `control_port` |
-| `mcp_token` | *(vacío)* | si se define, `Authorization: Bearer` obligatorio |
-| `autostart` | `0` | la GUI arranca el demonio al abrir si no responde |
-| `stop_on_exit` | `0` | la GUI lo para al cerrar **solo si lo arrancó ella** |
+| `daemon.toml` | cartera de fuentes y perfiles (datos) | el demonio |
+| `weteve.ini` | host, puerto, token y arranque | la GUI |
 
-Con `control_host` distinto de loopback y `mcp_token` vacío el demonio **no
-arranca** (falla cerrado). Ese bind afecta a **todo**: si publicas la playlist en
-la red, la API y el MCP quedan en la misma superficie (token obligatorio).
+`config.ini` es el formato **viejo**; solo se lee para migrar
+(`python daemon.py migrate-config`).
 
-## `[listmanager.target.N]` — un objetivo de salida
+## `weteve.ini` — `[DAEMON]`
 
-| Clave | Formato | Notas |
+| Clave | Por defecto | Qué hace |
 |---|---|---|
-| `name` | texto | nombre del resultado |
-| `custom_m3u` | ruta/URL | fuente única heredada; se conserva aunque se use la cartera |
-| `custom_epg` | ruta/URL | ídem para la guía |
-| `epg_source` | entero | legado; `-1` = sin índice de la app anfitriona |
-| `port` | entero | **ignorado** (legado): la playlist va por el puerto del demonio |
-| `bind` | texto | **ignorado** (legado): manda `[DAEMON] control_host` |
-| `starting_number` | entero | primer `tvg-chno` (default 1) |
-| `rules` | ver abajo | filtros, separados por `\|` |
-| `epg_overrides` | `url::channel-id` | mapeos manuales, separados por `;;` |
-| `disabled_channels` | urls | canales apagados a mano, separados por `\|\|` |
-| `m3u_sources` | ids | filas de cartera M3U del target, separadas por coma |
-| `epg_sources` | ids | filas de cartera EPG del target |
+| `control_host` | `127.0.0.1` | dónde enlaza. `0.0.0.0` = todos los interfaces |
+| `control_port` | `34400` | **único** puerto: control, REST, MCP, playlists y logos |
+| `mcp_port` | = `control_port` | obsoleto; se ignora si difiere |
+| `mcp_token` | vacío | vacío = sin autenticación (solo loopback). **Obligatorio** fuera de loopback |
+| `autostart` | `0` | si la GUI arranca el demonio al abrir |
+| `stop_on_exit` | `0` | si la GUI lo para al cerrar (solo si lo arrancó ella) |
+
+## `daemon.toml`
+
+```toml
+version = 2
+```
+
+### `[[sources]]` — cartera global
+
+| Clave | Notas |
+|---|---|
+| `id` | corto y estable |
+| `name` | se usa como etiqueta de origen (filtro `source`) |
+| `kind` | `m3u` (canales) o `epg` (guía) |
+| `source_type` | `file`, `url` o `movistar` (se deduce de `location`) |
+| `location` | ruta, URL http(s) o `movistar://epg?span=7` |
+| `refresh_min` | minutos entre recargas; `0` = estática |
+| `priority` | peso al desempatar guías (mayor gana); solo se escribe si no es 0 |
+| `enabled` | si participa en la unión |
+
+### `[[targets]]` — un perfil
+
+| Clave | Notas |
+|---|---|
+| `id` | numérico (`0`, `1`…): es el `<perfil>` de las URLs |
+| `name` | nombre visible |
+| `port`, `bind` | herencia del modo antiguo; hoy manda `control_port` |
+| `starting_number` | número del primer canal de la cola sin dial |
+| `m3u_sources`, `epg_sources` | ids de la cartera que aporta el perfil |
+| `rules` | filtros en sintaxis xteve (ver abajo) |
+| `disabled` | urls apagadas a mano a nivel de perfil (legado por url) |
+| `serve_without_epg` | `true` = servir con Dummy 1h los que no tienen guía |
+| `light_epg` | solo se escribe si es `false`: guía sin descripciones (por defecto sí) |
+| `quality_priority` | `{ "hd" = 9, "full hd" = 8, … }`; más número, más prioridad |
+
+### `[targets.overrides]` — EPG a mano por url
+
+```toml
+[targets.overrides]
+"http://proveedor/canal/3849" = "M+ LALIGA TV HD"
+```
+
+El valor es un channel-id del XMLTV (o `weteve-dummy-…`). Tiene prioridad sobre
+el emparejamiento automático.
+
+### `[targets.channels."<identidad>"]` — la ficha del canal
+
+```toml
+[targets.channels."MLIGA"]
+dial    = 54
+display = "M+ LALIGA"
+logo    = "MLIGA.png"
+alias   = "M+ LaLigaTVHD"     # nombre interno con el que se vio
+
+[targets.channels."url-0df14a8e7a69"]
+logo = "Odisea.png"
+```
+
+- Clave: el código de guía (`MLIGA`) o, si no lo hay, `url-<hash>` / `name-<base>`.
+- `dial` fuerza el número (1–9999, único entre los servidos).
+- `display` es el nombre que ve el reproductor; vacío = el de la guía.
+- `logo` es un fichero de `assets/logos` (el demonio lo sirve en `/logos/`).
+- Solo se escriben los campos que difieren del automático.
 
 ### Reglas (`rules`)
 
-Sintaxis xTeVe: `campo:patrón:case[:operador]`, unidas por `|`.
-
-- `campo`: `group-title` | `custom-filter` | `tvg-group` | `extgrp` | `source`.
-- `patrón`: texto a buscar; `{texto}` incluye; `!{texto}` excluye (la exclusión
-  gana siempre, antes de evaluar operadores).
-- `case`: `0` insensible, `1` respeta mayúsculas.
-- `operador`: `or` (default, se omite) o `and`. Las reglas `and` son
-  obligatorias; entre las `or` basta una.
-
-```ini
-rules = group-title:SPAIN:0:and|custom-filter:!{HBO}:0:and|group-title:Cine:0:or
+```
+group-title:TEXTO:0:and          incluye si el grupo contiene TEXTO (AND)
+custom-filter:!{TEXTO}:0:and     excluye si el nombre contiene TEXTO
 ```
 
-### Mapeos EPG (`epg_overrides`)
+Operador final `and`/`or`; `{texto}` incluye además, `!{texto}` excluye. La
+comparación es subcadena, sin expresiones regulares.
 
-`url-del-canal::channel-id` separados por `;;`. El `channel-id` es el del XMLTV;
-`Dummy 1h` se guarda como id sintético (`weteve-dummy-…`) en esta misma clave.
-Gana siempre sobre el emparejamiento automático (`tvg-id` y luego nombre
-normalizado), que **no se persiste**: se recalcula en cada ejecución.
+### Prioridad de calidad
 
+Agrupa variantes por identidad y nombre base, y sirve **una**. `0` = no servir
+nunca esa calidad; `1` = último recurso. Con tabla vacía se usan las de fábrica
+(4K > Full HD > HD > sin etiqueta > SD).
+
+## Migración desde `config.ini`
+
+```bat
+python daemon.py migrate-config           :: crea daemon.toml + weteve.ini
+python daemon.py migrate-config --check   :: comprueba que coinciden
 ```
-epg_overrides = http://host/canal/1::La 1 HD;;http://host/canal/2::La 2
-```
 
-### Desactivados (`disabled_channels`)
-
-URLs de canal separadas por `||`. Se excluyen antes de numerar; siguen visibles
-en la tabla de mapeo para poder reactivarlos.
-
-## `[source.<id>]` — cartera global de fuentes
-
-| Clave | Valores | Notas |
-|---|---|---|
-| `name` | texto | etiqueta para el filtro `source` |
-| `kind` | `m3u` \| `epg` | |
-| `source_type` | `file` \| `url` \| `movistar` | se infiere de `location` si falta |
-| `location` | ruta, URL http(s) o `movistar://epg` | una URL sin host (`http://`) se rechaza |
-| `refresh_min` | entero ≥ 0 | minutos entre recargas; `0` = estática |
-| `enabled` | `1` \| `0` | fila disponible para los targets |
-
-Cada target elige filas con `m3u_sources` / `epg_sources` (ids separados por
-coma). Sin ninguna fila seleccionada, el target usa `custom_m3u`/`custom_epg`.
-
-### Guía de Movistar+ (`movistar`)
-
-`location = "movistar://epg"` (o `movistar://epg?span=7`, de 1 a 7 días; por
-defecto 3, que son 4 días de parrilla). No es XMLTV: son dos endpoints JSON de
-la API OTT de Movistar+, y además de los programas publica el **dial** y el
-**logo** de cada canal.
-
-Eso cambia la lista servida: `tvg-chno` pasa a ser el dial real (1, 2, 3, 4, 7…,
-con sus huecos) y `tvg-logo`, el logo vigente del proveedor. Los canales sin
-dial (los que no están en el dial de Movistar+) se numeran a continuación del
-último dial. Cuando dos guías anuncian el mismo canal, gana la que publica
-dial y logo, aunque la otra lo anuncie con un nombre exacto.
-
-Un mapeo manual (`epg_overrides`) sigue mandando: si apunta a un id de otra
-guía, ese canal deja de recibir dial y logo de Movistar+.
-
-## Migración automática
-
-Una config antigua de fuente única (`custom_m3u`/`custom_epg` sin
-`m3u_sources`/`epg_sources`) se migra sola al arrancar el demonio: crea las filas
-`[source.*]` y enlaza el target. Es idempotente y solo escribe si hay algo que
-migrar; la GUI ya no migra nada.
+`config.ini` se conserva; bórralo cuando compruebes que todo va.

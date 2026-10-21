@@ -1,88 +1,101 @@
 # Puesta en marcha (10 minutos)
 
-Objetivo: tener weteve sirviendo una lista filtrada con guía EPG y comprobarlo
-desde un reproductor IPTV. No hace falta tocar código.
+Al final tendrás el demonio sirviendo una lista M3U y su guía en un único puerto,
+y la ventana para configurarla.
 
 ## 1. Requisitos
 
-- Windows 10/11 (probado ahí; el resto de plataformas no se prueba).
-- Python 3.11.
-- Una lista M3U (URL o fichero) y, si quieres guía, un XMLTV (`.xml`, `.xmltv`,
-  `.gz`).
+- Windows (probado en Windows 11), Python 3.11.
+- Opcional: `es.exe` (Everything) solo para los atajos de búsqueda del repo.
 
 ## 2. Instalar
 
-```powershell
+```bat
 cd K:\weteve
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
+.venv\Scripts\pip install -r requirements.txt
 ```
 
 ## 3. Configurar
 
-Copia `config.ini.example` a `config.ini` si no existe y edita la sección del
-target:
+Hay **dos** ficheros, con escritores distintos:
+
+- `daemon.toml` — datos: cartera de fuentes y perfiles. Lo escribe el demonio.
+- `weteve.ini` — cómo escucha: host, puerto, token y arranque. Lo escribe la GUI.
+
+Lo mínimo de `weteve.ini`:
 
 ```ini
 [DAEMON]
 control_host = 127.0.0.1
 control_port = 34400
-mcp_port = 34401
 mcp_token =
-
-[listmanager.target.0]
-name = mi lista
-custom_m3u = C:/ruta/lista.m3u
-custom_epg = C:/ruta/guia.xml
-rules =
+autostart = 1
+stop_on_exit = 0
 ```
 
-Detalle de cada clave: [`referencia-configuracion.md`](referencia-configuracion.md).
+Un `daemon.toml` mínimo con una lista y un perfil:
+
+```toml
+version = 2
+
+[[sources]]
+id = "lista1"
+name = "mi-lista"
+kind = "m3u"
+source_type = "url"
+location = "http://proveedor/lista.m3u"
+refresh_min = 720
+enabled = true
+
+[[targets]]
+id = "0"
+name = "salon"
+port = 34400
+bind = "127.0.0.1"
+starting_number = 1
+m3u_sources = ["lista1"]
+epg_sources = []
+rules = ["group-title:ESPAÑA:0:and"]
+```
+
+Si vienes del `config.ini` viejo: `python daemon.py migrate-config` (y
+`--check` para comprobar que coincide).
 
 ## 4. Arrancar
 
-```powershell
-python daemon.py run      # motor: pipeline + playlist en :9999
-python main.py            # GUI (opcional; sin demonio no muestra datos)
+```bat
+.venv\Scripts\python.exe daemon.py run
 ```
 
-Al arrancar, el demonio migra configs antiguas de fuente única a la cartera y
-publica **todo en un solo puerto** (`[DAEMON] control_port`, 34400):
-
-- `http://127.0.0.1:34400/weteve/0/playlist.m3u`
-- `http://127.0.0.1:34400/weteve/0/epg.xml`
-- alias cortos: `/weteve/playlist.m3u` y los heredados `/playlist.m3u` / `/epg.xml`
+Solo puede haber **un** demonio por `daemon.toml`: el segundo proceso sale con
+`ya está en marcha en host:puerto` (exit 0) sin abrir nada.
 
 ## 5. Comprobar que sirve
 
-```powershell
-python scripts/healthcheck.py
+```bat
+curl http://127.0.0.1:34400/m3u/weteve_0.m3u
+curl http://127.0.0.1:34400/xmltv/weteve_0.xml
 ```
 
-Debe terminar con `Resumen: N OK, 0 FAIL`. Comprueba la API de control, el MCP,
-el estado del target, la playlist, el EPG y cada fuente de la cartera.
-
-También puedes apuntar VLC/Jellyfin a la URL de `playlist.m3u`.
+La cabecera del M3U anuncia la guía (`url-tvg`), así que la app del móvil puede
+descargarla sola.
 
 ## 6. Usar la GUI (opcional)
 
-Pestañas: **Estado** (semáforo 🟢/🔴 del demonio y URL de cada servicio:
-control, REST, MCP, playlist y EPG), **Listas IPTV**, **Listas EPG**, **Filtros**
-(con vista previa en vivo), **Mapeado EPG**, **Configuración**, **Logs**.
+```bat
+.venv\Scripts\python.exe main.py
+```
 
-El botón «Iniciar demonio» lo lanza **sin ventana de cmd**: los logs quedan en
-`logs/weteve-daemon.log`.
-
-- Guardar escribe **en el demonio** por la API: no hay guardado local.
-- «Iniciar servicio» arranca/para el servidor del target, que vive en el demonio.
-- Casillas de `Configuración`: arrancar el demonio al abrir y pararlo al cerrar
-  (solo si lo arrancó la ventana).
+Pestañas: Estado, Listas IPTV, Filtros iptv, Listas EPG, Mapeado IPTV ↔ EPG,
+Catálogo de la guía, Configuración, Logs. La ventana es un **cliente** del
+demonio: sin demonio no sirve la lista, aunque sí deja editar y guardar.
 
 ## 7. Dejarlo permanente
 
-```powershell
-python daemon.py install-task   # tarea al iniciar sesión
-python daemon.py status         # ¿está vivo?
-python daemon.py stop
+```bat
+.venv\Scripts\python.exe daemon.py install-task
 ```
+
+Registra la tarea `weteve-daemon` al iniciar sesión. Para pararlo:
+`python daemon.py stop`.

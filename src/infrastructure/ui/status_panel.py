@@ -63,13 +63,12 @@ class StatusPanel(QWidget):
         self.state_label.setText(text)
 
     def _url_rows(self, root: str) -> list[tuple[str, str]]:
-        base = f"{root}/weteve/{self._target_id}"
         return [
             ("API de control", f"{root}/health"),
             ("REST", f"{root}/api/v1"),
             ("MCP", f"{root}/mcp"),
-            ("Playlist", f"{base}/playlist.m3u"),
-            ("EPG", f"{base}/epg.xml"),
+            ("Playlist", f"{root}/m3u/weteve_{self._target_id}.m3u"),
+            ("EPG", f"{root}/xmltv/weteve_{self._target_id}.xml"),
         ]
 
     def _fill_urls(self, root: str) -> None:
@@ -125,13 +124,13 @@ class StatusPanel(QWidget):
         self._set_state(
             GREEN,
             f"Demonio en marcha en {client.root_url} · "
-            f"{len(served)} de {len(targets)} target(s) sirviendo")
+            f"{len(served)} de {len(targets)} perfil(es) sirviendo")
 
         if not targets:
-            self._add_target_line("Sin targets definidos en config.ini.")
+            self._add_target_line("Sin perfiles definidos en daemon.toml.")
         for tid, t in sorted(targets.items()):
             running = bool(t.get("running"))
-            line = (f"{GREEN if running else RED} target {tid} · "
+            line = (f"{GREEN if running else RED} Perfil {tid} · "
                     f"{t.get('name', '?')} · "
                     f"{'sirviendo' if running else 'parado'}")
             if running and t.get("channel_count") is not None:

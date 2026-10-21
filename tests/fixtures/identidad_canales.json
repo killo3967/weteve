@@ -1,0 +1,1344 @@
+{
+ "_nota": "Instantánea real del 2026-10-20 (target 'test'): nombres que publica la lista IPTV y canal de la guía de Movistar+ que les corresponde. Fija el comportamiento del matcher, no el catálogo del proveedor.",
+ "guia_movistar": [
+  [
+   "13TV",
+   "TRECE",
+   45
+  ],
+  [
+   "24H",
+   "24 Horas",
+   127
+  ],
+  [
+   "A3",
+   "Antena 3",
+   3
+  ],
+  [
+   "ALJAZE",
+   "Al Jazeera English",
+   132
+  ],
+  [
+   "ANTV",
+   "Canal Sur Andalucía",
+   151
+  ],
+  [
+   "ARAGON",
+   "Aragón TV Int",
+   156
+  ],
+  [
+   "ARTHUR",
+   "M+ Deportes 2",
+   64
+  ],
+  [
+   "ATRESS",
+   "Atreseries",
+   49
+  ],
+  [
+   "AXN",
+   "AXN",
+   38
+  ],
+  [
+   "BABY",
+   "Baby TV",
+   110
+  ],
+  [
+   "BBC",
+   "BBC News",
+   128
+  ],
+  [
+   "BBCEAR",
+   "BBC Earth",
+   90
+  ],
+  [
+   "BBCLIF",
+   "BBC Lifestyle",
+   93
+  ],
+  [
+   "BBDRA",
+   "BBC Series",
+   32
+  ],
+  [
+   "BBFOO",
+   "BBC Food",
+   92
+  ],
+  [
+   "BBGEA",
+   "BBC Top Gear",
+   34
+  ],
+  [
+   "BBHIS",
+   "BBC History",
+   88
+  ],
+  [
+   "BEMAD",
+   "BE MAD",
+   36
+  ],
+  [
+   "BL",
+   "Bloomberg",
+   138
+  ],
+  [
+   "BOING",
+   "BOING",
+   117
+  ],
+  [
+   "C4",
+   "Cuatro",
+   4
+  ],
+  [
+   "CAZPES",
+   "Caza y Pesca",
+   82
+  ],
+  [
+   "CCTV-E",
+   "CGTN Español",
+   141
+  ],
+  [
+   "CHAP1",
+   "M+ Liga de Campeones 2",
+   61
+  ],
+  [
+   "CHAP10",
+   "M+ Liga de Campeones 11",
+   187
+  ],
+  [
+   "CHAP11",
+   "M+ Liga de Campeones 12",
+   188
+  ],
+  [
+   "CHAP12",
+   "M+ Liga de Campeones 13",
+   189
+  ],
+  [
+   "CHAP13",
+   "M+ Liga de Campeones 14",
+   170
+  ],
+  [
+   "CHAP14",
+   "M+ Liga de Campeones 15",
+   171
+  ],
+  [
+   "CHAP15",
+   "M+ Liga de Campeones 16",
+   172
+  ],
+  [
+   "CHAP16",
+   "M+ Liga de Campeones 17",
+   173
+  ],
+  [
+   "CHAP18",
+   "M+ Liga de Campeones 18",
+   174
+  ],
+  [
+   "CHAP19",
+   "M+ Liga de Campeones 19",
+   175
+  ],
+  [
+   "CHAP2",
+   "M+ Liga de Campeones  3",
+   62
+  ],
+  [
+   "CHAP3",
+   "M+ Liga de Campeones  4",
+   180
+  ],
+  [
+   "CHAP4",
+   "M+ Liga de Campeones 5",
+   181
+  ],
+  [
+   "CHAP5",
+   "M+ Liga de Campeones 6",
+   182
+  ],
+  [
+   "CHAP6",
+   "M+ Liga de Campeones 7",
+   183
+  ],
+  [
+   "CHAP7",
+   "M+ Liga de Campeones 8",
+   184
+  ],
+  [
+   "CHAP8",
+   "M+ Liga de Campeones 9",
+   185
+  ],
+  [
+   "CHAP9",
+   "M+ Liga de Campeones 10",
+   186
+  ],
+  [
+   "CHAPIO",
+   "M+ Liga de Campeones",
+   60
+  ],
+  [
+   "CL13",
+   "Calle 13",
+   41
+  ],
+  [
+   "CLANTV",
+   "Clan TVE",
+   118
+  ],
+  [
+   "CLASSD",
+   "Classica",
+   125
+  ],
+  [
+   "CNN",
+   "CNN Int",
+   129
+  ],
+  [
+   "COSMO",
+   "COSMO",
+   42
+  ],
+  [
+   "CPACCI",
+   "M+ Acción",
+   21
+  ],
+  [
+   "CPCOLE",
+   "M+ Drama",
+   23
+  ],
+  [
+   "CPCOME",
+   "M+ Comedia",
+   22
+  ],
+  [
+   "CPDEP",
+   "M+ Deportes",
+   63
+  ],
+  [
+   "DAZB2",
+   "DAZN Baloncesto 2",
+   75
+  ],
+  [
+   "DAZB3",
+   "DAZN Baloncesto 3",
+   76
+  ],
+  [
+   "DAZBA",
+   "DAZN Baloncesto",
+   74
+  ],
+  [
+   "DAZMOT",
+   "DAZN MotoGP",
+   71
+  ],
+  [
+   "DAZN3",
+   "DAZN 3",
+   197
+  ],
+  [
+   "DAZN4",
+   "DAZN 4",
+   198
+  ],
+  [
+   "DAZNL2",
+   "DAZN LALIGA 2",
+   58
+  ],
+  [
+   "DAZNLI",
+   "DAZN LALIGA",
+   55
+  ],
+  [
+   "DCESP",
+   "M+ Cine Español",
+   25
+  ],
+  [
+   "DCR",
+   "Discovery",
+   89
+  ],
+  [
+   "DCRMAX",
+   "DMAX",
+   91
+  ],
+  [
+   "DIVINI",
+   "Divinity",
+   95
+  ],
+  [
+   "DKISS",
+   "DKISS",
+   94
+  ],
+  [
+   "DWSP",
+   "Dreamworks",
+   115
+  ],
+  [
+   "ENERGY",
+   "ENERGY",
+   46
+  ],
+  [
+   "ENW",
+   "Euronews",
+   131
+  ],
+  [
+   "ESP",
+   "Eurosport 1",
+   77
+  ],
+  [
+   "ESP2",
+   "Eurosport 2",
+   78
+  ],
+  [
+   "ETB",
+   "ETB",
+   159
+  ],
+  [
+   "ETB3",
+   "etb1ON",
+   158
+  ],
+  [
+   "EXTREM",
+   "Canal Extremadura Sat",
+   153
+  ],
+  [
+   "FDFIC",
+   "Factoría de Ficción",
+   47
+  ],
+  [
+   "FLIX1",
+   "Canal FlixOlé 1",
+   28
+  ],
+  [
+   "FLIX2",
+   "Canal FlixOlé 2",
+   29
+  ],
+  [
+   "FOXGE",
+   "STAR Channel",
+   37
+  ],
+  [
+   "FRANCE",
+   "FRANCE24 (FR)",
+   133
+  ],
+  [
+   "GOL",
+   "Replay",
+   79
+  ],
+  [
+   "GOLF+",
+   "M+ Golf",
+   68
+  ],
+  [
+   "GOLF2",
+   "M+ Golf 2",
+   69
+  ],
+  [
+   "INTECO",
+   "El Toro TV",
+   139
+  ],
+  [
+   "INTEUA",
+   "1+1 Internacional",
+   135
+  ],
+  [
+   "LA2",
+   "LA 2",
+   2
+  ],
+  [
+   "M1SD",
+   "DAZN 1",
+   72
+  ],
+  [
+   "M2SD",
+   "DAZN 2",
+   73
+  ],
+  [
+   "MAXAVA",
+   "HBO Max Avances",
+   26
+  ],
+  [
+   "MBALC2",
+   "M+ Baloncesto 2",
+   67
+  ],
+  [
+   "MBALC3",
+   "M+ Baloncesto 3",
+   194
+  ],
+  [
+   "MBALC4",
+   "M+ Baloncesto 4",
+   195
+  ],
+  [
+   "MBALC5",
+   "M+ Baloncesto 5",
+   196
+  ],
+  [
+   "MBALCT",
+   "M+ Baloncesto",
+   66
+  ],
+  [
+   "MCLAS",
+   "M+ Clásicos",
+   20
+  ],
+  [
+   "MCOPA",
+   "Primera Federación",
+   53
+  ],
+  [
+   "MDOC",
+   "M+ Documentales",
+   17
+  ],
+  [
+   "MEGA",
+   "Mega",
+   97
+  ],
+  [
+   "MELLAV",
+   "M+ Vamos 3",
+   52
+  ],
+  [
+   "MEZZLI",
+   "Mezzo Live",
+   124
+  ],
+  [
+   "MEZZO",
+   "MEZZO",
+   123
+  ],
+  [
+   "MHITS",
+   "M+ Hits",
+   13
+  ],
+  [
+   "MINDI",
+   "M+ Indie",
+   24
+  ],
+  [
+   "MLIG1",
+   "M+ LALIGA 2",
+   57
+  ],
+  [
+   "MLIG2",
+   "M+ LALIGA 3",
+   167
+  ],
+  [
+   "MLIG3",
+   "M+ LALIGA 4",
+   168
+  ],
+  [
+   "MLIGA",
+   "M+ LALIGA",
+   54
+  ],
+  [
+   "MLIGS",
+   "LALIGA TV HYPERMOTION",
+   56
+  ],
+  [
+   "MLIGS2",
+   "LALIGA TV HYPERMOTION 2",
+   59
+  ],
+  [
+   "MLIGS3",
+   "LALIGA TV HYPERMOTION 3",
+   178
+  ],
+  [
+   "MORIG",
+   "M+ Originales",
+   14
+  ],
+  [
+   "MPLUS",
+   "Movistar Plus",
+   7
+  ],
+  [
+   "MROMA",
+   "M+ Romance",
+   18
+  ],
+  [
+   "MTV",
+   "MTV",
+   120
+  ],
+  [
+   "MULTI8",
+   "M+ Deportes 6",
+   193
+  ],
+  [
+   "MV1",
+   "M+ Estrenos",
+   12
+  ],
+  [
+   "MVF1",
+   "DAZN F1",
+   70
+  ],
+  [
+   "NATGEO",
+   "National Geographic",
+   86
+  ],
+  [
+   "NATGW",
+   "Nat Geo Wild",
+   87
+  ],
+  [
+   "NBC",
+   "CNBC",
+   136
+  ],
+  [
+   "NEGOTV",
+   "Negocios TV",
+   140
+  ],
+  [
+   "NEOX",
+   "Neox",
+   48
+  ],
+  [
+   "NICK",
+   "Nickelodeon",
+   114
+  ],
+  [
+   "NICKJR",
+   "NICK JR",
+   113
+  ],
+  [
+   "NOVA",
+   "Nova",
+   96
+  ],
+  [
+   "PCM",
+   "Comedy Central",
+   40
+  ],
+  [
+   "PLAYDC",
+   "Disney Channel",
+   111
+  ],
+  [
+   "REALM",
+   "Real Madrid TV",
+   81
+  ],
+  [
+   "RED",
+   "Canal RED",
+   150
+  ],
+  [
+   "SCI-FI",
+   "SciFi",
+   43
+  ],
+  [
+   "SET",
+   "AXN Movies",
+   31
+  ],
+  [
+   "SEXTA",
+   "La Sexta",
+   6
+  ],
+  [
+   "SKYSHO",
+   "SkyShowtime 1",
+   27
+  ],
+  [
+   "SQUI",
+   "Squirrel",
+   35
+  ],
+  [
+   "T5",
+   "Telecinco",
+   5
+  ],
+  [
+   "TCM",
+   "TCM",
+   30
+  ],
+  [
+   "TDEP",
+   "Teledeporte",
+   80
+  ],
+  [
+   "TELMIN",
+   "Telemadrid Int.",
+   157
+  ],
+  [
+   "TEN",
+   "TEN",
+   98
+  ],
+  [
+   "TERROR",
+   "M+ Terror",
+   15
+  ],
+  [
+   "TNT",
+   "Warner TV",
+   39
+  ],
+  [
+   "TV5",
+   "TV5MONDE",
+   137
+  ],
+  [
+   "TVC",
+   "TV3 Cat",
+   154
+  ],
+  [
+   "TVE",
+   "LA 1",
+   1
+  ],
+  [
+   "TVG",
+   "TVG",
+   152
+  ],
+  [
+   "UCL",
+   "UCL",
+   143
+  ],
+  [
+   "USOP11",
+   "M+ Deportes 5",
+   192
+  ],
+  [
+   "USOP2",
+   "M+ Deportes 3",
+   65
+  ],
+  [
+   "USOP3",
+   "M+ Deportes 4",
+   191
+  ],
+  [
+   "VAM2SD",
+   "M+ Vamos 2",
+   51
+  ],
+  [
+   "VAMOSD",
+   "M+ Vamos",
+   8
+  ],
+  [
+   "VEO7",
+   "Veo7",
+   44
+  ]
+ ],
+ "canales_iptv": [
+  [
+   "LA 1 HD",
+   "TVE"
+  ],
+  [
+   "LA 2 HD",
+   "LA2"
+  ],
+  [
+   "ANTENA 3 HD",
+   "A3"
+  ],
+  [
+   "CUATRO HD",
+   "C4"
+  ],
+  [
+   "TELECINCO HD",
+   "T5"
+  ],
+  [
+   "LA SEXTA HD",
+   "SEXTA"
+  ],
+  [
+   "M+ VAMOS FULL HD",
+   "VAMOSD"
+  ],
+  [
+   "M+ Estrenos HD",
+   "MV1"
+  ],
+  [
+   "M+ Originales HD",
+   "MORIG"
+  ],
+  [
+   "M+ CLASICOS HD",
+   "MCLAS"
+  ],
+  [
+   "M+ ACCION HD",
+   "CPACCI"
+  ],
+  [
+   "M+ COMEDIA HD",
+   "CPCOME"
+  ],
+  [
+   "M+ DRAMA HD",
+   "CPCOLE"
+  ],
+  [
+   "M+ Indie HD",
+   "MINDI"
+  ],
+  [
+   "M+ Cine Español FULL HD",
+   "DCESP"
+  ],
+  [
+   "TCM FULL HD",
+   "TCM"
+  ],
+  [
+   "AXN MOVIES HD",
+   "SET"
+  ],
+  [
+   "BBC DRAMA",
+   null
+  ],
+  [
+   "BBC TOP GEAR",
+   "BBGEA"
+  ],
+  [
+   "BeMad tv HD",
+   "BEMAD"
+  ],
+  [
+   "STAR Channel",
+   "FOXGE"
+  ],
+  [
+   "AXN HD",
+   "AXN"
+  ],
+  [
+   "COMEDYCENTRAL FULL HD",
+   "PCM"
+  ],
+  [
+   "CALLE 13 HD",
+   "CL13"
+  ],
+  [
+   "COSMO FULL HD",
+   "COSMO"
+  ],
+  [
+   "TRECE",
+   "13TV"
+  ],
+  [
+   "ENERGY FULL HD",
+   "ENERGY"
+  ],
+  [
+   "NEOX FULL HD",
+   "NEOX"
+  ],
+  [
+   "atreseries HD",
+   "ATRESS"
+  ],
+  [
+   "M+ VAMOS 2 HD",
+   "VAM2SD"
+  ],
+  [
+   "DAZN LaLiga HD",
+   "DAZNLI"
+  ],
+  [
+   "LALIGA TV HYPERMOTION HD",
+   "MLIGS"
+  ],
+  [
+   "DAZN LALIGA 2 FULL HD",
+   "DAZNL2"
+  ],
+  [
+   "LALIGA TV HYPERMOTION 2 HD",
+   "MLIGS2"
+  ],
+  [
+   "M+ LCAMPEONES 2 HD",
+   "CHAP1"
+  ],
+  [
+   "M+ DEPORTES FULL HD",
+   "CPDEP"
+  ],
+  [
+   "M+ DEPORTES2 FULL HD",
+   "ARTHUR"
+  ],
+  [
+   "M+ DEPORTES3 (SOLO EVENTOS)",
+   "USOP2"
+  ],
+  [
+   "M+ GOLF HD",
+   "GOLF+"
+  ],
+  [
+   "M+ GOLF 2 HD",
+   "GOLF2"
+  ],
+  [
+   "DAZN F1 HD",
+   "MVF1"
+  ],
+  [
+   "DAZN 1 HD",
+   "M1SD"
+  ],
+  [
+   "DAZN 2 HD",
+   "M2SD"
+  ],
+  [
+   "DAZNBaloncesto",
+   "DAZBA"
+  ],
+  [
+   "DAZNBaloncesto2",
+   "DAZB2"
+  ],
+  [
+   "DAZNBaloncesto3",
+   "DAZB3"
+  ],
+  [
+   "EUROSPORT 1 HD",
+   "ESP"
+  ],
+  [
+   "EUROSPORT 2 FULL HD",
+   "ESP2"
+  ],
+  [
+   "TELEDEPORTE HD",
+   "TDEP"
+  ],
+  [
+   "Realmadrid TV HD",
+   "REALM"
+  ],
+  [
+   "NAT GEO WILD FULL HD",
+   "NATGW"
+  ],
+  [
+   "BBC HISTORY",
+   "BBHIS"
+  ],
+  [
+   "DISCOVERY FULL HD",
+   "DCR"
+  ],
+  [
+   "DMAX",
+   "DCRMAX"
+  ],
+  [
+   "BBC FOOD",
+   "BBFOO"
+  ],
+  [
+   "DKISS",
+   "DKISS"
+  ],
+  [
+   "DIVINITY FULL HD",
+   "DIVINI"
+  ],
+  [
+   "NOVA FULL HD",
+   "NOVA"
+  ],
+  [
+   "mega",
+   "MEGA"
+  ],
+  [
+   "TEN",
+   "TEN"
+  ],
+  [
+   "BABY TV FULL HD",
+   "BABY"
+  ],
+  [
+   "DISNEY CH HD",
+   "PLAYDC"
+  ],
+  [
+   "NICK JR FULL HD",
+   "NICKJR"
+  ],
+  [
+   "NICKELODEON FULL HD",
+   "NICK"
+  ],
+  [
+   "DreamWorks FULL HD",
+   "DWSP"
+  ],
+  [
+   "BOING FULL HD",
+   "BOING"
+  ],
+  [
+   "CLAN TVE FULL HD",
+   "CLANTV"
+  ],
+  [
+   "MEZZO LIVE HD",
+   "MEZZLI"
+  ],
+  [
+   "Classica",
+   "CLASSD"
+  ],
+  [
+   "24 HORAS FULL HD",
+   "24H"
+  ],
+  [
+   "UEFA Champions League",
+   null
+  ],
+  [
+   "LALIGA TV HYPERMOTION 3 HD",
+   "MLIGS3"
+  ],
+  [
+   "M+ DEPORTES4 (SOLO EVENTOS)",
+   "USOP3"
+  ],
+  [
+   "M+ DEPORTES5 (SOLO EVENTOS)",
+   "USOP11"
+  ],
+  [
+   "M+ DEPORTES6 (SOLO EVENTOS)",
+   "MULTI8"
+  ],
+  [
+   "DAZN 3 HD",
+   "DAZN3"
+  ],
+  [
+   "DAZN 4 HD",
+   "DAZN4"
+  ],
+  [
+   "CANAL SUR HD",
+   null
+  ],
+  [
+   "CANAL SUR 2 HD",
+   null
+  ],
+  [
+   "AndaluciaTV",
+   null
+  ],
+  [
+   "BOM",
+   null
+  ],
+  [
+   "PARAMOUNT NETWORK",
+   null
+  ],
+  [
+   "SOMOS",
+   null
+  ],
+  [
+   "GOL PLAY FULL HD",
+   null
+  ],
+  [
+   "ARAGON TV FULL HD",
+   "ARAGON"
+  ],
+  [
+   "AMC BREAK FULL HD",
+   null
+  ],
+  [
+   "AMC CRIME FULL HD",
+   null
+  ],
+  [
+   "SYFY FULL HD",
+   null
+  ],
+  [
+   "WARNERTV FULL HD",
+   "TNT"
+  ],
+  [
+   "PARAMOUNT FULL HD",
+   null
+  ],
+  [
+   "FDF FULL HD",
+   null
+  ],
+  [
+   "MULTIDEPORTE FULL HD",
+   null
+  ],
+  [
+   "CANAL COCINA FULL HD",
+   null
+  ],
+  [
+   "SUNDANCE TV FULL HD",
+   null
+  ],
+  [
+   "NAT GEO FULL HD",
+   null
+  ],
+  [
+   "CANAL ODISEA FULL HD",
+   null
+  ],
+  [
+   "HISTORIA FULL HD",
+   null
+  ],
+  [
+   "IBERALIA TV FULL HD",
+   null
+  ],
+  [
+   "MTV ESPANA FULL HD",
+   null
+  ],
+  [
+   "ENFAMILIA FULL HD",
+   null
+  ],
+  [
+   "DISNEY JR FULL HD",
+   null
+  ],
+  [
+   "M+ Cine Espagnol",
+   "DCESP"
+  ],
+  [
+   "HOLLYWOOD",
+   null
+  ],
+  [
+   "M+Documentales HD",
+   "MDOC"
+  ],
+  [
+   "CAZAVISION",
+   null
+  ],
+  [
+   "CAZAyPESCA HD",
+   "CAZPES"
+  ],
+  [
+   "M+ SERIES HD",
+   null
+  ],
+  [
+   "AMC HD",
+   null
+  ],
+  [
+   "A3SERIES",
+   null
+  ],
+  [
+   "ONETORO HD",
+   null
+  ],
+  [
+   "BE MAD HD",
+   "BEMAD"
+  ],
+  [
+   "M+ LaLigaTVHD",
+   "MLIGA"
+  ],
+  [
+   "M+ LaLigaTVHD+",
+   "MLIGA"
+  ],
+  [
+   "M+ LaLigaTVSD",
+   "MLIGA"
+  ],
+  [
+   "M+ LaLigaTV FULL HD",
+   "MLIGA"
+  ],
+  [
+   "M+ LaLigaTV 2 HD",
+   "MLIG1"
+  ],
+  [
+   "M+ LaLigaTV 3 HD",
+   "MLIG2"
+  ],
+  [
+   "M+ LaLigaTV 4",
+   "MLIG3"
+  ],
+  [
+   "DAZN LaLiga HD+",
+   "DAZNLI"
+  ],
+  [
+   "DAZN LaLiga",
+   "DAZNLI"
+  ],
+  [
+   "DAZN LaLiga2 HD",
+   "DAZNL2"
+  ],
+  [
+   "DAZN MOTO GP HD",
+   "DAZMOT"
+  ],
+  [
+   "M+ LCAMPEONES HD",
+   "CHAPIO"
+  ],
+  [
+   "M+ LCAMPEONES HD+",
+   "CHAPIO"
+  ],
+  [
+   "M+ LCAMPEONES 3 HD (SOLO EVENTOS)",
+   "CHAP2"
+  ],
+  [
+   "M+ LCAMPEONES 3 FULL HD",
+   "CHAP2"
+  ],
+  [
+   "M+LCAMPEON4",
+   "CHAP3"
+  ],
+  [
+   "M+LCAMPEON5",
+   "CHAP4"
+  ],
+  [
+   "M+LCAMPEON6",
+   "CHAP5"
+  ],
+  [
+   "M+LCAMPEON7",
+   "CHAP6"
+  ],
+  [
+   "M+LCAMPEON8",
+   "CHAP7"
+  ],
+  [
+   "M+LCAMPEON9",
+   "CHAP8"
+  ],
+  [
+   "M+LCAMPEON10",
+   "CHAP9"
+  ],
+  [
+   "M+LCAMPEON11",
+   "CHAP10"
+  ],
+  [
+   "M+LCAMPEON12",
+   "CHAP11"
+  ],
+  [
+   "M+LCAMPEON13",
+   "CHAP12"
+  ],
+  [
+   "M+LCAMPEON14",
+   "CHAP13"
+  ],
+  [
+   "M+LCAMPEON19",
+   "CHAP19"
+  ],
+  [
+   "M+LCAMPEON18",
+   "CHAP18"
+  ],
+  [
+   "M+LCAMPEON17",
+   "CHAP16"
+  ],
+  [
+   "M+LCAMPEON16",
+   "CHAP15"
+  ],
+  [
+   "M+LCAMPEON15",
+   "CHAP14"
+  ],
+  [
+   "Movistar Plus+ HD",
+   "MPLUS"
+  ],
+  [
+   "EUROSPORT2HD",
+   "ESP2"
+  ],
+  [
+   "M+ #VAMOSHD",
+   "VAMOSD"
+  ],
+  [
+   "M+ DEPORTESHD",
+   "CPDEP"
+  ],
+  [
+   "M+ DEPORTES2HD (SOLO EVENTOS)",
+   "ARTHUR"
+  ],
+  [
+   "TELE MADRID",
+   "TELMIN"
+  ]
+ ]
+}

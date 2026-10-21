@@ -24,6 +24,7 @@ import tomllib
 from pathlib import Path
 
 from src.application.services.list_manager.models import (
+    ChannelProfile,
     FilterRule,
     PipelineTarget,
     SourceRef,
@@ -89,6 +90,11 @@ def dumps(config: dict) -> str:
             if value is None:
                 continue
             lines.append(f"{key} = {_val(value)}")
+        # solo cuando está activo: un fichero sin el toggle no gana ruido
+        if target.get("serve_without_epg"):
+            lines.append("serve_without_epg = true")
+        if target.get("light_epg") is False:
+            lines.append("light_epg = false")
         for key in ("m3u_sources", "epg_sources", "rules", "disabled"):
             lines.append(f"{key} = {_val(list(target.get(key) or []))}")
         priority = target.get("quality_priority") or {}
@@ -104,6 +110,18 @@ def dumps(config: dict) -> str:
             lines.append("[targets.overrides]")
             for url, channel_id in overrides.items():
                 lines.append(f"{_str(url)} = {_str(channel_id)}")
+            lines.append("")
+        # fichas de canal: una tabla por identidad y solo con lo que el
+        # usuario ha tocado (dial forzado, nombre mostrado y logo)
+        for clave, ficha in (target.get("channels") or {}).items():
+            campos = [(k, ficha.get(k)) for k in ("alias", "dial", "display",
+                                                  "logo")]
+            escritos = [(k, v) for k, v in campos if v not in (None, "", 0)]
+            if not escritos:
+                continue
+            lines.append(f'[targets.channels.{_str(clave)}]')
+            for key, value in escritos:
+                lines.append(f"{key} = {_val(value)}")
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -136,6 +154,23 @@ def load(path: Path) -> dict:
 
 
 # -- adaptadores: catálogo y targets ------------------------------------------
+
+def _profile_to_dict(ficha: ChannelProfile) -> dict:
+    """Ficha del dominio → bloque TOML (el escritor filtra los vacíos)."""
+    return {"alias": ficha.alias, "dial": ficha.dial,
+            "display": ficha.display, "logo": ficha.logo}
+
+
+def _profile_from_dict(raw: dict) -> ChannelProfile:
+    """Bloque TOML → ficha del dominio (tolerante con campos de más)."""
+    dial = raw.get("dial")
+    return ChannelProfile(
+        alias=str(raw.get("alias") or ""),
+        dial=int(dial) if dial not in (None, "") else None,
+        display=str(raw.get("display") or ""),
+        logo=str(raw.get("logo") or ""),
+    )
+
 
 def catalog_from(config: dict) -> SourceCatalog:
     """``SourceCatalog`` a partir de los ``[[sources]]`` del fichero."""
@@ -186,6 +221,10 @@ def target_to_dict(target: PipelineTarget, target_id: str) -> dict:
         "rules": [rule.serialize() for rule in target.rules],
         "disabled": list(target.disabled_channels),
         "overrides": dict(target.epg_overrides),
+        "channels": {clave: _profile_to_dict(ficha)
+                     for clave, ficha in target.channels.items()},
+        "serve_without_epg": bool(target.serve_without_epg),
+        "light_epg": bool(target.light_epg),
         "quality_priority": dict(target.quality_priority or {}),
     }
 
@@ -217,6 +256,10 @@ def target_from_dict(raw: dict, catalog: SourceCatalog) -> PipelineTarget:
         source_refs=refs("m3u_sources"),
         epg_refs=refs("epg_sources"),
         disabled_channels=tuple(str(url) for url in raw.get("disabled") or []),
+        channels={str(clave): _profile_from_dict(valor)
+                  for clave, valor in (raw.get("channels") or {}).items()},
+        serve_without_epg=bool(raw.get("serve_without_epg")),
+        light_epg=bool(raw.get("light_epg", True)),
         # vacío = prioridades de fábrica (None), no una tabla con todo a cero
         quality_priority={str(k): int(v) for k, v in
                           (raw.get("quality_priority") or {}).items()} or None,

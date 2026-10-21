@@ -69,7 +69,7 @@ qué guía.
   (lowercase, sin acentos/puntuación, colapsado de espacios).
 - Editor manual de asociación EPG: tabla de canales sin match con sugerencias del
   XMLTV para asignación manual.
-- Mini-web local (solo `localhost` por defecto): `GET /playlist.m3u` (lista filtrada
+- Mini-web local (solo `localhost` por defecto): `GET /m3u/weteve_<perfil>.m3u` (lista filtrada
   y mapeada) y `GET /epg.xml` (guía regenerada solo con canales activos).
 - Persistencia en `config.ini`: nueva sección por objetivo de pipeline.
 
@@ -158,23 +158,36 @@ La UI nunca pide esa sintaxis: ofrece filas "campo = [grupo|nombre] contains [te
 1. Normalización de nombre: `NFKD` → quitar diacríticos → lowercase → quitar
    puntuación → colapsar espacios.
 2. Match 1º por `tvg-id` exacto (canal vs canal del XMLTV).
-3. Fallback por nombre normalizado exacto.
-4. Sin match: el canal **no se sirve** cuando el target tiene fuente EPG
+3. Fallback por nombre normalizado exacto y por nombre base, sin la etiqueta de
+   calidad —también cuando el proveedor la pega al nombre (`M+ LaLigaTVHD`,
+   `M+ #VAMOSHD`)—.
+4. Fallback por parecido de marca: se comparan las palabras significativas
+   (`M+`, `Movistar+` y `Movistar Plus` son la misma marca, el sufijo `TV` no
+   distingue, `M+LCAMPEON4` es `M+ Liga de Campeones 4`, las anotaciones entre
+   paréntesis se ignoran). Dos reglas duras: el sufijo numérico tiene que
+   coincidir (`M+ LaLiga 2` no es `M+ LaLiga`) y el ganador necesita margen
+   sobre el segundo candidato.
+5. **Identidad del canal** (`canonical_id`): el id de la guía que publica dial y
+   logo, resuelto aparte del emparejamiento. Manda para el número, el logo y
+   para agrupar variantes, aunque la parrilla venga de otra guía: un mapeo
+   manual a Koala ya no deja el canal sin dial. Dos nombres del mismo canal
+   (`BeMad tv HD` y `BE MAD HD`) se sirven una sola vez.
+6. Sin match: el canal **no se sirve** cuando el target tiene fuente EPG
    (`require_epg`), porque un canal sin guía es ruido en el reproductor. Se
    conserva en `PipelineResult.excluded_no_epg` para que el editor lo muestre y
    se pueda rescatar. Sin fuente EPG la regla no se aplica: no se puede exigir
    una guía que no existe.
-5. Rescate desde el editor: desplegable con los canales de la guía (o texto
+7. Rescate desde el editor: desplegable con los canales de la guía (o texto
    libre para pegar un channel-id que la guía no anuncia), o `Dummy 1h` para
    generar una guía de relleno sintética (bloques de 1 h, 7 días, títulos con el
    nombre del canal). Las sugerencias por similitud
    (`EpgMatcher.suggestions()`, `difflib`) las expone el daemon como endpoint de
    solo lectura; la tabla de mapeo **no** las usa.
-6. La corrección manual se persiste en `epg_overrides` (`url::canal-id`, pares
+8. La corrección manual se persiste en `epg_overrides` (`url::canal-id`, pares
    separados por `;;`) y tiene prioridad sobre el automático en regeneraciones.
    `Dummy 1h` se persiste como id sintético `weteve-dummy-<hash>` derivado de la
    url, único por canal.
-7. La etiqueta del desplegable se muestra sin el sufijo `.TV` (solo visual: lo
+9. La etiqueta del desplegable se muestra sin el sufijo `.TV` (solo visual: lo
    persistido sigue siendo el channel-id real, p. ej. `La1.TV`). Si la guía
    trajera un canal llamado literalmente `Dummy 1h`, la opción sintética se
    retira y gana el canal real.
@@ -183,7 +196,7 @@ La UI nunca pide esa sintaxis: ofrece filas "campo = [grupo|nombre] contains [te
 
 - `http.server.ThreadingHTTPServer` en hilo daemon; bind `127.0.0.1` (configurable
   a `0.0.0.0` explícitamente si el usuario quiere LAN — warning en la UI).
-- Endpoints: `GET /playlist.m3u` y `GET /epg.xml` (uno por target: `/t/<name>/...`
+- Endpoints: `GET /m3u/weteve_<perfil>.m3u` y `GET /xmltv/weteve_<perfil>.xml`
   si hay más de un target).
 - La salida se **pre-genera** al arrancar el servicio y tras cada edición del
   target; los endpoints solo sirven el string cacheado (rápido, sin I/O por request).
@@ -250,7 +263,7 @@ wizard vacío.
       esperado en fixture).
 - [ ] El EPG de salida contiene solo programas de canales del target, con los
       overrides manuales respetados.
-- [ ] `http://127.0.0.1:<port>/playlist.m3u` y `/epg.xml` responden con el
+- [ ] `http://127.0.0.1:<port>/m3u/weteve_0.m3u` y `/xmltv/weteve_0.xml` responden con el
       contenido regenerado y dejan de responder al parar el servicio.
 - [ ] Config se persiste y sobrevive reinicio de la app.
 - [ ] Suite completa en verde, ruff y mypy sin errores nuevos.

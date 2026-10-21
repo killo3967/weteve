@@ -32,7 +32,8 @@ def _row(name="Antena 3 Internacional", url="http://x/a3int.ts",
 
 def _rows(dialog):
     table = dialog.epg_mapping.table
-    return [table.item(r, 0).text() for r in range(table.rowCount())]
+    columna = dialog.epg_mapping.COL_NAME
+    return [table.item(r, columna).text() for r in range(table.rowCount())]
 
 
 class TestFilasDeLaTabla:
@@ -84,6 +85,32 @@ class TestSinDaemon:
         dialog._refresh_mapping()
         assert dialog.epg_mapping.table.rowCount() == 0
         assert "no responde" in dialog.result_label.text()
+
+
+class TestRevisionDelDemonio:
+    """La tabla se repinta por revisión, no por fecha del fichero."""
+
+    class _Cliente:
+        def __init__(self, revision: int) -> None:
+            self.revision = revision
+
+        def status(self):
+            return 200, {"targets": {"0": {"revision": self.revision}}}
+
+    def test_solo_repinta_cuando_cambia_la_revision(self, dialog):
+        cliente = self._Cliente(1)
+        dialog._api_client = lambda: cliente
+        refrescos: list[int] = []
+        dialog._refresh_mapping = lambda: refrescos.append(1)
+
+        dialog._revisar_revision()
+        assert refrescos == [1], "la primera revisión se pinta"
+        dialog._revisar_revision()
+        assert refrescos == [1], "misma revisión: no se pide la tabla"
+
+        cliente.revision = 2
+        dialog._revisar_revision()
+        assert refrescos == [1, 1], "revisión nueva: se repinta"
 
 
 class TestCanalesYaServidos:
@@ -157,8 +184,9 @@ class TestSeleccionMultipleYMenu:
         self._filas(fake_api)
         dialog._refresh_mapping()
         tabla = dialog.epg_mapping.table
-        tabla.setRangeSelected(QTableWidgetSelectionRange(0, 0, 0, 4), True)
-        tabla.setRangeSelected(QTableWidgetSelectionRange(2, 0, 2, 4), True)
+        ultima = tabla.columnCount() - 1
+        tabla.setRangeSelected(QTableWidgetSelectionRange(0, 0, 0, ultima), True)
+        tabla.setRangeSelected(QTableWidgetSelectionRange(2, 0, 2, ultima), True)
         assert dialog.epg_mapping.selected_rows() == [0, 2]
 
     def test_deshabilitar_desde_el_menu(self, dialog, fake_api):
@@ -214,6 +242,9 @@ class TestSeleccionMultipleYMenu:
 
             def row(self):
                 return 2
+
+            def column(self):
+                return w.COL_NAME      # una columna de fila, no la del logo
 
         monkeypatch.setattr(w.table, "indexAt", lambda pos: _Index())
         w._show_row_menu(w.table.rect().center())

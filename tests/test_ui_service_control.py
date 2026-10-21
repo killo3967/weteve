@@ -31,9 +31,9 @@ class _FakeApi:
             return 0, {"error": "sin conexión"}
         return 200, {
             "name": "test", "running": self.running, "port": 34400,
-            "playlist_url": ("http://127.0.0.1:34400/weteve/0/playlist.m3u"
+            "playlist_url": ("http://127.0.0.1:34400/m3u/weteve_0.m3u"
                              if self.running else None),
-            "epg_url": ("http://127.0.0.1:34400/weteve/0/epg.xml"
+            "epg_url": ("http://127.0.0.1:34400/xmltv/weteve_0.xml"
                         if self.running else None),
         }
 
@@ -66,7 +66,7 @@ def dialog(qtbot, tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def no_modal(monkeypatch):
+def no_modal(monkeypatch) -> list[str]:
     """Sin diálogos modales en los tests."""
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
     warnings: list[str] = []
@@ -107,7 +107,7 @@ class TestServicioEnElDaemon:
         api = _FakeApi(running=True)
         dialog._api_client = lambda: api
         dialog._sync_service_url()
-        assert "/weteve/0/playlist.m3u" in dialog.service_url_label.text()
+        assert "/m3u/weteve_0.m3u" in dialog.service_url_label.text()
 
 
     def test_el_boton_refleja_el_estado_al_refrescar(self, dialog):
@@ -122,10 +122,10 @@ class TestServicioEnElDaemon:
         dialog._api_client = lambda: api
         dialog._toggle_service()
         assert dialog.service_button.text() == "&Iniciar servicio"
-        assert "/weteve/0/playlist.m3u" in dialog.service_url_label.text()
+        assert "/m3u/weteve_0.m3u" in dialog.service_url_label.text()
 
 
-    def test_sin_popup_al_iniciar(self, dialog, monkeypatch):
+    def test_sin_popup_al_iniciar(self, dialog, monkeypatch) -> None:
         """El resultado se ve en la ventana: no hace falta un diálogo modal."""
         avisos: list = []
         monkeypatch.setattr(QMessageBox, "information",
@@ -135,4 +135,4 @@ class TestServicioEnElDaemon:
         dialog._toggle_service()
         assert avisos == []
         assert dialog.service_button.text() == "&Parar servicio"
-        assert "/weteve/0/playlist.m3u" in dialog.service_url_label.text()
+        assert "/m3u/weteve_0.m3u" in dialog.service_url_label.text()

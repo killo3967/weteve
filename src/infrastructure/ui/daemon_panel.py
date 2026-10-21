@@ -40,6 +40,10 @@ class DaemonPanel(QWidget):
         self._target_id = target_id
         self._config_path = config_path
         self._launcher = DaemonLauncher()
+        # último (host, puerto) que respondió: sirve para parar el demonio
+        # vivo aunque la config ya apunte a otra dirección
+        self._vivo: tuple[str, int] | None = None
+        self._cliente_cfg: tuple[str, int, str] | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -87,12 +91,31 @@ class DaemonPanel(QWidget):
     # -- helpers ----------------------------------------------------------------
 
     def _ensure_client(self) -> DaemonClient:
-        if self._client is None:
-            cfg = load_daemon_config(self._config_path)
+        """Cliente de la dirección configurada; se rehace si el fichero cambió."""
+        if self._client is not None and self._config_path is None:
+            return self._client          # cliente inyectado (tests)
+        cfg = (load_daemon_config(self._config_path) if self._config_path
+               else DaemonConfig())
+        firma = (cfg.control_host, cfg.control_port, cfg.mcp_token)
+        if self._client is None or firma != self._cliente_cfg:
             self._client = DaemonClient(host=cfg.control_host,
                                         port=cfg.control_port,
                                         token=cfg.mcp_token)
+            self._cliente_cfg = firma
         return self._client
+
+    def _cliente_vivo(self, configurado: DaemonClient) -> DaemonClient:
+        """Cliente del demonio que responde, si no es el configurado.
+
+        Tras cambiar el host en el fichero, el demonio sigue escuchando en la
+        dirección anterior: para pararlo hay que hablarle ahí.
+        """
+        if self._vivo is None:
+            return configurado
+        host, port = self._vivo
+        if (host, port) == (configurado.host, configurado.port):
+            return configurado
+        return DaemonClient(host=host, port=port, token=configurado.token)
 
     def autostart_checked(self) -> bool:
         return self.autostart_check.isChecked()
@@ -109,13 +132,17 @@ class DaemonPanel(QWidget):
         """
         client = self._ensure_client()
         if client.ping():
+            self._vivo = (client.host, client.port)
             return False
-        if self._launcher.launch():
-            self.status_label.setText("Demonio: arrancando…")
-            return True
+        if self._launcher.daemon_address():
+            return False
+        ok, motivo = self._launcher.start_and_wait(client)
         self.status_label.setText(
-            "Demonio: no se pudo lanzar el proceso (ver logs)")
-        return False
+            "Demonio: arrancando…" if ok
+            else f"Demonio: no arrancó — {motivo}")
+        if ok:
+            self._vivo = (client.host, client.port)
+        return ok
 
     # -- acciones -----------------------------------------------------------------
 
@@ -125,34 +152,69 @@ class DaemonPanel(QWidget):
         if client.ping():
             self.status_label.setText("Demonio: ya está en marcha")
             return
-        if self._launcher.launch():
+        address = self._launcher.daemon_address()
+        if address:
+            # el candado lo tiene un demonio vivo en otro puerto: no se lanza otro
             self.status_label.setText(
-                "Demonio: arrancando… (pulsa Refrescar en unos segundos)")
+                f"Demonio: ya está en marcha en {address}")
+            return
+        ok, motivo = self._launcher.start_and_wait(client)
+        if ok:
+            self._vivo = (client.host, client.port)
+            self.status_label.setText(
+                "Demonio: arrancado (pulsa Refrescar para ver el estado)")
         else:
-            self.status_label.setText(
-                "Demonio: no se pudo lanzar el proceso (ver logs)")
+            self.status_label.setText(f"Demonio: no arrancó — {motivo}")
+
+    def esta_vivo(self) -> bool:
+        """True si el panel ha hablado con un demonio (hay algo que reiniciar)."""
+        return self._vivo is not None
+
+    def config_cambiada(self) -> bool:
+        """True si el fichero apunta a otra dirección que la del cliente vivo.
+
+        Guardar un host o un puerto distinto **no** cambia el proceso: hay que
+        reiniciarlo para que escuche ahí.
+        """
+        if self._config_path is None or self._cliente_cfg is None:
+            return False
+        cfg = load_daemon_config(self._config_path)
+        return (cfg.control_host, cfg.control_port, cfg.mcp_token) != self._cliente_cfg
 
     def stop_daemon(self) -> None:
         """Parada elegante vía API de control."""
         client = self._ensure_client()
         if client.shutdown():
             self.status_label.setText("Demonio: parando…")
+            return
+        # Sin respuesta puede ser que el token haya cambiado: el demonio sigue
+        # vivo y con el candado. Se para por PID.
+        if self._launcher.stop_running():
+            self._vivo = None
+            self.status_label.setText("Demonio: parado (no aceptaba órdenes)")
         else:
             self.status_label.setText("Demonio: no responde (ya estaba parado)")
 
     def restart_daemon(self) -> None:
         """Reiniciar = shutdown + arranque (si estaba vivo y aún se apaga, esperar)."""
         client = self._ensure_client()
-        was_alive = client.shutdown()
-        if was_alive and client.ping():
+        # si la config apunta a otra dirección, el demonio vivo sigue en la
+        # anterior: se para hablándole ahí
+        fue_vivo = self._cliente_vivo(client).shutdown()
+        if fue_vivo and client.ping():
             self.status_label.setText(
                 "Demonio: reiniciando… (pulsa Refrescar en unos segundos)")
             return
-        if self._launcher.launch():
+        if not fue_vivo and not self._launcher.stop_running():
             self.status_label.setText(
-                "Demonio: reiniciado, arrancando… (pulsa Refrescar)")
+                "Demonio: no se pudo parar el que estaba en marcha")
+            return
+        ok, motivo = self._launcher.start_and_wait(client)
+        if ok:
+            self._vivo = (client.host, client.port)
+            self.status_label.setText("Demonio: reiniciado")
         else:
-            self.status_label.setText("Demonio: no se pudo relanzar (ver logs)")
+            self.status_label.setText(f"Demonio: no arrancó — {motivo}")
 
     def refresh_later(self) -> None:
         """Programa un refresh para cuando la ventana ya esté visible."""
@@ -179,12 +241,13 @@ class DaemonPanel(QWidget):
                 "Demonio: no responde (arranca con «python daemon.py run» "
                 "o registra la tarea con «python daemon.py install-task»)")
             return
+        self._vivo = (client.host, client.port)
         targets = status.get("targets", {})
         t = targets.get(self._target_id)
         if t is None:
             self.status_label.setText(
-                f"Demonio: activo, {len(targets)} target(s); "
-                f"este target ({self._target_id}) no está en marcha")
+                f"Demonio: activo, {len(targets)} perfil(es); "
+                f"este perfil ({self._target_id}) no está en marcha")
             return
         state = ("sirviendo" if t.get("running") else "parado")
         extra = (f", {t.get('channel_count', 0)} canales"
@@ -201,7 +264,7 @@ class DaemonPanel(QWidget):
         """
         client = self._ensure_client()
         if client.reload_target(self._target_id):
-            self.status_label.setText("Demonio: config aplicada y target recargado")
+            self.status_label.setText("Demonio: config aplicada y perfil recargado")
         else:
             self.status_label.setText(
                 "Demonio: el daemon no responde: recargará al arrancar")

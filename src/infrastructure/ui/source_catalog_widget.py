@@ -135,6 +135,7 @@ class SourceCatalogWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.table = QTableWidget(0, len(_COLS), self)
+        self.table.verticalHeader().setVisible(False)   # sin número de línea
         self.table.setHorizontalHeaderLabels(_COLS)
         self.table.horizontalHeader().setSectionResizeMode(
             2, QHeaderView.ResizeMode.Stretch)

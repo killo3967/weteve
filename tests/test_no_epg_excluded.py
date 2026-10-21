@@ -99,7 +99,7 @@ class TestReglaServidor:
 
     def test_dummy_devuelve_el_canal_a_la_lista(self):
         target = _target(epg_overrides={NOGUIDE_URL: build_dummy_epg_id(
-            NOGUIDE_URL, "Canal Cine Plus")})
+            NOGUIDE_URL)})
         result = _pipeline().run(target)
         names = sorted(c.name for c in result.channels)
         assert names == ["Canal Cine Plus", "La 1 HD"]
@@ -168,7 +168,7 @@ class TestDummyEnXmltv:
         """El dummy se enlaza por id (tvg-id) y por nombre a la vez: su
         display-name debe ser el nombre del canal M3U, no la etiqueta
         'Dummy 1h', para que el emparejamiento por nombre también funcione."""
-        dummy_id = build_dummy_epg_id(DUMMY_URL, "Canal Raro")
+        dummy_id = build_dummy_epg_id("url-canal-raro")
         xml = build_xmltv([self._mapped("Canal Raro", DUMMY_URL, dummy_id)],
                           _epg())
         assert f'<channel id="{dummy_id}">' in xml
@@ -181,14 +181,14 @@ class TestDummyEnXmltv:
             build_m3u,
         )
 
-        dummy_id = build_dummy_epg_id(DUMMY_URL, "Canal Raro")
+        dummy_id = build_dummy_epg_id("url-canal-raro")
         m3u = build_m3u([self._mapped("Canal Raro", DUMMY_URL, dummy_id)])
         extinf = next(l for l in m3u.splitlines() if l.startswith("#EXTINF"))
         assert f'tvg-id="{dummy_id}"' in extinf
         assert extinf.endswith(",Canal Raro")
 
     def test_dummy_genera_la_parrilla_sintetica(self):
-        dummy_id = build_dummy_epg_id(DUMMY_URL, "Canal Raro")
+        dummy_id = build_dummy_epg_id("url-canal-raro")
         xml = build_xmltv([self._mapped("Canal Raro", DUMMY_URL, dummy_id)],
                           _epg())
         assert xml.count("<programme") == 168
@@ -196,14 +196,14 @@ class TestDummyEnXmltv:
 
     def test_dummy_no_busca_programas_en_la_epg_real(self):
         """Un id dummy no está en la EPG: no debe emitir canal vacío ni fallar."""
-        dummy_id = build_dummy_epg_id(DUMMY_URL, "Canal Raro")
+        dummy_id = build_dummy_epg_id("url-canal-raro")
         xml = build_xmltv([self._mapped("Canal Raro", DUMMY_URL, dummy_id)],
                           None)
         assert f'<channel id="{dummy_id}">' in xml
         assert xml.count("<programme") == 168
 
     def test_canal_real_y_dummy_conviven(self):
-        dummy_id = build_dummy_epg_id(DUMMY_URL, "Canal Raro")
+        dummy_id = build_dummy_epg_id("url-canal-raro")
         channels = [
             self._mapped("La 1 HD", GUIDE_URL, "es.la1"),
             self._mapped("Canal Raro", DUMMY_URL, dummy_id),
@@ -215,8 +215,8 @@ class TestDummyEnXmltv:
         assert xml.count("<programme") == 169
 
     def test_dos_dummy_no_comparten_canal_ni_parrilla(self):
-        a = build_dummy_epg_id("http://s/a", "Uno")
-        b = build_dummy_epg_id("http://s/b", "Dos")
+        a = build_dummy_epg_id("url-a")
+        b = build_dummy_epg_id("url-b")
         channels = [
             self._mapped("Uno", "http://s/a", a),
             self._mapped("Dos", "http://s/b", b),

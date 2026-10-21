@@ -61,6 +61,34 @@ class TestDaemonClient:
     def test_reload_unknown_false(self, client: DaemonClient) -> None:
         assert _retry(lambda: client.reload_target("ghost")) is False
 
+    def test_ping_con_otro_servicio_no_revienta(self, monkeypatch) -> None:
+        """xTeVe en el mismo puerto responde "Locked [423]" en texto plano."""
+        import http.client as http_client
+
+        class _Respuesta:
+            status = 423
+
+            def read(self) -> bytes:
+                return b"Locked [423]"
+
+        class _Conexion:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            def request(self, *args, **kwargs) -> None:
+                pass
+
+            def getresponse(self) -> _Respuesta:
+                return _Respuesta()
+
+            def close(self) -> None:
+                pass
+
+        monkeypatch.setattr(http_client, "HTTPConnection", _Conexion)
+        c = DaemonClient(host="192.168.1.46", port=34400, retries=0)
+        assert c.ping() is False
+        assert c.status() is None
+
     def test_ping_sin_daemon_false(self) -> None:
         # puerto casi seguro sin listener
         c = DaemonClient(host="127.0.0.1", port=1)

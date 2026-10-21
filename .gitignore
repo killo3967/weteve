@@ -35,6 +35,8 @@ src/cache/
 .pi/
 .atl/
 *.bak
+weteve.pid
+weteve.lock
 
 # Logos descargados por el demonio (se regeneran solos)
 assets/logos/

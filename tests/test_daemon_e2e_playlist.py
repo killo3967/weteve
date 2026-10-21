@@ -25,7 +25,7 @@ class TestServidorDePlaylist:
 
     def test_la_url_y_el_puerto_son_los_del_target(self, daemon, api):
         url = daemon.playlist_url()
-        assert url.endswith("/playlist.m3u")
+        assert url.endswith(".m3u") and "/m3u/weteve_" in url
         puerto = int(url.rsplit(":", 1)[1].split("/")[0])
         assert puerto == daemon.status()["port"]
         code, body = api.get("/targets/0/status")

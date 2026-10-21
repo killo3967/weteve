@@ -1,5 +1,8 @@
 # Demonio weteve
 
+> **Vocabulario:** lo que el código llama *target* es un **Perfil** en la
+> interfaz y en esta documentación: una lista + filtros + guía + numeración.
+
 El demonio es el servicio permanente de weteve: posee los targets (pipeline +
 servidor HTTP de playlist por target), expone una API de control para la UI Qt
 y un endpoint **MCP** completo para que agentes (Claude, etc.) lo gobiernen.
@@ -10,7 +13,7 @@ y un endpoint **MCP** completo para que agentes (Claude, etc.) lo gobiernen.
 config.ini  ←── config_store ──→ TargetStore ──→ TargetService ──→ TargetSupervisor
  (serializador único)                                  │                 │
                                                        │                 └→ PlaylistServer por target
-                                                       │                    (playlist.m3u + epg.xml)
+                                                       │                    (/m3u/weteve_<perfil>.m3u + /xmltv/weteve_<perfil>.xml)
         UI Qt (frontend) ── REST /api/v1 ─┐            │
         CLI (daemon.py)  ── control ──────┤            │
         Agentes          ── MCP —─────────┤            │
@@ -84,7 +87,7 @@ toca el fichero (salvo `[DAEMON]`, que el demonio solo lee al arrancar):
 | Clave | Default | Descripción |
 |---|---|---|
 | `control_host` | `127.0.0.1` | Bind de ambas APIs |
-| `control_port` | `34400` | **único** puerto: control, REST (`/api/v1`), MCP (`/mcp`) y playlists (`/weteve/{id}/…`) |
+| `control_port` | `34400` | **único** puerto: control, REST (`/api/v1`), MCP (`/mcp`) y playlists (`/m3u/weteve_<perfil>.m3u`, `/xmltv/weteve_<perfil>.xml`, `/logos/<f>`) |
 | `mcp_port` | *(ignorado)* | legado; el demonio avisa si difiere de `control_port` |
 | `mcp_token` | *(vacío)* | Si se define: `Authorization: Bearer` obligatorio en MCP, API de control y REST |
 | `autostart` | `0` | La interfaz arranca el demonio al abrirse si no responde |
@@ -109,7 +112,43 @@ arranca**: la API no distingue usuarios y quedaría expuesta a la red.
 .venv\Scripts\python.exe daemon.py install-task
 ```
 
-## Herramientas MCP (23)
+### Host de control
+
+Se elige en un desplegable de la pestaña Configuración: `127.0.0.1` (solo este
+equipo), la IP con la que el equipo sale a la red (la que necesita el
+reproductor), el resto de interfaces y `0.0.0.0` (todos los interfaces).
+
+- Fuera de loopback **hace falta `mcp_token`**: el guardado no se permite sin
+  él (hay un botón «Generar»). El demonio, además, se niega a arrancar sin
+  token en ese caso.
+- Con `0.0.0.0` se anuncia la IP de la red en `playlist_url` y en los logos:
+  `0.0.0.0` no es una dirección de destino.
+- Cambiar el host o el puerto **no** cambia el proceso en marcha: al guardar,
+  el panel reinicia el demonio y verifica que responde; si no, muestra el
+  motivo (la última línea de su log).
+
+### Instancia única
+
+Solo puede haber **un** demonio por `daemon.toml`. El arranque toma un candado
+del sistema operativo **antes** de leer la configuración:
+
+- `weteve.lock` (junto a `daemon.toml`): el bloqueo. No lleva contenido y lo
+  libera el sistema si el proceso muere, así que no hay que limpiar nada.
+- `weteve.pid`: `pid host:puerto` en texto plano, para saber quién corre y
+  dónde. Va aparte porque en Windows un bloqueo por rango impide leer esos
+  bytes.
+
+Si el candado ya está tomado, el segundo proceso **no arranca**: consulta el
+`/health` de la dirección anotada y sale con `ya está en marcha en host:puerto`
+(exit 0). Si el candado está tomado pero nadie responde (demonio colgado o
+arrancando), sale con exit 2 y un aviso: nunca se abre un segundo.
+
+Esto cubre el caso que el puerto no cubre: dos demonios con distinto
+`control_port` escribirían el mismo `daemon.toml` y se pisarían los guardados.
+La GUI usa el mismo candado para no lanzar otro cuando el que corre está en otro
+puerto del configurado.
+
+## Herramientas MCP (24)
 
 Transporte: JSON-RPC 2.0 Streamable HTTP (`POST /mcp`), sesión vía cabecera
 `Mcp-Session-Id` asignada en `initialize`. Sin dependencias del SDK oficial

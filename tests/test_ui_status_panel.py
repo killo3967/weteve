@@ -41,7 +41,7 @@ class TestSemaforo:
         panel = _panel(qtbot, api)
         textos = [w.text() for w in panel.targets_group.findChildren(
             type(panel.state_label))]
-        assert any("target 0" in t and "sirviendo" in t for t in textos), textos
+        assert any("Perfil 0" in t and "sirviendo" in t for t in textos), textos
 
 
 class TestUrls:
@@ -51,8 +51,8 @@ class TestUrls:
         assert "http://127.0.0.1:34400/health" in urls
         assert "http://127.0.0.1:34400/api/v1" in urls
         assert "http://127.0.0.1:34400/mcp" in urls
-        assert "http://127.0.0.1:34400/weteve/0/playlist.m3u" in urls
-        assert "http://127.0.0.1:34400/weteve/0/epg.xml" in urls
+        assert "http://127.0.0.1:34400/m3u/weteve_0.m3u" in urls
+        assert "http://127.0.0.1:34400/xmltv/weteve_0.xml" in urls
 
     def test_sin_demonio_las_urls_siguen_a_la_vista(self, qtbot):
         panel = _panel(qtbot, FakeApi(down=True))

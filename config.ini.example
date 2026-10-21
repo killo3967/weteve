@@ -26,5 +26,5 @@ control_port = 34400
 ; Puerto del endpoint MCP (default 34401)
 mcp_port = 34401
 ; Token Bearer para MCP y API de control. Vacío = sin autenticación
-; (solo localhost). Ejemplo: mcp_token = un-secreto-largo
+; (solo localhost). Ejemplo: mcp_token = wtv-<aleatorio>
 mcp_token =

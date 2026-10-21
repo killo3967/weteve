@@ -11,12 +11,15 @@ pipeline). Solo ``run`` ejecuta.
 import logging
 import time
 from dataclasses import replace
+from pathlib import Path
 from typing import cast
 
 from src.application.services.list_manager.models import (
+    ChannelProfile,
     FilterRule,
     PipelineTarget,
     SourceRef,
+    url_key,
 )
 from src.application.services.list_manager.source_catalog import (
     SourceCatalog,
@@ -29,6 +32,46 @@ from src.application.services.list_manager.source_catalog import (
 
 logger = logging.getLogger(__name__)
 
+#: Extensiones que el demonio sirve como logo desde ``assets/logos``.
+LOGO_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
+
+
+def logos_dir() -> Path:
+    """Directorio de logos: el mismo que sirve el demonio en ``/logos/``."""
+    return Path(__file__).resolve().parents[4] / "assets" / "logos"
+
+
+def _nombre_seguro(nombre: str) -> str:
+    """Nombre de fichero sin rutas ni caracteres raros."""
+    import re
+
+    limpio = re.sub(r"[^A-Za-z0-9._-]", "_", Path(nombre).name)
+    return limpio or "logo.png"
+
+
+def _nombre_libre(destino: Path) -> str:
+    """``X.png`` ocupado por otro fichero → ``X_2.png``."""
+    for n in range(2, 100):
+        candidato = f"{destino.stem}_{n}{destino.suffix}"
+        if not (destino.parent / candidato).exists():
+            return candidato
+    return f"{destino.stem}_{destino.stat().st_mtime_ns}{destino.suffix}"
+
+
+def logo_valido(nombre: str) -> bool:
+    """True si el nombre es un fichero de imagen de ``assets/logos``.
+
+    Se guarda solo el nombre, no una ruta: el demonio sirve ese directorio y
+    el reproductor pide ``/logos/<fichero>``. Una ruta absoluta no viajaría.
+    """
+    limpio = (nombre or "").strip()
+    if (not limpio or "/" in limpio or "\\" in limpio
+            or limpio.startswith(".")):
+        return False
+    if not limpio.lower().endswith(LOGO_EXTENSIONS):
+        return False
+    return (logos_dir() / limpio).is_file()
+
 
 def serialize_target(t: PipelineTarget) -> dict:
     """PipelineTarget → dict JSON con reglas en sintaxis xteve textual."""
@@ -38,6 +81,11 @@ def serialize_target(t: PipelineTarget) -> dict:
         "rules": [r.serialize() for r in t.rules],
         "epg_overrides": dict(t.epg_overrides),
         "disabled_channels": list(t.disabled_channels),
+        "channels": {clave: {"alias": f.alias, "dial": f.dial,
+                             "display": f.display, "logo": f.logo}
+                     for clave, f in t.channels.items()},
+        "serve_without_epg": bool(t.serve_without_epg),
+        "light_epg": bool(t.light_epg),
         "quality_priority": dict(t.quality_priority or {}),
         "port": t.port,
         "starting_number": t.starting_number,
@@ -361,8 +409,9 @@ class TargetService:
 
     def update_settings(self, target_id: str, *, name=None, port=None,
                         bind=None, quality_priority=None,
+                        serve_without_epg=None, light_epg=None,
                         reload: bool = True) -> dict:
-        """Cambia nombre, puerto, bind o prioridad de calidad del target."""
+        """Cambia nombre, puerto, bind, prioridad, dummy o guía ligera."""
         t = self._definition(target_id)
         if t is None:
             return {"error": f"target {target_id} no existe"}
@@ -392,6 +441,10 @@ class TargetService:
                     return {"error": "las prioridades van de 0 a 9"}
                 tabla[str(token)] = valor
             changes["quality_priority"] = tabla or None
+        if serve_without_epg is not None:
+            changes["serve_without_epg"] = bool(serve_without_epg)
+        if light_epg is not None:
+            changes["light_epg"] = bool(light_epg)
         new = replace(t, **changes)
         return self._write(target_id, new, reload, bind=bind)
 
@@ -438,6 +491,150 @@ class TargetService:
         if errors:
             out["partial"] = True
         return out
+
+    def _resolver_logo(self, valor: str) -> tuple[str, str | None]:
+        """Logo pedido por el usuario → nombre de fichero en ``assets/logos``.
+
+        Acepta las tres formas que se usan a mano: el **nombre** de un fichero
+        que ya está en la carpeta, una **ruta** a una imagen (se copia) y una
+        **URL http(s)** (se descarga). Devuelve (nombre, error).
+        """
+        limpio = (valor or "").strip()
+        if not limpio:
+            return "", None
+        carpeta = logos_dir()
+        carpeta.mkdir(parents=True, exist_ok=True)
+
+        if limpio.lower().startswith(("http://", "https://")):
+            from src.application.services.list_manager.logo_store import LogoStore
+
+            mapa = LogoStore(carpeta).ensure([limpio])
+            nombre = mapa.get(limpio)
+            if not nombre:
+                return "", f"no se pudo descargar el logo {limpio!r}"
+            return nombre, None
+
+        ruta = Path(limpio)
+        if ruta.is_file():
+            if not ruta.name.lower().endswith(LOGO_EXTENSIONS):
+                return "", f"{ruta.name!r} no tiene extensión de imagen"
+            destino = carpeta / _nombre_seguro(ruta.name)
+            if destino.exists() and destino.read_bytes() != ruta.read_bytes():
+                destino = carpeta / _nombre_libre(destino)
+            if not destino.exists():
+                import shutil
+
+                shutil.copy2(ruta, destino)
+            return destino.name, None
+
+        if logo_valido(limpio):
+            return limpio, None
+        return "", (f"{limpio!r} no es una imagen de assets/logos, ni una ruta, "
+                    "ni una URL")
+
+    def set_channels(self, target_id: str, channels: list[dict],
+                     reload: bool = True) -> dict:
+        """Fija a mano dial, nombre mostrado y logo de varios canales.
+
+        Cada entrada es ``{"identity", "url", "dial", "display", "logo"}``. Un
+        campo ausente no se toca; ``None`` o vacío lo devuelve al automático.
+        Se aplica todo o nada: si un dial se repite, no se guarda nada.
+        """
+        t = self._definition(target_id)
+        if t is None:
+            return {"error": f"target {target_id} no existe"}
+        if not isinstance(channels, list):
+            return {"error": "channels debe ser una lista"}
+        fichas = dict(t.channels)
+        errores: list[dict] = []
+        for item in channels:
+            fila = dict(item or {})
+            clave = str(fila.get("identity") or "").strip()
+            if not clave:
+                url = str(fila.get("url") or "").strip()
+                if not url:
+                    errores.append({"error": "canal sin identidad ni url",
+                                    "channel": fila})
+                    continue
+                clave = url_key(url)
+            cambios: dict = {}
+            if "dial" in fila:
+                valor = fila.get("dial")
+                if valor in (None, ""):
+                    cambios["dial"] = None
+                else:
+                    try:
+                        dial = int(valor)
+                    except (TypeError, ValueError):
+                        errores.append({"error": "dial no numérico",
+                                        "channel": clave, "value": valor})
+                        continue
+                    if not 1 <= dial <= 9999:
+                        errores.append({"error": "el dial va de 1 a 9999",
+                                        "channel": clave, "value": valor})
+                        continue
+                    cambios["dial"] = dial
+            if "display" in fila:
+                cambios["display"] = str(fila.get("display") or "").strip()
+            if "logo" in fila:
+                logo, fallo = self._resolver_logo(str(fila.get("logo") or ""))
+                if fallo:
+                    errores.append({"error": fallo, "channel": clave,
+                                    "value": fila.get("logo")})
+                    continue
+                cambios["logo"] = logo
+            fichas[clave] = replace(fichas.get(clave) or ChannelProfile(),
+                                    **cambios)
+        if errores:
+            return {"error": "hay canales con datos no válidos",
+                    "errors": errores}
+        conflictos = self._diales_repetidos(target_id, fichas)
+        if conflictos:
+            return {"error": "dial repetido: dos canales no pueden compartir "
+                             "número", "conflicts": conflictos}
+        out = self._write(target_id, replace(t, channels=fichas), reload)
+        out["channels"] = len(fichas)
+        return out
+
+    def _diales_repetidos(self, target_id: str,
+                          fichas: dict[str, ChannelProfile]) -> list[dict]:
+        """Canales que acabarían con el mismo número.
+
+        Se compara el número final de la última ejecución (dial de la guía o
+        cola) con los forzados de la ficha: un forzado que pise el dial de otro
+        canal es un choque; dos forzados iguales, también. Sin ejecución
+        previa solo se pueden comparar los forzados entre sí.
+        """
+        filas: list[dict] = []
+        try:
+            page = self._supervisor.mapping_candidates(
+                target_id, limit=5000, include_served=True)
+            filas = list(page.get("channels") or [])
+        except Exception:  # noqa: BLE001 - sin snapshot se valida lo forzado
+            logger.warning("Sin snapshot para validar diales de %s", target_id)
+        numeros: dict[int, list[str]] = {}
+        for fila in filas:
+            clave = str(fila.get("identity") or "")
+            if not clave:
+                continue
+            ficha = fichas.get(clave)
+            forzado = ficha.dial if ficha is not None else None
+            if fila.get("served") is False and forzado is None:
+                # una variante descartada (o un canal que no se sirve) no
+                # ocupa número: solo cuentan las filas servidas
+                continue
+            numero = forzado if forzado is not None else fila.get("dial_auto")
+            if numero is None:
+                continue
+            numeros.setdefault(int(numero), []).append(
+                str(fila.get("name") or clave))
+        if not filas:
+            for clave, ficha in fichas.items():
+                if ficha.dial is not None:
+                    numeros.setdefault(int(ficha.dial), []).append(clave)
+        return [{"dial": numero, "channels": nombres}
+                for numero, nombres in sorted(numeros.items())
+                if len(nombres) > 1]
 
     def set_disabled(self, target_id: str, urls: list[str],
                      reload: bool = True) -> dict:

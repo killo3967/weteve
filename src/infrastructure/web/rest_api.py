@@ -196,6 +196,8 @@ class RestApi:
                 target_id, name=payload.get("name"), port=payload.get("port"),
                 bind=payload.get("bind"),
                 quality_priority=payload.get("quality_priority"),
+                serve_without_epg=payload.get("serve_without_epg"),
+                light_epg=payload.get("light_epg"),
                 reload=reload)
         elif method == "PUT" and action == "rules":
             if not isinstance(payload.get("rules"), list):
@@ -206,6 +208,11 @@ class RestApi:
             if not isinstance(payload.get("mappings"), list):
                 return 400, {"error": "mappings debe ser una lista"}
             result = self._service.set_mappings(target_id, payload["mappings"],
+                                               reload=reload)
+        elif method == "PUT" and action == "channels":
+            if not isinstance(payload.get("channels"), list):
+                return 400, {"error": "channels debe ser una lista"}
+            result = self._service.set_channels(target_id, payload["channels"],
                                                reload=reload)
         elif method == "PUT" and action == "sources":
             if not isinstance(payload.get("m3u_sources"), list) or not isinstance(

@@ -210,6 +210,21 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
                 "epg_overrides": out["target"]["epg_overrides"],
                 "reloaded": out["reloaded"]}
 
+    def modify_channels(target_id: str, channels: list[dict]) -> dict:
+        """Ficha de canal en lote: dial, nombre mostrado y logo.
+
+        Cada entrada: ``{identity, url?, dial?, display?, logo?}``. Un campo
+        ausente no se toca; vacío lo devuelve al automático. Un dial repetido
+        no se guarda (devuelve los conflictos).
+        """
+        if not isinstance(channels, list) or not channels:
+            return {"error": "channels debe ser una lista no vacía"}
+        out = service.set_channels(target_id, channels)
+        if "error" in out:
+            return out
+        return {"ok": True, "target_id": target_id,
+                "fichas": out.get("channels")}
+
     def modify_mappings(target_id: str,
                         mappings: list[dict]) -> dict:
         """Asignación EPG en lote: [{'channel_url', 'epg_id'|None}, ...].
@@ -451,6 +466,32 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
             },
             "handler": modify_mapping,
         },
+        "modify_channels": {
+            "description": ("Fija a mano dial, nombre mostrado o logo de uno o "
+                            "varios canales (ficha por identidad); hot-reload"),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "target_id": STRING,
+                    "channels": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "identity": {"type": "string"},
+                                "url": {"type": "string"},
+                                "dial": {"type": ["integer", "null"]},
+                                "display": {"type": "string"},
+                                "logo": {"type": "string"},
+                            },
+                            "required": ["identity"],
+                        },
+                    },
+                },
+                "required": ["target_id", "channels"],
+            },
+            "handler": modify_channels,
+        },
         "modify_mappings": {
             "description": ("Asignación EPG en lote: aplica varios mapeos "
                             "(epg_id) o eliminaciones (epg_id=null) con UN solo "
@@ -558,7 +599,7 @@ def build_tool_registry(supervisor, target_store, on_shutdown=None) -> dict:
             "handler": delete_target,
         },
         "start_target": {
-            "description": "Arranca el servicio HTTP de un target (sirve playlist.m3u y epg.xml)",
+            "description": "Arranca el servicio HTTP de un perfil (sirve la lista y la guía)",
             "schema": {
                 "type": "object",
                 "properties": {"target_id": STRING},

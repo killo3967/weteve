@@ -4,8 +4,8 @@ from datetime import datetime
 
 from src.application.services.list_manager.dummy_epg import (
     build_dummy_channel,
+    dummy_id_for,
     is_dummy_id,
-    make_dummy_id,
 )
 from src.application.services.list_manager.models import MappedChannel
 
@@ -14,15 +14,16 @@ def _fmt_xmltv_time(dt: datetime) -> str:
     return dt.strftime("%Y%m%d%H%M%S +0200")
 
 
-def build_dummy_epg_id(url: str, name: str) -> str:
-    """Id de la guía de relleno (Dummy 1h) para un canal.
+def build_dummy_epg_id(identity: str) -> str:
+    """Id de la guía de relleno (Dummy 1h) para un canal, por su identidad.
 
     Se expone aquí porque quien lo necesita es la UI al resolver el
     desplegable: 'Dummy 1h' no es un canal XMLTV, así que hay que traducirla al
     id sintético con el que ``build_xmltv`` reconoce el canal. Derivado de la
-    url, es estable entre regeneraciones del EPG.
+    identidad (y no de la url), es estable entre regeneraciones y no cambia
+    cuando la deduplicación elige otra variante del mismo canal.
     """
-    return make_dummy_id(url, name)
+    return dummy_id_for(identity)
 
 
 def epg_id_of(ch: MappedChannel) -> str | None:
@@ -30,7 +31,7 @@ def epg_id_of(ch: MappedChannel) -> str | None:
     return ch.matched_epg_id or ch.tvg_id or None
 
 
-def build_m3u(channels: list[MappedChannel]) -> str:
+def build_m3u(channels: list[MappedChannel], url_tvg: str | None = None) -> str:
     """Genera el contenido M3U de salida a partir de los canales mapeados.
 
     El ``tvg-id`` es el id EPG del canal (el asignado a mano o el que casó con
@@ -42,8 +43,16 @@ def build_m3u(channels: list[MappedChannel]) -> str:
     El nombre es el del canal, sin el prefijo de la lista de origen, y sigue
     siendo el ``<display-name>`` del XMLTV: el enlace funciona por id **y** por
     nombre, así que un canal renombrado no pierde la guía.
+
+    Con ``url_tvg`` la cabecera anuncia la guía (``url-tvg``), que es como las
+    apps la encuentran sin configurarla a mano.
     """
-    lines = ["#EXTM3U"]
+    # ``url-tvg`` es lo que hace que la app descargue la guía sola: es la
+    # convención que leen xTeVe, Threadfin y sus clientes.
+    cabecera = "#EXTM3U"
+    if url_tvg:
+        cabecera += f' url-tvg="{url_tvg}"'
+    lines = [cabecera]
     for ch in channels:
         epg_id = epg_id_of(ch) or ""
         attrs = [f'tvg-id="{epg_id}"']
@@ -59,12 +68,16 @@ def build_m3u(channels: list[MappedChannel]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build_xmltv(channels: list[MappedChannel], epg) -> str:
+def build_xmltv(channels: list[MappedChannel], epg,
+                light: bool = True) -> str:
     """Genera el XMLTV de salida con la guía real de los canales mapeados.
 
     Args:
         channels: canales resultantes del pipeline.
         epg: ``EPGData`` con la guía original, o ``None`` si no hay fuente.
+        light: sin ``<desc>`` ni ``<category>``. Son el 65 % del fichero y
+            muchas televisiones cortan la guía por tamaño: con descripciones,
+            un target de 150 canales pasa de 9 MB a 3 MB.
 
     Returns:
         Contenido XML del EPG. Solo aparecen los canales con id EPG (asignado
@@ -116,10 +129,10 @@ def build_xmltv(channels: list[MappedChannel], epg) -> str:
             )
             title = ET.SubElement(programme, "title")
             title.text = prog.title
-            if prog.description:
+            if prog.description and not light:
                 desc = ET.SubElement(programme, "desc")
                 desc.text = prog.description
-            if prog.category:
+            if prog.category and not light:
                 cat = ET.SubElement(programme, "category")
                 cat.text = prog.category
 

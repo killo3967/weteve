@@ -43,7 +43,7 @@ def cfg_file(tmp_path):
 
 
 class TestCallbackDelGuardado:
-    def test_ventana_destruida_no_lanza_ni_emite(self, qapp, cfg_file):
+    def test_ventana_destruida_no_lanza_ni_emite(self, qapp, cfg_file) -> None:
         dialog = _dialog(cfg_file)
         dialog._config_watch.stop()
         emitidos: list = []
@@ -54,7 +54,7 @@ class TestCallbackDelGuardado:
         dialog._on_save_done(_Future({"ok": True}))
         assert emitidos == []
 
-    def test_ventana_viva_emite_el_resultado(self, qtbot, cfg_file):
+    def test_ventana_viva_emite_el_resultado(self, qtbot, cfg_file) -> None:
         dialog = _dialog(cfg_file)
         qtbot.addWidget(dialog)
         dialog._config_watch.stop()
@@ -63,7 +63,7 @@ class TestCallbackDelGuardado:
         dialog._on_save_done(_Future({"ok": True, "served": 3}))
         assert emitidos == [{"ok": True, "served": 3}]
 
-    def test_futuro_cancelado_no_emite(self, qtbot, cfg_file):
+    def test_futuro_cancelado_no_emite(self, qtbot, cfg_file) -> None:
         dialog = _dialog(cfg_file)
         qtbot.addWidget(dialog)
         dialog._config_watch.stop()
@@ -73,7 +73,7 @@ class TestCallbackDelGuardado:
         assert emitidos == []
 
     def test_un_fallo_del_trabajo_se_entrega_como_error(self, qtbot, cfg_file,
-                                                      monkeypatch):
+                                                      monkeypatch) -> None:
         class _Boom(_Future):
             def result(self):
                 raise RuntimeError("fallo del job")

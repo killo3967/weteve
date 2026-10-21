@@ -27,7 +27,7 @@ class _M3URepo:
 class _EpgRepo:
     """Cuenta cuántas veces se lee la guía y si fue con ``fresh``."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.llamadas: list[tuple[str, bool]] = []
 
     def load_epg(self, source, fresh=False):

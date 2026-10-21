@@ -32,9 +32,17 @@ from src.application.services.daemon.service import TargetService
 from src.application.services.daemon.supervisor import TargetSupervisor
 from src.application.services.daemon.target_store import TargetStore
 from src.infrastructure.client.daemon_client import DaemonClient
+from src.infrastructure.client.single_instance import (
+    DaemonLock,
+    lock_path,
+    pid_path,
+    read_address,
+    write_pid,
+)
 from src.infrastructure.client.sources_store import (
     load_catalog,
 )
+from src.infrastructure.web.playlist_server import url_base_for
 from src.infrastructure.web.rest_api import RestApi
 
 logger = logging.getLogger("weteve.daemon")
@@ -163,7 +171,9 @@ def build_daemon(config_path: Path = DEFAULT_CONFIG,
     if not server.start():
         raise RuntimeError(
             f"puerto {cfg.control_port} ocupado ¿hay otro daemon?")
-    base = f"http://{cfg.control_host}:{server.port}"
+    # Se anuncia una dirección navegable: con 0.0.0.0 el reproductor no puede
+    # ir a ninguna parte, así que se publica la IP de la ruta por defecto.
+    base = url_base_for(cfg.control_host, server.port)
     supervisor.set_base_url(base, server.port)
 
     logger.info("daemon weteve listo en %s (/mcp, /api/v1, "
@@ -180,34 +190,78 @@ def build_daemon(config_path: Path = DEFAULT_CONFIG,
     }
 
 
+def _hay_demonio(address: str | None, client_path: Path) -> bool:
+    """True si responde el demonio del candado o el del cliente configurado.
+
+    Con dirección en el candado se pregunta a esa (puede estar en otro puerto
+    del configurado); sin ella, al cliente de ``weteve.ini``.
+    """
+    if address:
+        host, _, puerto = address.rpartition(":")
+        try:
+            return DaemonClient(host=host or "127.0.0.1", port=int(puerto),
+                                timeout=2.0, retries=1).ping()
+        except (TypeError, ValueError):
+            return False
+    return _control_client(client_path=client_path).ping()
+
+
+def _avisar_ya_arrancado(candado: Path, client_path: Path) -> int:
+    """Ya hay un demonio: se dice dónde está y se sale sin tocar la config."""
+    address = read_address(pid_path(candado.parent / "daemon.toml"))
+    if _hay_demonio(address, client_path):
+        mensaje = (f"ya está en marcha en {address}" if address
+                   else "ya está en marcha (responde el puerto configurado)")
+        logger.info("%s — candado %s", mensaje, candado)
+        print(mensaje)
+        return 0
+    mensaje = ("hay otro proceso con el candado del demonio pero no responde "
+               f"({address or 'sin dirección'}): no se arranca otro")
+    logger.error("%s — candado %s", mensaje, candado)
+    print(mensaje)
+    return 2
+
+
 def cmd_run(config_path: Path = DEFAULT_CONFIG,
             client_path: Path = DEFAULT_CLIENT) -> int:
     setup_logging()
     logger.info("arrancando daemon weteve (config=%s)", config_path)
+    # Candado ANTES de leer la configuración: dos demonios a la vez se pisan
+    # daemon.toml, y el puerto solo no lo impide (con otro control_port, entra).
+    candado = DaemonLock(lock_path(config_path))
+    if not candado.acquire():
+        return _avisar_ya_arrancado(candado.path, client_path)
     try:
-        d = build_daemon(config_path, client_path)
-    except RuntimeError as e:
-        logger.error("%s", e)
-        return 2
-
-    # Arranca los targets definidos en config.ini
-    for tid, target in d["store"].list().items():
         try:
-            d["supervisor"].start_target(
-                tid, target, epg_path=d["store"].get_epg_path(tid))
-        except Exception:
-            logger.exception("target %s no arrancó", tid)
+            d = build_daemon(config_path, client_path)
+        except RuntimeError as e:
+            logger.error("%s", e)
+            return 2
+        # La dirección queda anotada para que la GUI sepa a quién preguntar
+        # aunque escuche en un puerto distinto del configurado.
+        write_pid(pid_path(config_path),
+                  d["server"].url_base.removeprefix("http://"))
 
-    try:
-        while d["running"]["flag"]:
-            threading.Event().wait(0.5)
-    except KeyboardInterrupt:
-        pass
+        # Arranca los targets definidos en daemon.toml
+        for tid, target in d["store"].list().items():
+            try:
+                d["supervisor"].start_target(
+                    tid, target, epg_path=d["store"].get_epg_path(tid))
+            except Exception:
+                logger.exception("target %s no arrancó", tid)
+
+        try:
+            while d["running"]["flag"]:
+                threading.Event().wait(0.5)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            logger.info("apagando daemon…")
+            d["supervisor"].stop_all()
+            d["server"].stop()
+        return 0
     finally:
-        logger.info("apagando daemon…")
-        d["supervisor"].stop_all()
-        d["server"].stop()
-    return 0
+        candado.release()
 
 
 def _control_client(port: int | None = None,

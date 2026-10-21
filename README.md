@@ -3,7 +3,7 @@
 Gestor de listas IPTV independiente, extraído de [IPTVViewer](K:/IPTVViewer).
 Toma una lista M3U (URL o fichero), aplica filtros en sintaxis xTeVe, asocia la
 guía EPG (XMLTV) y sirve el resultado por un mini-servidor web local
-(`playlist.m3u` y `epg.xml`).
+(`/m3u/weteve_<perfil>.m3u` y `/xmltv/weteve_<perfil>.xml`).
 
 ## Estado
 
@@ -98,7 +98,7 @@ En la pestaña «Mapeado EPG» del editor:
 
 Una vez aceptado el wizard, el servidor sirve en `http://127.0.0.1:<port>`:
 
-- `/playlist.m3u` — la lista filtrada y mapeada
+- `/m3u/weteve_<perfil>.m3u` — la lista filtrada, numerada y con `url-tvg`
 - `/epg.xml` — la guía EPG asociada
 
 ## Calidad

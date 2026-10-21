@@ -49,6 +49,33 @@ def normalize(name: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9+]+", " ", sin_acentos.lower()).split())
 
 
+#: Raíz mínima que se exige delante de una etiqueta pegada (``LaLigaTVHD``).
+#: Con menos no se distingue de una palabra que acaba igual (``CLASSD``).
+_RAIZ_MINIMA = 5
+
+_PATRONES: dict[str, re.Pattern[str]] = {}
+
+
+def _patron(token: str) -> re.Pattern[str]:
+    """Regex de una etiqueta de calidad, suelta o pegada al final de palabra.
+
+    El proveedor escribe la calidad de las dos formas: ``LA 1 HD`` pero
+    también ``M+ LaLigaTVHD``, ``M+DEPORTESHD`` o ``M+ #VAMOSHD``. Con la
+    forma pegada, el mismo canal contaba como dos: se servían las cuatro
+    variantes de ``M+ LaLigaTV`` y el dial no se reconocía.
+
+    Solo cuenta el final de palabra: una etiqueta en medio del nombre no es
+    una etiqueta de calidad (``HDO Sport`` no es un canal en HD).
+    """
+    patron = _PATRONES.get(token)
+    if patron is None:
+        patron = re.compile(
+            rf"(?:(?<![a-z0-9])|(?<=[a-z0-9]{{{_RAIZ_MINIMA}}}))"
+            rf"{re.escape(token)}(?![a-z0-9])")
+        _PATRONES[token] = patron
+    return patron
+
+
 def quality_token(name: str) -> str:
     """Etiqueta de calidad del nombre ('' si no lleva ninguna).
 
@@ -57,7 +84,7 @@ def quality_token(name: str) -> str:
     norm = normalize(name)
     for token in sorted((t for t in DEFAULT_PRIORITY if t), key=len,
                         reverse=True):
-        if re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", norm):
+        if _patron(token).search(norm):
             return token
     return SIN_ETIQUETA
 
@@ -78,7 +105,10 @@ def base_name(name: str) -> str:
     token = quality_token(name)
     if not token:
         return norm
-    return " ".join(norm.replace(token, " ").split())
+    # el ``+`` suelto es la coletilla de ``HD+``; un ``+`` pegado forma parte
+    # de la marca (``M+``) y no se toca
+    return " ".join(part for part in _patron(token).sub(" ", norm).split()
+                    if part != "+")
 
 
 def dedupe_variants(channels, priority: dict[str, int] | None = None
@@ -91,16 +121,29 @@ def dedupe_variants(channels, priority: dict[str, int] | None = None
       todas las variantes de un canal valen 0, el canal desaparece.
     - Canales sin id EPG no se agrupan: sin guía no hay nada que duplicar (los
       filtra la regla de servidor).
+    - Con ``canonical_id`` la clave es solo la identidad: el nombre ya no
+      distingue variantes (``BeMad tv HD`` y ``BE MAD HD`` son la misma). Sin
+      identidad se mantiene la clave antigua, id de guía + nombre base, porque
+      dos canales distintos pueden compartir guía (``La 1`` y
+      ``La 1 Canarias``).
     """
     tabla = priority or DEFAULT_PRIORITY
     mejores: dict[tuple[str, str], tuple[int, int]] = {}
     servir: set[int] = set()
     for index, ch in enumerate(channels):
-        epg_id = getattr(ch, "matched_epg_id", None)
-        if not epg_id:
-            servir.add(index)          # sin guía: lo decide la regla de servidor
-            continue
-        clave = (epg_id, base_name(ch.name))
+        # Con identidad canónica el nombre sobra: ``BeMad tv HD`` y
+        # ``BE MAD HD`` son el mismo canal aunque se escriban distinto, y
+        # dejar las dos copias servidas rompía la numeración (una se quedaba
+        # con el dial y la otra caía al contador).
+        canonico = getattr(ch, "canonical_id", None)
+        if canonico:
+            clave = (canonico, "")
+        else:
+            epg_id = getattr(ch, "matched_epg_id", None)
+            if not epg_id:
+                servir.add(index)      # sin guía: lo decide la regla de servidor
+                continue
+            clave = (epg_id, base_name(ch.name))
         peso = weight(ch.name, tabla)
         actual = mejores.get(clave)
         if actual is None or peso > actual[0]:

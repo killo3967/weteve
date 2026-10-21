@@ -66,7 +66,7 @@ class TestMovistarEPG:
         assert programas[0].category == "Informativos"
         assert programas[0].start_time < programas[0].end_time
 
-    def test_segunda_llamada_usa_la_cache(self, monkeypatch):
+    def test_segunda_llamada_usa_la_cache(self, monkeypatch) -> None:
         repo = MovistarEPGRepository(ttl_seconds=300)
         registro: list[str] = []
         self._instalar(monkeypatch, repo, registro=registro)
@@ -76,7 +76,7 @@ class TestMovistarEPG:
         assert primera > 0
         assert len(registro) == primera
 
-    def test_fresh_vuelve_a_descargar(self, monkeypatch):
+    def test_fresh_vuelve_a_descargar(self, monkeypatch) -> None:
         repo = MovistarEPGRepository(ttl_seconds=300)
         registro: list[str] = []
         self._instalar(monkeypatch, repo, registro=registro)
@@ -85,14 +85,14 @@ class TestMovistarEPG:
         repo.load_epg("movistar://epg", fresh=True)
         assert len(registro) > primera
 
-    def test_span_de_la_fuente_llega_a_la_peticion(self, monkeypatch):
+    def test_span_de_la_fuente_llega_a_la_peticion(self, monkeypatch) -> None:
         registro: list[str] = []
         repo = MovistarEPGRepository(ttl_seconds=0)
         self._instalar(monkeypatch, repo, registro=registro)
         repo.load_epg("movistar://epg?span=7")
         assert any("span=7" in url for url in registro)
 
-    def test_span_se_limita_al_maximo(self, monkeypatch):
+    def test_span_se_limita_al_maximo(self, monkeypatch) -> None:
         registro: list[str] = []
         repo = MovistarEPGRepository(ttl_seconds=0)
         self._instalar(monkeypatch, repo, registro=registro)

@@ -57,7 +57,7 @@ ALL_TOOLS = {
     "suggest_epg_matches",
     "add_source", "list_sources", "update_source", "remove_source",
     "set_target_sources",
-    "create_filter", "delete_filter", "modify_mapping", "modify_mappings",
+    "create_filter", "delete_filter", "modify_mapping", "modify_mappings", "modify_channels",
 }
 
 
@@ -320,11 +320,10 @@ class TestDaemonE2ETools:
         # start_target + HTTP real de la playlist y el EPG (puerto único)
         r = mcp.call("start_target", {"target_id": "e2e"})
         assert "error" not in r, r
-        base = f"http://127.0.0.1:{daemon['server'].port}/weteve/e2e"
-        url = f"{base}/playlist.m3u"
-        body = _http_get_retry(url)
+        raiz = f"http://127.0.0.1:{daemon['server'].port}"
+        body = _http_get_retry(f"{raiz}/m3u/weteve_e2e.m3u")
         assert body.startswith("#EXTM3U"), body[:100]
-        epg_body = _http_get_retry(f"{base}/epg.xml")
+        epg_body = _http_get_retry(f"{raiz}/xmltv/weteve_e2e.xml")
         assert "<tv" in epg_body
 
         # create_filter + hot-reload (target corriendo → reloaded True)
@@ -335,7 +334,7 @@ class TestDaemonE2ETools:
         assert r.get("ok") is True, r
         assert r.get("reloaded") is True, r
         # el canal de Deportes desaparece de la playlist servida
-        body = _http_get_retry(url)
+        body = _http_get_retry(f"{raiz}/m3u/weteve_e2e.m3u")
         assert "Teledeporte" not in body and "La 1" in body
 
         # create_filter: duplicado (mismo campo+patrón, aunque cambie exclude) e inválido

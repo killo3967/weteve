@@ -18,6 +18,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from src.infrastructure.client.net_utils import announced_host
 from src.infrastructure.web.http_common import AccessLogMixin, NoReuseServer
 
 logger = logging.getLogger(__name__)
@@ -32,17 +33,10 @@ def url_base_for(host: str, port: int) -> str:
     """URL con la que un reproductor alcanza el servidor de un target.
 
     ``0.0.0.0`` no es una dirección navegable: para la lista se usa la IP del
-    equipo en la red local, que es lo que necesita el cliente IPTV.
+    equipo en la red local, que es lo que necesita el cliente IPTV. La misma
+    regla vale para anunciar la playlist y los logos del propio demonio.
     """
-    display_host = str(host or "127.0.0.1")
-    if display_host in ("0.0.0.0", "::"):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.connect(("8.8.8.8", 80))
-                display_host = s.getsockname()[0]
-        except OSError:
-            display_host = "127.0.0.1"
-    return f"http://{display_host}:{int(port)}"
+    return f"http://{announced_host(host)}:{int(port)}"
 
 
 def port_in_use(host: str, port: int) -> bool:

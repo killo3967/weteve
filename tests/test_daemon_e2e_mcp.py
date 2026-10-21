@@ -16,7 +16,7 @@ class TestProtocolo:
         mcp = daemon.mcp()
         nombres = set(mcp.tools())
         assert nombres == EXPECTED_TOOLS
-        assert len(nombres) == 23
+        assert len(nombres) == 24
 
     def test_notificacion_aceptada(self, daemon):
         mcp = daemon.mcp()

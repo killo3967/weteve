@@ -79,7 +79,7 @@ class TestInitialize:
             "add_source", "list_sources", "update_source", "remove_source",
             "set_target_sources",
             "create_filter", "delete_filter",
-            "modify_mapping", "modify_mappings",
+            "modify_mapping", "modify_mappings", "modify_channels",
         }
         # cada herramienta declara inputSchema
         for t in resp["result"]["tools"]:

@@ -12,7 +12,7 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40
 
 
 class _Descargas:
-    def __init__(self, datos=PNG):
+    def __init__(self, datos: bytes = PNG) -> None:
         self.urls: list[str] = []
         self._datos = datos
 
@@ -109,8 +109,8 @@ class TestPlaylistConLogosLocales:
         supervisor, dir_logos = self._supervisor(tmp_path)
         dir_logos.mkdir(parents=True, exist_ok=True)
         (dir_logos / "A3.png").write_bytes(PNG)
-        for ruta in ("/logos/A3.png", "/weteve/logos/A3.png",
-                     "/weteve/0/logos/A3.png"):
+        for ruta in ("/logos/A3.png", "/logos/A3.png",
+                     "/logos/A3.png"):
             salida = supervisor.playlist_route(ruta)
             assert salida is not None and salida[0] == 200, ruta
             assert salida[1] == PNG

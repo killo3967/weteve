@@ -1,112 +1,103 @@
 # Referencia de la API
 
-**Todo se sirve en un solo puerto**, `[DAEMON] control_port` (34400). Un único
-listener con estas rutas:
+Un único puerto (`control_port`, 34400 por defecto) sirve todo. El token, si está
+definido, se manda como `Authorization: Bearer <token>`; la playlist y los logos
+quedan abiertos a propósito porque los reproductores no mandan cabeceras.
 
-| Ruta | Para quién | Token |
-|---|---|---|
-| `/mcp` | agentes (JSON-RPC) | sí |
-| `/api/v1/...` | frontends (GUI Qt, futura web) | sí |
-| `/health`, `/status`, `/shutdown`, `/targets/{id}/reload` | API de control (GUI/CLI) | sí |
-| `/weteve/{id}/playlist.m3u` y `/weteve/{id}/epg.xml` | reproductores IPTV | **no** |
-| `/weteve/playlist.m3u`, `/weteve/epg.xml` | forma corta del target 0 | no |
-| `/playlist.m3u`, `/epg.xml` | alias heredados del target 0 | no |
-
-Token opcional por `[DAEMON] mcp_token` (`Authorization: Bearer <token>`); es
-**obligatorio** si `control_host` no es loopback. La playlist queda sin token a
-propósito: los reproductores IPTV no mandan `Authorization`.
-
-REST y MCP son adaptadores finos sobre `TargetService` (ver
-[`explicacion-arquitectura.md`](explicacion-arquitectura.md)).
-
----
-
-## REST v1
-
-Prefijo `/api/v1`. Respuestas JSON. Errores: `400` (cuerpo o cambio inválido),
-`404` (ruta o target), `405` (método). `limit` se capa a 1000. `compatible` con
-CORS solo para orígenes de loopback.
-
-### Lecturas
-
-| Ruta | Devuelve |
-|---|---|
-| `GET /health` | `{"ok": true, "api": "v1"}` |
-| `GET /status` | estado de todos los targets (`running`, `port`, `channel_count`, `playlist_url`, `epg_url`, `error`) |
-| `GET /targets` | definiciones serializadas (reglas, mapeos, puerto…) |
-| `GET /targets/{id}` | `{"target": {...}}` |
-| `GET /targets/{id}/status` | estado de ese target |
-| `GET /targets/{id}/channels?limit&offset&unmatched_only` | canales servidos |
-| `GET /targets/{id}/mapping-candidates?limit&offset` | canales que necesitan atención (sin guía o desactivados) |
-| `GET /targets/{id}/epg-channels?limit&offset` | catálogo XMLTV (`id`, `display_name`) |
-| `GET /targets/{id}/groups` | grupos de la fuente (combos de reglas) |
-| `GET /targets/{id}/group-fields` | valores por campo de agrupación |
-| `GET /sources` | cartera completa |
-
-### Escrituras
-
-Todas aceptan `"reload": false` para agrupar cambios y ejecutar el pipeline una
-sola vez al final con `POST /run`. Sin ese campo, cada escritura recarga.
-
-| Ruta | Cuerpo | Efecto |
-|---|---|---|
-| `PUT /sources` | `{"sources": [{id?, name, kind, location, source_type?, refresh_min?, enabled?}]}` | reemplaza la cartera; **rechaza todo el lote** si una entrada es inválida |
-| `PUT /targets/{id}/sources` | `{"m3u_sources": [id], "epg_sources": [id]}` | selección del target; ids inexistentes → 400 |
-| `PUT /targets/{id}/settings` | `{"name"?, "port"?, "bind"?}` | nombre, puerto (1-65535), bind (`127.0.0.1` o `0.0.0.0`) |
-| `PUT /targets/{id}/rules` | `{"rules": ["group-title:SPAIN:0:and", ...]}` | reemplaza las reglas |
-| `PUT /targets/{id}/mappings` | `{"mappings": [{"channel_url", "epg_id"\|null}]}` | mezcla por URL; `null` borra; devuelve `applied`/`errors`/`partial` |
-| `PUT /targets/{id}/disabled` | `{"disabled_channels": [url, ...]}` | reemplaza los desactivados |
-| `POST /targets/{id}/preview` | `{"rules": [...]}` | vista previa de filtros, no persiste |
-| `POST /targets/{id}/run` | — | ejecuta el pipeline con la definición en disco; devuelve métricas |
-| `POST /targets/{id}/service` | `{"action": "start"\|"stop"}` | arranca/para el servidor de playlist del target |
-
----
-
-## MCP (`POST /mcp`)
-
-JSON-RPC 2.0 Streamable HTTP. Flujo: `initialize` (devuelve
-`Mcp-Session-Id`) → notificaciones con esa cabecera → `tools/list` /
-`tools/call`. `GET /mcp` no soporta SSE (405); `DELETE /mcp` cierra la sesión.
-
-23 herramientas, agrupadas:
-
-| Grupo | Herramientas |
-|---|---|
-| Estado | `get_status()`, `shutdown()` |
-| Targets | `list_targets()`, `get_target(target_id)`, `create_target(target_id, name, m3u, port, epg?, bind?, rules?, epg_overrides?, starting_number?)`, `update_target(target_id, …)`, `delete_target(target_id)` |
-| Ciclo de vida | `start_target(target_id)`, `stop_target(target_id)`, `reload_target(target_id)`, `run_pipeline(target_id)` |
-| Canales/EPG | `list_tv_channels(target_id, limit?, offset?, unmatched_only?)`, `list_epg_channels(target_id, limit?, offset?)`, `suggest_epg_matches(target_id, channel_name, limit?)` |
-| Filtros | `create_filter(target_id, field, pattern, exclude?, case_sensitive?, operator?)`, `delete_filter(target_id, field, pattern)` |
-| Mapeo | `modify_mapping(target_id, channel_url, epg_id?)`, `modify_mappings(target_id, mappings)` |
-| Cartera | `add_source(name, kind, location, refresh_min?)`, `list_sources(kind?)`, `update_source(id, name?, location?, refresh_min?)`, `remove_source(id)`, `set_target_sources(target_id, m3u_ids?, epg_ids?)` |
-
-Reglas y mapeos usan la sintaxis de `config.ini` (ver
-[`referencia-configuracion.md`](referencia-configuracion.md)).
-
----
-
-## API de control
-
-Lo mínimo para la GUI y la CLI:
-
-| Ruta | Efecto |
-|---|---|
-| `GET /health` | `{"ok": true}` si el demonio vive |
-| `GET /status` | estado agregado (el mismo que `GET /api/v1/status`) |
-| `POST /targets/{id}/reload` | relee `config.ini` y reejecuta el pipeline |
-| `POST /shutdown` | parada elegante |
-
----
-
-## Playlist y EPG (mismo puerto)
+## Playlist y guía (lo que consume el reproductor)
 
 | Ruta | Contenido |
 |---|---|
-| `GET /weteve/{id}/playlist.m3u` | M3U filtrada y numerada (`tvg-chno`) |
-| `GET /weteve/{id}/epg.xml` | XMLTV solo con los canales servidos |
-| `GET /weteve/playlist.m3u`, `GET /playlist.m3u` | alias del target 0 |
+| `GET /m3u/weteve_<perfil>.m3u` | lista M3U del perfil, numerada (`tvg-chno`) |
+| `GET /xmltv/weteve_<perfil>.xml` | XMLTV con solo los canales servidos |
+| `GET /logos/<fichero>` | logo local de `assets/logos` |
 
-El supervisor guarda el contenido en memoria; no hay un servidor por target.
+- El `<perfil>` es el id numérico (`0`, `1`…). Cualquier otro valor da 404.
+- La cabecera del M3U lleva `url-tvg="…/xmltv/weteve_<perfil>.xml"`: es lo que
+  permite a las apps descargar la guía solas.
+- No hay otros formatos ni alias: el anterior `/weteve/{id}/playlist.m3u` se
+  retiró.
 
-El `tvg-id` del M3U sale **vacío a propósito**: el enlace canal↔guía es por
-nombre, como en las listas de proveedor. Cualquier otra ruta devuelve 404.
+## API de control
+
+| Ruta | Para qué |
+|---|---|
+| `GET /health` | vivo / 401 si hace falta token |
+| `GET /status` | estado agregado (perfiles, URLs, `revision`) |
+| `POST /shutdown` | parada elegante |
+| `POST /targets/{id}/reload` | reejecutar el pipeline de un perfil |
+
+## REST v1 (`/api/v1`, prefijo fijo)
+
+Límite de página: 1000. Todas las lecturas salen del snapshot; solo `run` y
+`refresh-epg` ejecutan.
+
+| Ruta | Qué hace |
+|---|---|
+| `GET /health`, `GET /status` | estado |
+| `GET /targets`, `GET /targets/{id}` | perfiles |
+| `GET /targets/{id}/status` | estado de ejecución |
+| `GET /targets/{id}/channels` | canales servidos (`?limit&offset&unmatched_only`) |
+| `GET /targets/{id}/mapping-candidates` | filas de la tabla (`?include_served`) |
+| `GET /targets/{id}/epg-channels` | canales de la guía |
+| `GET /targets/{id}/catalog` | catálogo con dial, código y «en tu lista» |
+| `GET /targets/{id}/groups`, `/group-fields` | valores de agrupación |
+| `GET /sources` | cartera (`?kind=m3u\|epg`) |
+| `POST /targets/{id}/preview` | vista previa de unas reglas |
+| `POST /targets/{id}/run` | ejecutar el pipeline |
+| `POST /targets/{id}/refresh-epg` | volver a leer las guías (descarga) |
+| `PUT /targets/{id}/settings` | nombre, puerto, bind, prioridad, dummy, guía ligera |
+| `PUT /targets/{id}/rules` | filtros en sintaxis xteve |
+| `PUT /targets/{id}/mappings` | mapeos EPG en lote |
+| `PUT /targets/{id}/channels` | fichas: dial, nombre mostrado y logo |
+| `PUT /targets/{id}/sources` | selección de fuentes del perfil |
+| `PUT /targets/{id}/disabled` | canales apagados a mano |
+
+### `PUT /targets/{id}/channels`
+
+```json
+{"channels": [
+  {"identity": "MLIGA", "dial": 54, "display": "M+ LALIGA", "logo": "MLIGA.png"}
+]}
+```
+
+- `identity` es la clave de la ficha (`MLIGA`, `url-<hash>`, `name-<base>`).
+- Campo ausente = no se toca. `null`/`""` = vuelve al automático.
+- `logo` acepta **nombre** de `assets/logos`, **ruta** a una imagen (se copia) o
+  **URL http(s)** (se descarga y se guarda).
+- Todo o nada: un dial repetido o un logo imposible devuelve error y no guarda.
+
+## MCP (`POST /mcp`, JSON-RPC 2.0)
+
+`initialize` devuelve `Mcp-Session-Id`, que hay que repetir en cada `tools/call`.
+Cabecera `Accept: application/json, text/event-stream`.
+
+24 herramientas:
+
+| Grupo | Herramientas |
+|---|---|
+| Estado | `get_status`, `list_targets`, `get_target` |
+| Perfiles | `create_target`, `update_target`, `delete_target`, `start_target`, `stop_target`, `reload_target`, `run_pipeline` |
+| Lectura de canales | `list_tv_channels`, `list_epg_channels`, `suggest_epg_matches` |
+| Cartera | `add_source`, `list_sources`, `update_source`, `remove_source`, `set_target_sources` |
+| Filtros | `create_filter`, `delete_filter` |
+| Mapeo y fichas | `modify_mapping`, `modify_mappings`, `modify_channels` |
+| Demonio | `shutdown` |
+
+Ejemplo mínimo:
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"tools/call",
+ "params":{"name":"modify_channels","arguments":{"target_id":"0",
+   "channels":[{"identity":"MLIGA","display":"M+ LALIGA"}]}}}
+```
+
+## Campos de `/status` por perfil
+
+| Campo | Significado |
+|---|---|
+| `running` | si está sirviendo |
+| `channel_count` | canales servidos tras filtros y dedupe |
+| `playlist_url`, `epg_url` | URLs públicas (`/m3u/…`, `/xmltv/…`) |
+| `revision` | sube con cada guardado o recarga; la GUI lo usa para repintar |
+| `error` | último fallo del pipeline, si lo hubo |

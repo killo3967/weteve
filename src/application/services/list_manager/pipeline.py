@@ -4,12 +4,16 @@ import logging
 from dataclasses import replace as dataclasses_replace
 from pathlib import Path
 
+from src.application.services.list_manager.dummy_epg import dummy_id_for
 from src.application.services.list_manager.epg_matcher import EpgMatcher
 from src.application.services.list_manager.filter_engine import evaluate_channel
 from src.application.services.list_manager.models import (
+    ChannelProfile,
     FilterRule,
     MappedChannel,
     PipelineTarget,
+    channel_keys,
+    merge_profiles,
 )
 from src.application.services.list_manager.quality import base_name, dedupe_variants
 from src.domain.entities.epg import ChannelInfo, EPGData, Program
@@ -30,6 +34,25 @@ def _combinar(principal: ChannelInfo | None,
     return ChannelInfo(
         dial=principal.dial if principal.dial is not None else respaldo.dial,
         logo=principal.logo or respaldo.logo)
+
+
+def profile_of(target: PipelineTarget, canonical: str | None,
+               url: str = "", name: str = "") -> ChannelProfile:
+    """Ficha del canal: la de su código de guía, la de su url o la de su nombre.
+
+    Un canal puede tener más de una (un mapeo manual antiguo dejó una por url);
+    se funden campo a campo.
+    """
+    fichas = [target.channels[clave] for clave
+              in channel_keys(canonical, url, name) if clave in target.channels]
+    return merge_profiles(fichas)
+
+
+def channel_identity(canonical: str | None, url: str = "",
+                     name: str = "") -> str:
+    """Identidad estable del canal: código de guía, url o nombre."""
+    claves = channel_keys(canonical, url, name)
+    return claves[0] if claves else ""
 
 
 def _is_separator_channel(name: str) -> bool:
@@ -109,7 +132,8 @@ class ListManagerPipeline:
         self._source_epg_path: dict[int | str, str] = {}
         # cache canal→guía: no depende de las reglas, así que sobrevive a las
         # recargas (se invalida si cambia la guía o los overrides)
-        self._match_cache: dict[int | str, tuple[tuple, dict[tuple, str]]] = {}
+        self._match_cache: dict[
+            int | str, tuple[tuple, dict[tuple, tuple[str, str]]]] = {}
 
     def register_source(self, index: int | str, m3u_path: str,
                         epg_path: str | None,
@@ -409,12 +433,14 @@ class ListManagerPipeline:
 
         return self._finish(target, kept, total_input, epg)
 
-    def _match_cache_for(self, index: int | str, epg: EPGData,
-                         overrides: dict[str, str]) -> dict[tuple, str]:
+    def _match_cache_for(
+        self, index: int | str, epg: EPGData, overrides: dict[str, str],
+    ) -> dict[tuple, tuple[str, str]]:
         """Cache de emparejamiento por canal, invalidada por guía u overrides.
 
         La clave incluye ``tvg_id`` y nombre, así que si la lista cambia el
-        canal se vuelve a emparejar solo.
+        canal se vuelve a emparejar solo. El valor guarda el id de guía y la
+        identidad canónica: las dos se resuelven igual de caras.
         """
         signature = (id(epg), frozenset(overrides.items()))
         cached = self._match_cache.get(index)
@@ -422,6 +448,30 @@ class ListManagerPipeline:
             cached = (signature, {})
             self._match_cache[index] = cached
         return cached[1]
+
+    @staticmethod
+    def _resolver(cache: dict[tuple, tuple[str, str]], matcher: EpgMatcher,
+                  mapped: MappedChannel, override: str | None = None,
+                  ) -> tuple[str | None, str | None]:
+        """Id de guía y identidad canónica de un canal, con cache.
+
+        Son dos preguntas distintas: ``matched_epg_id`` decide de qué guía
+        salen los programas (un mapeo manual manda sobre esto) y
+        ``canonical_id`` dice de qué canal estamos hablando (dial, logo y
+        agrupación de variantes). Antes las dos se contestaban con el mismo
+        id, y por eso un mapeo a Koala dejaba el canal sin dial.
+
+        La cache se invalida cuando cambian los mapeos (la firma los incluye),
+        así que guardar el id del mapeo dentro no la deja obsoleta.
+        """
+        clave = (mapped.url, mapped.tvg_id or "", mapped.name)
+        guardado = cache.get(clave)
+        if guardado is None:
+            epg_id = override or matcher.match(mapped.tvg_id, mapped.name)
+            canonico = matcher.canonical_for(mapped.name, epg_id)
+            guardado = (epg_id or "", canonico or "")
+            cache[clave] = guardado
+        return guardado[0] or None, guardado[1] or None
 
     def _finish(self, target: PipelineTarget, kept: list[MappedChannel],
                 total_input: int, epg: EPGData | None) -> PipelineResult:
@@ -442,17 +492,20 @@ class ListManagerPipeline:
             cache = self._match_cache_for(target.source_index, epg,
                                           target.epg_overrides)
             for mapped in kept:
+                # un mapeo manual fija la parrilla y no gasta emparejamiento
                 override = target.epg_overrides.get(mapped.url)
-                if override:
-                    matched.append(dataclasses_replace(mapped, matched_epg_id=override))
-                    continue
-                clave = (mapped.url, mapped.tvg_id or "", mapped.name)
-                if clave in cache:
-                    epg_id = cache[clave] or None
-                else:
-                    epg_id = matcher.match(mapped.tvg_id, mapped.name)
-                    cache[clave] = epg_id or ""
-                matched.append(dataclasses_replace(mapped, matched_epg_id=epg_id))
+                epg_id, canonico = self._resolver(
+                    cache, matcher, mapped, override)
+                perfil = profile_of(target, canonico, mapped.url, mapped.name)
+                # Sin guía: el dial forzado (o el toggle del target) la
+                # resuelven con la guía de relleno, antes de que la regla de
+                # servidor descarte el canal.
+                if not epg_id and (perfil.dial is not None
+                                   or target.serve_without_epg):
+                    epg_id = dummy_id_for(
+                        channel_identity(canonico, mapped.url, mapped.name))
+                matched.append(dataclasses_replace(
+                    mapped, matched_epg_id=epg_id, canonical_id=canonico))
         else:
             matched = kept
 
@@ -514,8 +567,9 @@ class ListManagerPipeline:
                   epg: EPGData | None) -> list[MappedChannel]:
         """Pone logo y número final: dial real si la guía lo publica.
 
-        - **Logo** por capas: el de la fuente de guía (el que el proveedor
-          usa ahora) y, si no lo publica, el que traía la lista M3U.
+        - **Logo** por capas: el de la guía del canal canónico (el que el
+          proveedor usa ahora), el de la guía del emparejamiento y, si no lo
+          publica ninguna, el que traía la lista M3U.
         - **Número**: ``tvg-chno`` sale del ``dial`` del canal cuando existe
           (1, 2, 3, 4, 7…, con los huecos de la parrilla real) y de un
           contador que empieza **después del último dial** para los que no
@@ -528,20 +582,40 @@ class ListManagerPipeline:
         muestre el mismo orden que la parrilla del proveedor.
         """
         info = epg.channel_info if epg is not None else {}
+        nombres = epg.channel_names if epg is not None else {}
         # Un mapeo manual puede apuntar a una guía que no publica dial ni logo
-        # (la de siempre): en ese caso se buscan por nombre del canal, que es
-        # lo que permite tener número real sin rehacer los 179 mapeos.
+        # (la de siempre): el canal canónico cubre ese hueco y, si tampoco hay
+        # identidad, se busca por nombre.
         por_nombre = self._meta_por_nombre(epg) if epg is not None else {}
         con_dial: list[MappedChannel] = []
         sin_dial: list[MappedChannel] = []
         usados: set[int] = set()
         for mapped in served:
+            perfil = profile_of(target, mapped.canonical_id, mapped.url,
+                                mapped.name)
+            # La identidad manda: el dial y el logo son del canal, no de la
+            # guía que resolvió la parrilla. Los respaldos son para canales
+            # sin identidad reconocida.
             meta = _combinar(
-                info.get(mapped.matched_epg_id or ""),
-                por_nombre.get(base_name(mapped.name)))
+                info.get(mapped.canonical_id or ""),
+                _combinar(info.get(mapped.matched_epg_id or ""),
+                          por_nombre.get(base_name(mapped.name))))
             logo = (meta.logo if meta is not None else None) or mapped.logo_url
-            canal = dataclasses_replace(mapped, logo_url=logo)
-            dial = meta.dial if meta is not None else None
+            # El nombre mostrado es cosmético: la guía del canal canónico pone
+            # el nombre real ("LA 1" para "LA 1 HD") y la ficha lo puede
+            # sobrescribir. El dedupe ya se hizo con el nombre interno.
+            # Si la guía solo publica el código como nombre ("LA2"), no se usa:
+            # sería peor que el que trae la lista.
+            de_guia = nombres.get(mapped.canonical_id or "") or ""
+            if de_guia == (mapped.canonical_id or ""):
+                de_guia = ""
+            nombre = perfil.display or de_guia or mapped.name
+            canal = dataclasses_replace(
+                mapped, logo_url=logo, logo_file=perfil.logo or None,
+                name=nombre,
+                internal_name=mapped.internal_name or mapped.name)
+            dial = perfil.dial if perfil.dial is not None else (
+                meta.dial if meta is not None else None)
             # Un dial repetido (dos canales apuntando al mismo id de guía) no
             # puede duplicar el número: el segundo cae al contador.
             if dial is not None and dial not in usados:

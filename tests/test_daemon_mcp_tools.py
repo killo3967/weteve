@@ -97,7 +97,7 @@ class TestRegistry:
             "add_source", "list_sources", "update_source", "remove_source",
             "set_target_sources",
             "create_filter", "delete_filter",
-            "modify_mapping", "modify_mappings",
+            "modify_mapping", "modify_mappings", "modify_channels",
         }
         assert set(registry) == expected
         for spec in registry.values():
