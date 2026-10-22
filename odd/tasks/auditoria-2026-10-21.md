@@ -138,8 +138,8 @@ Cada tarea se cierra cuando su criterio de aceptación se cumple **y** la suite
   del demonio en marcha): 41 apagados → 41 fichas con `enabled = false`,
   residuo 0, pérdidas 0; fichero 47 764 → 43 474 bytes.
   **Hallazgo importante**: los **226 mapeos por url son huérfanos** — apuntan al
-  host viejo del proveedor (`host antiguo del proveedor`) y la lista actual usa otro
-  (`host nuevo del mismo proveedor`). Ninguno casa con un canal actual: llevan tiempo sin
+  host viejo del proveedor, y la lista actual usa otro. Ninguno casa con un
+  canal actual: llevan tiempo sin
   aplicarse y el pipeline resolvía esos canales por parecido automático. No se
   borran ni se reanclan a ciegas (201 de ellos comparten id de canal en la ruta,
   pero reanclar por número es adivinar): se conservan tal cual hasta que el

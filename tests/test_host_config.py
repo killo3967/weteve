@@ -19,11 +19,11 @@ class TestDirecciones:
     def test_para_conectar_0000_es_loopback(self):
         assert connect_host("0.0.0.0") == "127.0.0.1"
         assert connect_host("localhost") == "127.0.0.1"
-        assert connect_host("192.168.1.47") == "192.168.1.47"
+        assert connect_host("192.0.2.10") == "192.0.2.10"
 
     def test_para_anunciar_0000_no_sirve(self):
         assert announced_host("0.0.0.0") != "0.0.0.0"
-        assert announced_host("192.168.1.47") == "192.168.1.47"
+        assert announced_host("192.0.2.10") == "192.0.2.10"
         assert announced_host("127.0.0.1") == "127.0.0.1"
 
     def test_el_desplegable_empieza_en_loopback_y_acaba_en_todos(self):
@@ -112,8 +112,8 @@ class TestValidacionDelToken:
 
         app = ListManagerDialog.__new__(ListManagerDialog)
         app.parent = lambda: None
-        sin_token = SimpleNamespace(control_host="192.168.1.47", mcp_token="")
-        con_token = SimpleNamespace(control_host="192.168.1.47",
+        sin_token = SimpleNamespace(control_host="192.0.2.10", mcp_token="")
+        con_token = SimpleNamespace(control_host="192.0.2.10",
                                     mcp_token="abc")
         local = SimpleNamespace(control_host="127.0.0.1", mcp_token="")
 

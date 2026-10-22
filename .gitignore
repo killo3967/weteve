@@ -1,45 +1,64 @@
+# ---------------------------------------------------------------------------
+# Sistema y editor
+# ---------------------------------------------------------------------------
+Thumbs.db
+Desktop.ini
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# ---------------------------------------------------------------------------
 # Python
+# ---------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# ---------------------------------------------------------------------------
+# Herramientas (lint, tipos, pruebas, agentes)
+# ---------------------------------------------------------------------------
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.coverage.*
 htmlcov/
+.atl/
+.codegraph/
+.pi/
 
-# Virtual environments
-.venv/
-venv/
-
-# IDE
-.idea/
-.vscode/
-
-# Runtime artifacts
-*.log
-*.pid
-
-# Project-local config (each user keeps their own)
+# ---------------------------------------------------------------------------
+# Configuración y datos del usuario — NUNCA se publican
+#
+# Cada instalación tiene los suyos: llevan direcciones de fuentes con
+# credenciales y el token del demonio. Los ejemplos sí se versionan
+# (`daemon.toml.example`, `weteve.ini.example`).
+# ---------------------------------------------------------------------------
 config.ini
 daemon.toml
 weteve.ini
-
-# Tooling artifacts
-.atl/
-logs/
-# caché de logos de la GUI (se regenera sola)
-src/cache/
-
-# Sesión/herramientas locales
-.pi/
-.atl/
 *.bak
+*.tmp
+backups/
+
+# ---------------------------------------------------------------------------
+# Estado en tiempo de ejecución
+# ---------------------------------------------------------------------------
+logs/
+*.log
+*.pid
 weteve.pid
 weteve.lock
+cache/
+src/cache/
 
-# Logos descargados por el demonio (se regeneran solos)
+# ---------------------------------------------------------------------------
+# Medios descargados (se regeneran solos)
+# ---------------------------------------------------------------------------
 assets/logos/
-
-# Copias locales previas a cambios delicados (pueden llevar datos del usuario)
-backups/
