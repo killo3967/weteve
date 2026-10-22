@@ -1,0 +1,25 @@
+# weteve.ini — arranque del demonio
+#
+# Lo escribe la GUI (pestaña «Configuración»). Copia este fichero como
+# `weteve.ini` solo si arrancas el demonio a mano sin abrir la interfaz.
+#
+# Reparto de ficheros (un escritor cada uno):
+#   daemon.toml  → datos: cartera de fuentes y perfiles. Lo escribe el demonio.
+#   weteve.ini   → arranque (esto): host, puerto, token y preferencias.
+#
+# `config.ini` es el formato viejo: solo se lee para migrar con
+# `python daemon.py migrate-config`.
+
+[DAEMON]
+; 127.0.0.1 = solo este equipo; 0.0.0.0 = toda la red local (exige token)
+control_host = 127.0.0.1
+; Único puerto: control, REST (/api/v1), MCP (/mcp) y playlists (/m3u, /xmltv)
+control_port = 34400
+; Legado: todo se sirve en control_port; el demonio avisa si difiere
+mcp_port = 34400
+; Token Bearer de MCP, API de control y REST. Vacío solo vale en loopback.
+mcp_token =
+; La interfaz arranca el demonio al abrirse si no responde
+autostart = 0
+; La interfaz para el demonio al cerrarse, solo si lo arrancó ella
+stop_on_exit = 0

@@ -76,6 +76,8 @@ class LogoStore:
             if destino.is_file() and self._es_imagen(destino.read_bytes()[:16]):
                 return nombre
         except OSError:
+            # Fichero local ilegible/corrupto: se trata como ausente y se
+            # vuelve a descargar más abajo.
             pass
         try:
             datos = self._opener(url)

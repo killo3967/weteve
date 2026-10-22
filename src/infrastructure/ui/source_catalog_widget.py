@@ -171,7 +171,7 @@ class SourceCatalogWidget(QWidget):
     def set_catalog(self, catalog: SourceCatalog) -> None:
         """Reemplaza la cartera y repuebla la tabla.
 
-        Lo usa el diálogo cuando config.ini cambia por fuera (daemon o sus
+        Lo usa el diálogo cuando la cartera cambia por fuera (daemon o sus
         herramientas MCP): las filas que se ven son las del fichero, no las
         que la ventana leyó al abrirse.
         """

@@ -23,13 +23,13 @@ configura.
 - **Guía ligera**: `epg.xml` sin descripciones ni categorías (~3 MB en vez de
   9 MB). Activa por defecto.
 
-## Estado verificado (2026-10-21)
+## Estado verificado (2026-10-22)
 
 | Comprobación | Resultado |
 |---|---|
-| `pytest -q` | 982 tests en verde |
+| `pytest -q` | 1003 tests en verde |
 | `ruff check` | limpio |
-| `mypy` | sin errores (141 ficheros) |
+| `mypy` | sin errores (142 ficheros) |
 | Demonio | 146 canales servidos, 0 sin logo |
 
 Informe de auditoría: `docs/forensic-audit/2026-10-21.md`.
@@ -39,7 +39,6 @@ Informe de auditoría: `docs/forensic-audit/2026-10-21.md`.
 ```
 main.py            ventana Qt (frontend del demonio)
 daemon.py          proceso del demonio: run | status | stop | install-task | migrate-config
-scripts/           healthcheck.py (comprobación manual contra un demonio vivo)
 src/
   domain/          entidades y puertos, sin Qt ni red
   application/

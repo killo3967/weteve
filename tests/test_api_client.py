@@ -248,18 +248,6 @@ class TestPaginacion:
         assert body["truncated"] is False
         assert pedidos == [0, 3, 6]
 
-    def test_mapping_candidates_recorre_todas_las_paginas(self, monkeypatch):
-        filas = [{"name": f"canal{i}", "url": f"http://x/{i}"} for i in range(5)]
-        def falso(self, target_id, limit=1000, offset=0, include_served=True):
-            page = filas[offset:offset + 2]
-            return 200, {"channels": page, "total": len(filas),
-                         "count": len(page), "offset": offset}
-
-        monkeypatch.setattr(ApiClient, "mapping_candidates", falso)
-        code, body = ApiClient().all_mapping_candidates("0")
-        assert code == 200 and len(body["channels"]) == 5
-        assert body["truncated"] is False
-
     def test_si_el_daemon_no_avanza_se_marca_truncado(self, monkeypatch):
         def falso(self, target_id, limit=1000, offset=0):
             return 200, {"channels": [], "total": 5, "count": 0,

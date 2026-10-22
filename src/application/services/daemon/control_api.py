@@ -30,7 +30,7 @@ class ControlApiServer:
     def __init__(self, supervisor, host: str = "127.0.0.1", port: int = 34400,
                  token: str = "", on_shutdown=None, target_store=None) -> None:
         self._supervisor = supervisor
-        # si hay store, el reload toma la definición de config.ini (fresca)
+        # si hay store, el reload toma la definición de daemon.toml (fresca)
         # en vez de la que el supervisor memorizó al arrancar
         self._store = target_store
         self._host = host
@@ -80,7 +80,7 @@ class ControlApiServer:
     # -- config compartida ------------------------------------------------------
 
     def _fresh_target(self, target_id: str):
-        """Definición actualizada de config.ini, o None si no hay store.
+        """Definición actualizada de daemon.toml, o None si no hay store.
 
         Sin store (o con uno antiguo sin reload()) se reutiliza lo que ya
         tiene el supervisor: same reload de pipeline de toda la vida.

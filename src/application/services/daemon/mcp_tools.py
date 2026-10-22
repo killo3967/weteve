@@ -4,7 +4,7 @@ Cada entrada mapea nombre MCP → {description, inputSchema JSON Schema,
 handler}. Los handlers son funciones planas sobre el TargetSupervisor y el
 TargetStore, serializables a JSON (los agentes solo ven texto/JSON).
 
-Sintaxis de reglas en argumentos MCP: la textual de xTeVe usada en config.ini
+Sintaxis de reglas en argumentos MCP: la textual de xTeVe usada en daemon.toml
 (``field:pattern:case``), parseada con FilterRule.parse.
 """
 

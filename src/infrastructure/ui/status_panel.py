@@ -21,6 +21,13 @@ RED = "\U0001F534"     # 🔴
 
 DEFAULT_ROOT = "http://127.0.0.1:34400"
 
+#: Aviso del semáforo para el muestreo de streams.
+WARN = "\U0001F7E1"    # 🟡
+
+#: Por debajo de esta fracción de streams respondiendo se avisa: el origen
+#: puede estar caído aunque el demonio esté perfecto.
+UMBRAL_STREAMS = 0.5
+
 
 class StatusPanel(QWidget):
     """Vista de solo lectura del demonio: responde o no, y dónde se accede."""
@@ -104,7 +111,7 @@ class StatusPanel(QWidget):
         if client is None:
             self._fill_urls(DEFAULT_ROOT)
             self._clear_targets()
-            self._add_target_line("Sin config.ini: no hay demonio que consultar.")
+            self._add_target_line("Sin configuración: no hay demonio que consultar.")
             self._set_state(RED, "Demonio: sin configuración")
             return
 
@@ -137,6 +144,15 @@ class StatusPanel(QWidget):
                 line += f" · {t.get('channel_count')} canales"
             if t.get("error"):
                 line += f" · ERROR: {t['error']}"
+            streams = t.get("streams") or {}
+            comprobados = int(streams.get("checked") or 0)
+            if running and comprobados:
+                responden = int(streams.get("ok") or 0)
+                aviso = responden < comprobados * UMBRAL_STREAMS
+                line += (f" · {WARN if aviso else ''}"
+                         f" {responden} de {comprobados} streams responden")
+                if aviso:
+                    line += " (¿sigue la lista del proveedor?)"
             self._add_target_line(line)
             if running and t.get("playlist_url"):
                 self._add_target_line(

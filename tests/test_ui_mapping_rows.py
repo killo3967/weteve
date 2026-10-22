@@ -10,7 +10,10 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QAbstractItemView, QTableWidgetSelectionRange
 
-from src.infrastructure.ui.list_manager_dialog import ListManagerDialog
+from src.infrastructure.ui.list_manager_dialog import (
+    MAPPING_PAGE,
+    ListManagerDialog,
+)
 
 
 @pytest.fixture
@@ -254,22 +257,27 @@ class TestSeleccionMultipleYMenu:
 class TestCatalogoIncompleto:
     """Si el demonio no entrega todo, la GUI lo dice en vez de callarse."""
 
-    def test_avisa_si_el_catalogo_viene_truncado(self, dialog, fake_api,
-                                                 monkeypatch):
+    def test_avisa_si_el_demonio_recorta_la_pagina(self, dialog, fake_api,
+                                                   monkeypatch):
         fake_api.served_channels = [_row()]
-        original = fake_api.all_mapping_candidates
+        original = fake_api.mapping_candidates
 
-        def truncado(target_id, include_served=True):
-            code, body = original(target_id, include_served=include_served)
+        def recortado(target_id, limit=1000, offset=0, include_served=True):
+            code, body = original(target_id, limit=limit, offset=offset,
+                                  include_served=include_served)
+            body["total"] = 10        # hay 10 canales, pero solo llega uno
             body["truncated"] = True
             return code, body
 
-        monkeypatch.setattr(fake_api, "all_mapping_candidates", truncado)
+        monkeypatch.setattr(fake_api, "mapping_candidates", recortado)
         dialog._refresh_mapping()
         assert "catálogo incompleto" in dialog.result_label.text()
 
-    def test_sin_truncar_no_avisa(self, dialog, fake_api):
-        fake_api.served_channels = [_row()]
+    def test_una_pagina_con_mas_filas_no_es_catalogo_incompleto(
+            self, dialog, fake_api):
+        """Que queden filas es paginación: las trae «Cargar más»."""
+        fake_api.served_channels = [_row(name=f"Canal {i}", url=f"http://x/{i}")
+                                    for i in range(80)]
         dialog._refresh_mapping()
         assert "catálogo incompleto" not in dialog.result_label.text()
 
@@ -486,3 +494,93 @@ class TestActualizarGuias:
         dialog.epg_mapping.refresh_guides_btn.click()
         assert not [c for c in fake_api.calls if c[0] == "refresh_epg"]
         assert "guardado en curso" in dialog.result_label.text()
+
+
+class TestLaVistaSobreviveAlRefresco:
+    """Repintar no devuelve al usuario al principio ni le quita la selección.
+
+    El refresco lo dispara el demonio (revisión nueva) cada pocos segundos; si
+    la tabla saltara al principio y perdiera la selección, mapear 800 canales
+    sería imposible.
+    """
+
+    def _canales(self, total: int):
+        return [_row(name=f"Canal {i:02d}", url=f"http://x/{i}.ts",
+                     tvg_id=f"Canal {i:02d}") for i in range(total)]
+
+    def test_conserva_la_seleccion_por_identidad(self, dialog, fake_api):
+        fake_api.served_channels = self._canales(20)
+        dialog._refresh_mapping()
+        tabla = dialog.epg_mapping.table
+        w = dialog.epg_mapping
+        ultima = tabla.columnCount() - 1
+        tabla.setRangeSelected(QTableWidgetSelectionRange(5, 0, 5, ultima), True)
+        tabla.setRangeSelected(QTableWidgetSelectionRange(9, 0, 9, ultima), True)
+
+        # el orden cambia (fila nueva delante): las mismas filas siguen elegidas
+        canales = self._canales(20)
+        canales.insert(0, _row(name="Nuevo", url="http://x/nuevo.ts"))
+        fake_api.served_channels = canales
+        dialog._refresh_mapping()
+
+        elegidas = {tabla.item(r, w.COL_NAME).text() for r in w.selected_rows()}
+        assert elegidas == {"Canal 05", "Canal 09"}
+
+    def test_conserva_la_fila_superior_visible(self, dialog, fake_api):
+        fake_api.served_channels = self._canales(60)
+        dialog._refresh_mapping()
+        tabla = dialog.epg_mapping.table
+        w = dialog.epg_mapping
+        tabla.resize(1000, 400)
+        tabla.scrollToItem(tabla.item(25, w.COL_NAME),
+                           QAbstractItemView.ScrollHint.PositionAtTop)
+        arriba = tabla.rowAt(0)
+
+        # el demonio devuelve lo mismo con dos filas nuevas al principio
+        canales = self._canales(60)
+        canales[:0] = [_row(name="Nueva A", url="http://x/na.ts"),
+                       _row(name="Nueva B", url="http://x/nb.ts")]
+        fake_api.served_channels = canales
+        dialog._refresh_mapping()
+
+        assert tabla.rowAt(0) == arriba + 2, (
+            "la fila superior tiene que seguir siendo el mismo canal")
+
+
+class TestPaginacionDeLaTabla:
+    """La tabla pide una página; el total se conoce sin bajar el catálogo entero."""
+
+    def _canales(self, total: int):
+        return [_row(name=f"Canal {i:02d}", url=f"http://x/{i}.ts",
+                     tvg_id=f"Canal {i:02d}") for i in range(total)]
+
+    def test_pide_una_pagina_y_no_el_catalogo_entero(self, dialog, fake_api):
+        fake_api.served_channels = self._canales(300)
+        dialog._refresh_mapping()
+        assert fake_api.last_limit == MAPPING_PAGE
+        assert dialog.epg_mapping.table.rowCount() == MAPPING_PAGE
+
+    def test_el_boton_dice_cuantas_hay_y_trae_la_siguiente(
+            self, dialog, fake_api):
+        fake_api.served_channels = self._canales(300)
+        dialog._refresh_mapping()
+        boton = dialog.epg_mapping.more_btn
+        assert not boton.isHidden()
+        assert "50 de 300" in boton.text()
+
+        boton.click()
+        assert fake_api.last_limit == 2 * MAPPING_PAGE
+        assert dialog.epg_mapping.table.rowCount() == 2 * MAPPING_PAGE
+
+    def test_sin_filas_pendientes_el_boton_no_aparece(self, dialog, fake_api):
+        fake_api.served_channels = self._canales(3)
+        dialog._refresh_mapping()
+        assert dialog.epg_mapping.more_btn.isHidden()
+
+    def test_un_apagado_fuera_de_la_pagina_no_se_pierde(self, dialog, fake_api):
+        """Guardar no puede reactivar lo que no está en la página cargada."""
+        fake_api.served_channels = self._canales(300)
+        dialog._refresh_mapping()
+        w = dialog.epg_mapping
+        w._manual_off.add("http://x/250.ts")   # apagado que no está cargado
+        assert "http://x/250.ts" in w.get_disabled()

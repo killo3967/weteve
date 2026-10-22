@@ -79,6 +79,8 @@ def find_port_owner(port: int, host: str = "127.0.0.1") -> str | None:
             except (psutil.Error, TypeError):
                 return f"PID {conn.pid}" if conn.pid else "proceso desconocido"
     except psutil.Error:
+        # Sin permisos de psutil caemos en el mismo "proceso desconocido"
+        # del return final.
         pass
     return "proceso desconocido"
 

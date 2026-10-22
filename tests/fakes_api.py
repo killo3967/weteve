@@ -20,6 +20,8 @@ class FakeApi:
         self.preview_names: list[str] = []
         self.preview_total = 0
         self.running = True
+        #: muestreo de streams del perfil (lo que publica /status)
+        self.streams = {"checked": 0, "ok": 0, "pending": False}
         #: targets que devuelve GET /targets (id -> nombre)
         self.targets_map: dict[str, str] = {"0": "test"}
         self.calls: list[tuple] = []
@@ -31,27 +33,28 @@ class FakeApi:
         if self.down:
             return 0, {"error": "sin conexión"}
         return 200, {"name": "test", "running": self.running,
-                     "port": 9999, "channel_count": self.served}
+                     "port": 9999, "channel_count": self.served,
+                     "streams": dict(self.streams)}
 
     def mapping_candidates(self, target_id: str, limit: int = 1000,
-                           include_served: bool = True):
+                           offset: int = 0, include_served: bool = True):
         self.last_include_served = include_served
+        self.last_limit = limit
+        self.last_offset = offset
         if self.down:
             return 0, {"error": "sin conexión"}
         rows = list(self.served_channels)
-        return 200, {"channels": rows, "total": len(rows),
-                     "count": len(rows), "offset": 0}
+        total = len(rows)
+        page = rows[offset:offset + limit]
+        return 200, {"channels": page, "total": total, "count": len(page),
+                     "offset": offset,
+                     "truncated": offset + len(page) < total}
 
     def targets(self):
         if self.down:
             return 0, {"error": "sin conexión"}
         return 200, {"targets": {tid: {"name": name}
                                  for tid, name in self.targets_map.items()}}
-
-    def all_mapping_candidates(self, target_id: str,
-                               include_served: bool = True):
-        """Misma respuesta que la página única: el fake no pagina."""
-        return self.mapping_candidates(target_id, include_served=include_served)
 
     def all_epg_channels(self, target_id: str):
         return self.epg_channels(target_id)
@@ -103,6 +106,7 @@ class FakeApi:
             "channel_count": self.served if self.running else None,
             "playlist_url": f"{url}/playlist.m3u" if self.running else None,
             "epg_url": f"{url}/epg.xml" if self.running else None,
+            "streams": dict(self.streams),
             "error": None,
         }}}
 

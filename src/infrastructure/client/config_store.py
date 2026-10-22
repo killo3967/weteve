@@ -1,14 +1,21 @@
-"""Serialización única de ``config.ini``.
+"""Escritura atómica de configuración + lectores del INI legado.
 
-Un solo módulo escribe el fichero: secciones de target
-(``listmanager.target.N``), cartera de fuentes (``source.<id>``) y
-``[DAEMON]``. Antes cada consumidor tenía su propia copia del formato
-(``persistencia.save_config``, ``TargetStore.save``,
-``sources_store.save_catalog`` y ``daemon.config.save_daemon_config``) y las
-cuatro podían divergir: el formato del fichero solo debe cambiar aquí.
+Este módulo **ya no serializa los datos del demonio**: eso es
+``config_toml`` (``daemon.toml``). Le quedan dos papeles:
 
-Todas las escrituras pasan por ``update()``: una lectura, las mutaciones y una
-escritura, para que un guardado en lote no reescriba el fichero N veces.
+- **Escritura atómica** (``write_atomic``, ``dump``, ``update``) con copia
+  ``.bak``: la comparten ``config_toml`` y ``daemon/config.py``.
+- **Formato INI legado** (``parse``, ``parse_overrides``, ``write_daemon``):
+  ``parse``/``parse_overrides`` solo los lee ``python daemon.py
+  migrate-config`` para convertir un ``config.ini``. ``write_daemon`` escribe
+  ``[DAEMON]`` en ``weteve.ini``, el fichero de arranque que lee la GUI.
+
+**Congelado el 2026-10-22** (tarea T02 de ``odd/tasks/auditoria-2026-10-21.md``):
+no se añaden claves ni escritores nuevos aquí. El reparto vigente es
+``daemon.toml`` (datos, lo escribe el demonio) + ``weteve.ini`` (arranque, lo
+escribe la GUI); ver ``docs/diataxis/referencia-configuracion.md``. El INI viejo
+se mantiene indefinidamente **solo** para migrar: ``config.ini`` no se escribe
+ni se lee en el flujo normal.
 """
 
 import configparser
@@ -19,13 +26,10 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-from src.application.services.list_manager.models import FilterRule
-from src.application.services.list_manager.source_catalog import SourceCatalog
-
 logger = logging.getLogger(__name__)
 
-SOURCE_PREFIX = "source."
-TARGET_PREFIX = "listmanager.target."
+#: Sección de ``weteve.ini`` (arranque del demonio). El resto de este módulo
+#: solo lee el formato viejo.
 DAEMON_SECTION = "DAEMON"
 
 
@@ -44,7 +48,7 @@ def parse(path: Path) -> configparser.ConfigParser:
 
 
 def backup_path(path: Path) -> Path:
-    """Copia de la última versión buena: ``config.ini.bak``."""
+    """Copia de la última versión buena: ``<nombre>.bak`` junto al original."""
     return path.with_name(path.name + ".bak")
 
 
@@ -74,12 +78,14 @@ def write_atomic(path: Path, text: str) -> None:
         try:
             tmp.unlink()
         except OSError:
+            # Limpieza best-effort: la excepción original se relanza igualmente
+            # (no enmascarar el fallo de escritura con el fallo del borrado).
             pass
         raise
 
 
 def dump(parser: configparser.ConfigParser, path: Path) -> None:
-    """Escribe el parser completo (config.ini) con la escritura atómica."""
+    """Escribe el parser completo con la escritura atómica."""
     buffer = io.StringIO()
     parser.write(buffer)
     write_atomic(path, buffer.getvalue())
@@ -92,25 +98,14 @@ def update(path: Path, mutate: Callable[[configparser.ConfigParser], None]) -> N
     dump(parser, path)
 
 
-# -- piezas compartidas --------------------------------------------------------
-
-def selection_ids(refs, catalog: SourceCatalog) -> str:
-    """Serializa refs como ids separados por coma, validando contra la cartera."""
-    ids = []
-    for ref in refs or ():
-        if catalog.get(ref.id) is not None:
-            ids.append(ref.id)
-        else:
-            logger.warning("Ref %s (%s) sin fila en la cartera: no se persiste",
-                           ref.id, getattr(ref, "name", ""))
-    return ",".join(ids)
-
+# -- lectura del formato viejo ------------------------------------------------
 
 def parse_overrides(raw: str | None) -> dict[str, str]:
     """``url -> channel-id`` desde el valor de ``epg_overrides``.
 
     Acepta el formato actual (un par por línea) y el viejo (todo en una línea
-    separado por ``;;``): un config.ini de antes se sigue leyendo igual.
+    separado por ``;;``): un ``config.ini`` de antes se sigue leyendo igual.
+    Solo lo usa ``migrate-config`` (capa legada congelada el 2026-10-22).
     """
     pairs: dict[str, str] = {}
     for line in (raw or "").replace(";;", "\n").splitlines():
@@ -124,70 +119,7 @@ def parse_overrides(raw: str | None) -> dict[str, str]:
     return pairs
 
 
-def _rules_str(rules) -> str:
-    return "|".join(
-        r.serialize() if isinstance(r, FilterRule) else str(r)
-        for r in rules or ()
-    )
-
-
-# -- secciones -----------------------------------------------------------------
-
-def write_target(
-    parser: configparser.ConfigParser,
-    target_id: str | int,
-    *,
-    name: str,
-    m3u: str,
-    epg_path: str | None = None,
-    epg_source: int | None = None,
-    rules=(),
-    overrides: dict[str, str] | None = None,
-    disabled=(),
-    port: int = 8080,
-    starting_number: int = 1,
-    bind: str | None = "127.0.0.1",
-    m3u_refs=(),
-    epg_refs=(),
-    catalog: SourceCatalog | None = None,
-) -> None:
-    """Escribe (o reemplaza) la sección de un target."""
-    catalog = catalog if catalog is not None else SourceCatalog()
-    parser[f"{TARGET_PREFIX}{target_id}"] = {
-        "name": name,
-        "custom_m3u": str(m3u or ""),
-        "custom_epg": str(epg_path or ""),
-        "epg_source": str(epg_source if epg_source is not None else -1),
-        "rules": _rules_str(rules),
-        # Un mapeo por línea (configparser escribe las líneas siguientes
-        # indentadas): el fichero queda legible y cada cambio se ve en el diff.
-        "epg_overrides": "".join(
-            f"\n{url}::{cid}" for url, cid in (overrides or {}).items()),
-        "disabled_channels": "||".join(
-            str(u) for u in (disabled or ()) if u),
-        "port": str(port),
-        "starting_number": str(int(starting_number)),
-        "bind": str(bind or "127.0.0.1"),
-        "m3u_sources": selection_ids(m3u_refs, catalog),
-        "epg_sources": selection_ids(epg_refs, catalog),
-    }
-
-
-def write_sources(parser: configparser.ConfigParser,
-                  catalog: SourceCatalog) -> None:
-    """Reemplaza por completo las secciones ``source.*`` con la cartera dada."""
-    for sec in [s for s in parser.sections() if s.startswith(SOURCE_PREFIX)]:
-        parser.remove_section(sec)
-    for entry in catalog.all():
-        sec = f"{SOURCE_PREFIX}{entry.id}"
-        parser.add_section(sec)
-        parser.set(sec, "name", entry.name)
-        parser.set(sec, "kind", entry.kind)
-        parser.set(sec, "source_type", entry.source_type)
-        parser.set(sec, "location", entry.location)
-        parser.set(sec, "refresh_min", str(entry.refresh_min))
-        parser.set(sec, "enabled", "1" if entry.enabled else "0")
-
+# -- escritura del arranque (weteve.ini) --------------------------------------
 
 def write_daemon(parser: configparser.ConfigParser, cfg) -> None:
     """Escribe ``[DAEMON]`` desde un DaemonConfig."""

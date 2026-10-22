@@ -10,6 +10,14 @@ Dos ficheros, cada uno con su escritor:
 `config.ini` es el formato **viejo**; solo se lee para migrar
 (`python daemon.py migrate-config`).
 
+**Capa legada congelada el 2026-10-22**: los módulos que leen el INI
+(`config_store.parse`, `persistencia.load_config_ini`, `sources_store.read_catalog`)
+no crecen ni se usan en el flujo normal; solo los llama `migrate-config`. No hay
+fecha de retirada: se mantienen mientras haya ficheros antiguos que convertir.
+
+Ejemplos listos para copiar: `daemon.toml.example` (datos) y
+`weteve.ini.example` (arranque).
+
 ## `weteve.ini` — `[DAEMON]`
 
 | Clave | Por defecto | Qué hace |
@@ -82,6 +90,8 @@ logo = "Odisea.png"
 - `dial` fuerza el número (1–9999, único entre los servidos).
 - `display` es el nombre que ve el reproductor; vacío = el de la guía.
 - `logo` es un fichero de `assets/logos` (el demonio lo sirve en `/logos/`).
+  Esa carpeta está ignorada por git: los logos elegidos a mano se apuntan en
+  `assets/logos-manual.json` para poder recuperarlos tras un clon.
 - Solo se escriben los campos que difieren del automático.
 
 ### Reglas (`rules`)

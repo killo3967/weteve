@@ -180,13 +180,6 @@ class ApiClient:
                         limit=limit, offset=offset,
                         include_served="true" if include_served else "false")
 
-    def all_mapping_candidates(self, target_id: str,
-                               include_served: bool = True) -> tuple[int, dict]:
-        """Todos los canales de la tabla, paginando hasta ``total``."""
-        return self._all_pages(
-            lambda offset: self.mapping_candidates(
-                target_id, offset=offset, include_served=include_served))
-
     def epg_channels(self, target_id: str, limit: int = 1000,
                      offset: int = 0) -> tuple[int, dict]:
         return self.get(f"/targets/{target_id}/epg-channels",

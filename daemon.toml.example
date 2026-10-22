@@ -1,16 +1,101 @@
-# daemon.toml — ejemplo del fichero de arranque del demonio
+# daemon.toml — ejemplo de datos del demonio de weteve (esquema v2)
 #
-# Lo escribe la GUI (pestaña «Configuración»): es lo primero que se lee para
-# saber dónde escuchar y con qué token. Copia como `daemon.toml` si arrancas el
-# demonio a mano sin pasar por la interfaz.
+# Es el fichero de datos: cartera de fuentes y perfiles. Lo escribe el demonio
+# (la GUI se lo pide por la API). Copia este fichero como `daemon.toml` y
+# edítalo. Todo lo que empieza por «#» es un comentario.
+#
+# Reparto de ficheros (un escritor cada uno):
+#   daemon.toml  → datos: cartera de fuentes y perfiles (esto).
+#   weteve.ini   → arranque: host, puerto, token y preferencias de la GUI
+#                  (ver `weteve.ini.example`). No va aquí.
+#
+# Compatibilidad: si vienes de un `config.ini` antiguo, `python daemon.py
+# migrate-config` genera este fichero por ti (sin borrar el INI).
+#
+# Las listas son arrays TOML (`["a", "b"]`) y los números/booleanos son
+# nativos: no hace falta entrecomillarlos.
 
 version = 2
 
-host = "127.0.0.1"      # 127.0.0.1 = solo este equipo; 0.0.0.0 = red local
-port = 34400            # control + REST + MCP + playlists en el mismo puerto
-mcp_port = 34400        # legado: todo se sirve en `port`
-token = ""              # vacío = sin autenticación (solo con host loopback)
+# ---------------------------------------------------------------------------
+# Cartera de fuentes: listas IPTV (kind = "m3u") y guías EPG (kind = "epg").
+# El `id` es lo que usan los targets para seleccionarlas; si no lo pones, la
+# migración lo deriva de la ubicación.
+# ---------------------------------------------------------------------------
 
-# Comportamiento de la interfaz (los aplica la GUI al abrir/cerrar)
-autostart = false       # arrancar el demonio al abrir la ventana si no responde
-stop_on_exit = false    # pararlo al cerrar, solo si lo arrancó esta ventana
+[[sources]]
+id = "7dd4d840b120"
+name = "platero2026"
+kind = "m3u"
+source_type = "file"                  # "file" o "url" (informativo)
+location = "C:/Users/tomas/Downloads/platero2026.m3u"
+refresh_min = 0                       # 0 = estática; si no, minutos entre recargas
+enabled = true
+
+[[sources]]
+id = "a33499effccd"
+name = "Doble_M"
+kind = "epg"
+source_type = "url"
+location = "https://ejemplo.net/guia/master/guiatv.xml"
+refresh_min = 1440                    # una vez al día
+enabled = true
+
+[[sources]]
+id = "82a9f9cfacc3"
+name = "Koala"
+kind = "epg"
+source_type = "url"
+location = "https://ejemplo.net/epg/koala7.xml.gz"
+refresh_min = 1440
+enabled = true
+
+# ---------------------------------------------------------------------------
+# Targets: qué se sirve y con qué reglas. Cada target tiene su playlist y su
+# guía en `http://<host>:<puerto>/m3u/weteve_<id>.m3u` y
+# `/xmltv/weteve_<id>.xml`, en el puerto único del demonio.
+# ---------------------------------------------------------------------------
+
+[[targets]]
+id = "0"
+name = "test"                         # nombre visible del resultado
+port = 34400                          # legado: el puerto real es el del demonio
+bind = "127.0.0.1"                    # legado: 127.0.0.1 u 0.0.0.0
+starting_number = 1                   # primer tvg-chno
+
+# Fuentes que aporta este target (ids de la cartera; se unen)
+m3u_sources = ["7dd4d840b120"]
+epg_sources = ["a33499effccd", "82a9f9cfacc3"]
+
+# Campos de fuente única (legado). Si rellenas `m3u_sources`/`epg_sources`,
+# estos se ignoran; se conservan para no perder configuraciones antiguas.
+custom_m3u = ""
+custom_epg = ""
+epg_source = -1
+
+# Reglas de filtro en sintaxis xTeVe: campo:patrón:mayúsculas:operador.
+#   campos: group-title | custom-filter | tvg-group | extgrp | source
+#   {texto} incluye, !{texto} excluye; operador and/or para combinar
+rules = [
+  "group-title:SPAIN:0:and",
+  "custom-filter:!{HBO}:0:and",
+  "group-title:Deportes:0:or",
+]
+
+# Canales apagados a mano (urls completas del M3U). No se sirven, pero se
+# conservan en la tabla de mapeo para poder reactivarlos.
+disabled = []
+
+# Prioridad de calidad: de cada canal repetido (LA 1 HD / LA 1 FULL HD /
+# LA 1 SD) se sirve una sola variante, la de mayor número.
+#   mayor = mejor; 0 = no servir nunca esa calidad; 1 = último recurso
+#   (solo entra si no hay otra). Si una calidad no aparece, se le da el mínimo.
+quality_priority = { "4k" = 5, "full hd" = 4, "hd" = 3, "" = 2, "sd" = 1 }
+
+# Mapeos EPG asignados a mano: url del canal M3U → channel-id del XMLTV.
+# Las urls van entrecomilladas (llevan «?», «&», «=» y «%»): en TOML no hay
+# problema, y un canal por línea se lee y se compara en el diff.
+#
+# [targets.overrides]
+# "http://ejemplo.net/live/usuario/clave/355?h=abc&z=&i=132511" = "La 1 HD"
+# "http://ejemplo.net/live/usuario/clave/421?h=abc&z=&i=132511" = "La 2"

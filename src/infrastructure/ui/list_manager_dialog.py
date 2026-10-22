@@ -12,7 +12,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
-from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import (
+    QItemSelection,
+    QItemSelectionModel,
+    QSize,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
 from PyQt6.QtGui import QAction, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -775,6 +782,8 @@ class EpgMappingWidget(QWidget):
     filter_requested = pyqtSignal(list)
     # «Actualizar guías»: descarga de nuevo el XMLTV del target.
     refresh_guides_requested = pyqtSignal()
+    # «Cargar más»: la tabla pide otra página al demonio (paginación por vista).
+    more_requested = pyqtSignal()
 
     # Columnas de la tabla
     COL_DIAL, COL_NAME, COL_DISPLAY, COL_LOGO, COL_EPG, COL_ACTIVE, COL_URL = (
@@ -824,6 +833,13 @@ class EpgMappingWidget(QWidget):
             "Muestra solo los canales cuyo nombre contiene este texto.")
         self.name_filter.textChanged.connect(lambda _texto: self._apply_name_filter())
         filtro_row.addWidget(self.name_filter)
+        # Paginación: la tabla pide una página, no las 855 filas del catálogo.
+        self.more_btn = QPushButton("Cargar más", self)
+        self.more_btn.setVisible(False)
+        self.more_btn.setToolTip(
+            "Trae la siguiente página de canales del demonio.")
+        self.more_btn.clicked.connect(self.more_requested.emit)
+        filtro_row.addWidget(self.more_btn)
         self.refresh_guides_btn = QPushButton("&Actualizar guías")
         self.refresh_guides_btn.setToolTip(
             "Vuelve a descargar las guías EPG del perfil. Filtrar o mapear "
@@ -1047,7 +1063,12 @@ class EpgMappingWidget(QWidget):
         ``disabled``: urls apagadas a mano (persistidas). Es la única fuente de
         ``disabled_channels``; una fila sin guía se marca sola, pero no se
         guarda como decisión del usuario.
+
+        La tabla se vacía y se repuebla entera, así que la vista se captura
+        antes (fila superior y selección por identidad) y se devuelve después:
+        un refresco automático no puede mover al usuario de sitio.
         """
+        vista = self._capture_view()
         self._loading = True
         try:
             self._manual_off = set(disabled)
@@ -1132,6 +1153,64 @@ class EpgMappingWidget(QWidget):
         finally:
             self._loading = False
         self._apply_name_filter()
+        self._restore_view(vista)
+
+    def _capture_view(self) -> tuple[str | None, set[str], str | None]:
+        """Vista que hay que devolver tras repoblar: (tope, selección, actual).
+
+        Se guarda la **identidad** de las filas, no su número: el orden de la
+        tabla lo decide el demonio (por dial) y puede cambiar entre refrescos.
+        """
+        if not self._row_identity:
+            return None, set(), None
+
+        def identidad(fila: int) -> str | None:
+            if 0 <= fila < len(self._row_identity):
+                return self._row_identity[fila]
+            return None
+
+        superior = identidad(self.table.rowAt(0))
+        seleccion = {i for i in map(identidad, self.selected_rows()) if i}
+        return superior, seleccion, identidad(self.table.currentRow())
+
+    def _restore_view(self, vista: tuple[str | None, set[str], str | None]) -> None:
+        """Devuelve el scroll y la selección a las filas equivalentes."""
+        superior, seleccion, actual = vista
+        if not self._row_identity:
+            return
+        indice = {clave: fila for fila, clave in enumerate(self._row_identity)}
+        fila_tope = indice.get(superior) if superior is not None else None
+        if fila_tope is not None:
+            item = self.table.item(fila_tope, self.COL_NAME)
+            if item is not None:
+                self.table.scrollToItem(
+                    item, QAbstractItemView.ScrollHint.PositionAtTop)
+        # La fila actual se fija antes de la selección: setCurrentCell la limpia.
+        fila_actual = indice.get(actual) if actual is not None else None
+        if fila_actual is not None:
+            self.table.setCurrentCell(fila_actual, self.COL_NAME)
+        self.table.clearSelection()
+        self._select_rows(
+            [f for f in (indice.get(c) for c in seleccion) if f is not None])
+
+    def _select_rows(self, filas: list[int]) -> None:
+        """Selecciona filas enteras sin cambiar la fila actual.
+
+        ``QTableWidget.selectRow`` limpia la selección anterior y
+        ``QTableWidgetItem.setSelected`` no surte efecto con selección por
+        filas: se manda el comando al modelo de selección.
+        """
+        modelo = self.table.model()
+        seleccion = self.table.selectionModel()
+        if modelo is None or seleccion is None or not filas:
+            return
+        for fila in filas:
+            primera = modelo.index(fila, 0)
+            ultima = modelo.index(fila, self.table.columnCount() - 1)
+            seleccion.select(
+                QItemSelection(primera, ultima),
+                QItemSelectionModel.SelectionFlag.Select
+                | QItemSelectionModel.SelectionFlag.Rows)
 
     def _apply_name_filter(self) -> None:
         """Oculta las filas cuyo nombre no contiene el texto del filtro.
@@ -1151,6 +1230,11 @@ class EpgMappingWidget(QWidget):
         """Filas visibles con el filtro puesto (la GUI no lo muestra, se testea)."""
         return sum(1 for row in range(self.table.rowCount())
                    if not self.table.isRowHidden(row))
+
+    def set_pagination(self, loaded: int, total: int) -> None:
+        """Cuántas filas hay cargadas de cuántas: el botón dice si quedan más."""
+        self.more_btn.setText(f"Cargar más ({loaded} de {total})")
+        self.more_btn.setVisible(total > loaded)
 
     # ------------------------------------------------------------------
     # Casilla 'Activo'
@@ -1470,6 +1554,10 @@ class EpgMappingWidget(QWidget):
             if url_item is None or url_item.text() not in self._manual_off:
                 continue
             disabled.append(url_item.text())
+        # La tabla puede ser una página: los apagados que no están en ella se
+        # conservan, o el guardado los reactivaría sin que el usuario lo pida.
+        en_tabla = set(disabled)
+        disabled.extend(u for u in sorted(self._manual_off) if u not in en_tabla)
         return tuple(disabled)
 
     def set_logo(self, url: str, pixmap=None) -> None:
@@ -1506,8 +1594,14 @@ def _source_payload(entry) -> dict:
             "refresh_min": entry.refresh_min, "enabled": entry.enabled}
 
 
+#: Filas por página de la tabla de mapeo. El catálogo real ronda las 855
+#: filas (~200 KB): pedirlas todas en cada refresco para ver ~30 es tirar
+#: ancho de banda y tiempo. «Cargar más» dobla la página.
+MAPPING_PAGE = 50
+
+
 class ListManagerDialog(QDialog):
-    """Diálogo principal del gestor: wizard 3 pasos + servicio web."""
+    """Diálogo principal del gestor: mapeado, catálogo de guía y configuración."""
 
     # Resultado del guardado en segundo plano (dict). Se emite desde el hilo
     # de trabajo y Qt lo entrega en el de la GUI, donde sí se tocan widgets.
@@ -1522,6 +1616,9 @@ class ListManagerDialog(QDialog):
                             | Qt.WindowType.WindowMinimizeButtonHint
                             | Qt.WindowType.WindowMaximizeButtonHint)
         self._config = self._with_legacy_fields(config)
+        # Filas de mapeo pedidas al demonio: empieza en una página y crece con
+        # «Cargar más». Se conserva entre refrescos para no colapsar la tabla.
+        self._mapping_limit = MAPPING_PAGE
         # True mientras se aplica un cambio leído de disco: en ese momento las
         # asignaciones/desactivados válidos son los del fichero, no los de la
         # tabla (que todavía tiene el estado viejo).
@@ -1618,6 +1715,7 @@ class ListManagerDialog(QDialog):
         self.epg_mapping.filter_changed.connect(self._refresh_mapping)
         self.epg_mapping.filter_requested.connect(self._filter_channels)
         self.epg_mapping.refresh_guides_requested.connect(self._refresh_guides)
+        self.epg_mapping.more_requested.connect(self._load_more_mapping)
         epg_layout.addWidget(self.epg_mapping)
         self.result_label = QLabel("")
         epg_layout.addWidget(self.result_label)
@@ -1782,7 +1880,7 @@ class ListManagerDialog(QDialog):
         self._reload_target_choices()
         self._load_priorities()
 
-        # Refresco desde disco: config.ini lo escriben también el daemon y sus
+        # Refresco desde disco: daemon.toml lo escriben también el daemon y sus
         # herramientas MCP (listas, filtros, mapeos). Sin vigilarlo, la ventana
         # abierta se quedaría con el estado que leyó al arrancar.
         self._config_signature = self._config_file_signature()
@@ -1800,7 +1898,7 @@ class ListManagerDialog(QDialog):
     # -- refresco desde disco -------------------------------------------------
 
     def _config_file_signature(self) -> tuple[int, int] | None:
-        """(mtime, tamaño) de config.ini; None si aún no existe."""
+        """(mtime, tamaño) de daemon.toml; None si aún no existe."""
         path = self._config.get("_config_path")
         if path is None:
             return None
@@ -1811,7 +1909,7 @@ class ListManagerDialog(QDialog):
         return (st.st_mtime_ns, st.st_size)
 
     def _reload_config_if_changed(self) -> None:
-        """Aplica al diálogo los cambios externos de config.ini.
+        """Aplica al diálogo los cambios externos de daemon.toml.
 
         La firma se guarda antes de aplicar: si el fichero se escribe otra vez
         durante el refresco, el siguiente tic lo detecta y vuelve a aplicar.
@@ -2392,7 +2490,7 @@ class ListManagerDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _with_legacy_fields(self, config: dict) -> dict:
-        """Completa los campos heredados de fuente única desde config.ini.
+        """Completa los campos heredados de fuente única desde daemon.toml.
 
         ``custom_m3u``/``custom_epg``/``epg_source`` ya no se editan en la UI,
         pero se reescriben al guardar: si el llamador no los pasó, se leen del
@@ -2514,14 +2612,20 @@ class ListManagerDialog(QDialog):
             self._group_fields_cache = dict(body.get("fields") or {})
         return dict(self._group_fields_cache)
 
+    def _load_more_mapping(self) -> None:
+        """Pide otra página de la tabla (dobla las filas cargadas)."""
+        self._mapping_limit += MAPPING_PAGE
+        self._refresh_mapping()
+
     def _refresh_mapping(self) -> None:
         """Repuebla la tabla de mapeo y el resumen con el snapshot del daemon.
 
-        La GUI no ejecuta el pipeline: pide ``mapping-candidates`` (todos los
-        canales, o solo los que necesitan atención), ``epg-channels`` (catálogo
-        de guía) y el estado del target. El estado editable (asignaciones y desactivados) se captura
-        antes de repoblar: leerlo después descartaría lo que el usuario acaba de
-        cambiar en las casillas y los desplegables.
+        La GUI no ejecuta el pipeline: pide una **página** de
+        ``mapping-candidates`` (los que necesitan atención y/o los servidos),
+        ``epg-channels`` (catálogo de guía) y el estado del target. El estado
+        editable (asignaciones y desactivados) se captura antes de repoblar:
+        leerlo después descartaría lo que el usuario acaba de cambiar en las
+        casillas y los desplegables.
         """
         self._invalidate_catalog_cache()
         overrides = self._overrides_now()
@@ -2530,9 +2634,11 @@ class ListManagerDialog(QDialog):
         if client is None:
             return
         solo_pendientes = self.epg_mapping.only_pending()
-        # Todas las páginas: la tabla no puede perder canales por un límite.
-        code, candidates = client.all_mapping_candidates(
-            self._target_id(), include_served=not solo_pendientes)
+        # Una página: el total llega en la respuesta y «Cargar más» pide otra.
+        pedido = self._mapping_limit
+        code, candidates = client.mapping_candidates(
+            self._target_id(), limit=pedido, offset=0,
+            include_served=not solo_pendientes)
         if code == 0:
             self.epg_mapping.set_epg(None)
             self.epg_mapping.load_unmatched([], overrides)
@@ -2577,22 +2683,27 @@ class ListManagerDialog(QDialog):
             c["url"] for c in candidates.get("channels", [])
             if c.get("disabled") and c.get("url")
         })
+        total = int(candidates.get("total") or 0)
         self.epg_mapping.load_unmatched(rows, overrides, disabled=disabled)
+        self.epg_mapping.set_pagination(len(rows), total)
         self._request_logos()
         _, status = client.target_status(self._target_id())
         served = (status or {}).get("channel_count")
-        pending = candidates.get("total") or 0
         parts = []
         if served is not None:
             parts.append(f"{served} canales servidos")
-        parts.append(f"{pending} necesitan atención" if pending
+        parts.append(f"{total} necesitan atención" if total
                      else "ninguno necesita atención")
         repetidos = sum(1 for c in candidates.get("channels", [])
                         if c.get("duplicate"))
         if repetidos:
             parts.append(f"{repetidos} variantes descartadas por calidad")
         aviso = ""
-        if candidates.get("truncated") or epg.get("truncated"):
+        # ``truncated`` con una página completa es normal (quedan más filas y
+        # las trae «Cargar más»). Solo es un aviso si pedimos más de lo que el
+        # demonio entrega: entonces sí se pierden canales.
+        recortado = candidates.get("truncated") and len(rows) < pedido
+        if recortado or epg.get("truncated"):
             aviso = (" — catálogo incompleto: el demonio no devolvió todo "
                      "(faltan canales en las listas)")
         self.result_label.setText("Demonio: " + "; ".join(parts) + "." + aviso)
@@ -2661,7 +2772,7 @@ class ListManagerDialog(QDialog):
         super().reject()
 
     def _api_client(self) -> ApiClient | None:
-        """Cliente REST del daemon (uno por diálogo), o None sin config.ini."""
+        """Cliente REST del daemon (uno por diálogo), o None sin configuración."""
         if not self._api_ready:
             self._api_ready = True
             from src.application.services.daemon.config import load_daemon_config
@@ -2754,7 +2865,7 @@ class ListManagerDialog(QDialog):
         self._apply_service_state(status)
 
     def get_target_config(self) -> dict:
-        """Serializa el estado del diálogo para persistir en config.ini.
+        """Serializa el estado del diálogo para persistir en daemon.toml.
 
         Incluye las selecciones de la cartera (``m3u_refs``/``epg_refs``):
         ``save_config`` las reescribe desde aquí, así que omitirlas borraría
@@ -2763,7 +2874,7 @@ class ListManagerDialog(QDialog):
         return {
             "name": self.name_edit.text().strip(),
             # campos heredados de fuente única: no se editan en la UI, se
-            # conservan tal como están en config.ini para no perderlos
+            # conservan tal como están en daemon.toml para no perderlos
             "source": None,
             "source_mode": "custom",
             "custom_m3u": str(self._config.get("custom_m3u") or ""),

@@ -132,7 +132,7 @@ class TargetService:
     # -- lectura -------------------------------------------------------------
 
     def _definition(self, target_id: str) -> PipelineTarget | None:
-        """Definición desde disco cuando se pueda (config.ini lo editan otros).
+        """Definición desde disco cuando se pueda (daemon.toml lo editan otros).
 
         ``TargetStore.reload`` reescribe la cache del store; es el mismo
         criterio que usaban las herramientas MCP para no servir lo que había
@@ -232,7 +232,7 @@ class TargetService:
 
     def _save_catalog(self, catalog: SourceCatalog) -> None:
         if self._config_path is None:
-            raise RuntimeError("config.ini no disponible")
+            raise RuntimeError("configuración del demonio no disponible")
         from src.infrastructure.client.sources_store import save_catalog
         save_catalog(self._config_path, catalog)
 
@@ -292,7 +292,7 @@ class TargetService:
     def set_sources(self, sources: list[dict]) -> dict:
         """Reemplaza la cartera completa; los ids que llegan se conservan."""
         if self._config_path is None:
-            return {"error": "config.ini no disponible"}
+            return {"error": "configuración del demonio no disponible"}
         if not isinstance(sources, list):
             return {"error": "sources debe ser una lista"}
         entries: list[SourceEntry] = []

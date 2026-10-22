@@ -25,6 +25,8 @@ def _terminar(pid: int) -> None:
     try:
         os.kill(pid, signal.SIGTERM)
     except OSError:
+        # Best-effort: el proceso puede haber muerto ya; no debemos tumbar la
+        # parada del daemon por eso.
         pass
 
 

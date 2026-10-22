@@ -10,22 +10,22 @@ y un endpoint **MCP** completo para que agentes (Claude, etc.) lo gobiernen.
 ## Arquitectura
 
 ```
-config.ini  ←── config_store ──→ TargetStore ──→ TargetService ──→ TargetSupervisor
- (serializador único)                                  │                 │
-                                                       │                 └→ PlaylistServer por target
-                                                       │                    (/m3u/weteve_<perfil>.m3u + /xmltv/weteve_<perfil>.xml)
+daemon.toml  ←── TargetStore ──→ TargetService ──→ TargetSupervisor
+ (datos; lo escribe el demonio)                        │                 │
+                                                       │                 └→ PlaylistServer por perfil
+                                                       │                    (/m3u/weteve_<perfil>.m3u
+                                                       │                     + /xmltv/weteve_<perfil>.xml)
         UI Qt (frontend) ── REST /api/v1 ─┐            │
         CLI (daemon.py)  ── control ──────┤            │
-        Agentes          ── MCP —─────────┤            │
+        Agentes          ── MCP ──────────┤            │
                                           ▼            ▼
                                     ┌──────────────────────────┐
-                                    │ McpHttpTransport          │ puerto [DAEMON] mcp_port (34401)
+                                    │ McpHttpTransport          │ puerto único: control_port (34400)
                                     │  /api/v1  (REST v1)       │  REST → UI/web
                                     │  /mcp     (JSON-RPC)      │  MCP → agentes
-                                    ├──────────────────────────┤
-                                    │ ControlApiServer          │ puerto [DAEMON] control_port (34400)
-                                    │  health/status/reload/    │  → UI y CLI
-                                    │  shutdown                 │
+                                    │  /health, /status,        │  control → UI y CLI
+                                    │  reload, shutdown         │
+                                    │  /m3u, /xmltv, /logos     │  playlists → reproductor
                                     └──────────────────────────┘
 ```
 
@@ -46,9 +46,14 @@ Las lecturas salen del snapshot del supervisor y **no reejecutan** el pipeline.
 
 ## Quién escribe la config: flujo de Guardar
 
-El **demonio es el único escritor** de `config.ini` (`TargetStore` y la cartera),
-con un único serializador (`src/infrastructure/client/config_store.py`). La UI no
-toca el fichero (salvo `[DAEMON]`, que el demonio solo lee al arrancar):
+Dos ficheros, **un escritor cada uno**: `daemon.toml` (datos) lo escribe el
+demonio; `weteve.ini` (arranque, sección `[DAEMON]`) lo escribe la GUI. Detalle
+de claves y de la migración desde el INI viejo:
+`docs/diataxis/referencia-configuracion.md`.
+
+El **demonio es el único escritor** de `daemon.toml` (`TargetStore` y la cartera,
+serializados por `src/infrastructure/client/config_toml.py`). La UI no toca el
+fichero: pide los cambios por REST.
 
 1. **Guardar** (diálogo) manda un lote por REST con `reload: false`:
    `PUT /sources`, `PUT /targets/{id}/sources`, `/settings`, `/rules`,
@@ -82,16 +87,18 @@ toca el fichero (salvo `[DAEMON]`, que el demonio solo lee al arrancar):
 - **El MCP es la superficie de control total** (CRUD incluido); la API de
   control HTTP es lo mínimo que la UI necesita.
 
-## Configuración (`config.ini`, sección `[DAEMON]`)
+## Configuración (`weteve.ini`, sección `[DAEMON]`)
 
 | Clave | Default | Descripción |
 |---|---|---|
-| `control_host` | `127.0.0.1` | Bind de ambas APIs |
+| `control_host` | `127.0.0.1` | Bind de todas las APIs |
 | `control_port` | `34400` | **único** puerto: control, REST (`/api/v1`), MCP (`/mcp`) y playlists (`/m3u/weteve_<perfil>.m3u`, `/xmltv/weteve_<perfil>.xml`, `/logos/<f>`) |
 | `mcp_port` | *(ignorado)* | legado; el demonio avisa si difiere de `control_port` |
 | `mcp_token` | *(vacío)* | Si se define: `Authorization: Bearer` obligatorio en MCP, API de control y REST |
 | `autostart` | `0` | La interfaz arranca el demonio al abrirse si no responde |
 | `stop_on_exit` | `0` | La interfaz para el demonio al cerrarse **solo si lo arrancó ella** |
+
+Ejemplo completo: `weteve.ini.example`.
 
 Con `control_host` distinto de loopback y `mcp_token` vacío el demonio **no
 arranca**: la API no distingue usuarios y quedaría expuesta a la red.
@@ -166,7 +173,7 @@ Transporte: JSON-RPC 2.0 Streamable HTTP (`POST /mcp`), sesión vía cabecera
 
 ## API REST v1
 
-Mismo puerto que MCP (`[DAEMON] mcp_port`), prefijo `/api/v1`, misma
+Mismo puerto que MCP (`control_port`), prefijo `/api/v1`, misma
 autenticación. Es el contrato de los frontends (Qt hoy, web mañana).
 
 | Método | Ruta | Para qué |
@@ -174,7 +181,7 @@ autenticación. Es el contrato de los frontends (Qt hoy, web mañana).
 | GET | `/health`, `/status`, `/targets`, `/targets/{id}`, `/targets/{id}/status` | estado |
 | GET | `/targets/{id}/channels?limit&offset&unmatched_only` | canales servidos |
 | GET | `/targets/{id}/mapping-candidates` | canales que necesitan atención (sin guía / desactivados) |
-| GET | `/targets/{id}/epg-channels`, `/groups`, `/group-fields` | catálogo y combos |
+| GET | `/targets/{id}/epg-channels`, `/catalog`, `/groups`, `/group-fields` | catálogo y combos |
 | POST | `/targets/{id}/preview` | vista previa de filtros (no persiste) |
 | POST | `/targets/{id}/run`, `/targets/{id}/service` | ejecutar pipeline / arrancar-parar el servicio |
 | PUT | `/targets/{id}/settings`, `/rules`, `/mappings`, `/disabled` | escrituras en lote |
@@ -184,20 +191,19 @@ pipeline una sola vez al final con `POST .../run`. Códigos: 200, 400 (cuerpo o
 cambio inválido), 404, 405. CORS solo para orígenes de loopback.
 
 Las reglas de filtro viajan en sintaxis xTeVe textual (`campo:{patrón}:case`,
-`!{...}` para exclusiones), igual que en `config.ini`.
+`!{...}` para exclusiones), y se guardan así en `daemon.toml`.
 
 ## Cartera de fuentes y multi-origen
 
-`config.ini` guarda una cartera global de listas en secciones
-`[source.<id>]` (`name`, `kind` = `m3u|epg`, `source_type` = `file|url`,
-`location`, `refresh_min`, `enabled`). Cada target **selecciona** filas con
-las claves `m3u_sources` / `epg_sources` (ids separados por comas) en su
-sección `listmanager.target.N`; la playlist servida es la **unión** de las
-listas M3U activas y la guía la unión de las EPG activas. Los canales
-replicados entre listas NO se deduplican: se muestran como `<Lista>.<Canal>`
-(prefijo solo de presentación; filtros y casado EPG ven el nombre limpio).
-El campo de filtro `source` (etiqueta "Lista" en la GUI) filtra por nombre de
-lista de origen.
+`daemon.toml` guarda una cartera global de listas en bloques `[[sources]]`
+(`id`, `name`, `kind` = `m3u|epg`, `source_type` = `file|url`, `location`,
+`refresh_min`, `enabled`). Cada perfil **selecciona** filas con las claves
+`m3u_sources` / `epg_sources` (arrays de ids) en su bloque `[[targets]]`; la
+playlist servida es la **unión** de las listas M3U activas y la guía la unión de
+las EPG activas. Los canales replicados entre listas NO se deduplican: se
+muestran como `<Lista>.<Canal>` (prefijo solo de presentación; filtros y casado
+EPG ven el nombre limpio). El campo de filtro `source` (etiqueta "Lista" en la
+GUI) filtra por nombre de lista de origen.
 
 Cada fuente tiene un refresco periódico (`refresh_min`, 0 = estática). El
 demonio reejecuta el pipeline de cada target cada
@@ -208,7 +214,7 @@ conservan entre ciclos; el resto del mapeo se recalcula en cada recarga.
 ### Ejemplo de sesión MCP
 
 ```json
-POST http://127.0.0.1:34401/mcp
+POST http://127.0.0.1:34400/mcp
 {"jsonrpc":"2.0","id":1,"method":"initialize",
  "params":{"protocolVersion":"2025-03-26","capabilities":{},
            "clientInfo":{"name":"agente","version":"0"}}}
@@ -230,12 +236,12 @@ POST /mcp
 
 | Módulo | Responsabilidad |
 |---|---|
-| `config.py` | `DaemonConfig`, carga/guarda `[DAEMON]` preservando targets |
-| `target_store.py` | CRUD persistente de `listmanager.target.N` (formato compartido con la UI) |
+| `config.py` | `DaemonConfig`, carga/guarda `[DAEMON]` de `weteve.ini` |
+| `target_store.py` | CRUD persistente de los `[[targets]]` de `daemon.toml` |
 | `supervisor.py` | Único dueño de targets: pipeline + PlaylistServer por target, thread-safe |
-| `control_api.py` | API JSON mínima para la UI (`/health`, `/status`, `/targets/{id}/reload`, `/shutdown`) |
+| `control_api.py` | Rutas de control para la UI (`/health`, `/status`, `/targets/{id}/reload`, `/shutdown`); las enruta el servidor único |
 | `mcp_server.py` | Núcleo del protocolo MCP (initialize, sesiones, tools, JSON-RPC 2.0) |
-| `mcp_tools.py` | Registro de las 12 herramientas sobre supervisor + store |
+| `mcp_tools.py` | Registro de las 24 herramientas sobre supervisor + store |
 | `mcp_transport.py` | Servidor HTTP Streamable (POST/DELETE /mcp, Bearer opcional) |
 
 `src/infrastructure/client/daemon_client.py`: cliente urllib usado por la UI

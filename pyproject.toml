@@ -7,10 +7,10 @@
 
 [tool.pytest.ini_options]
 # Los tests marcados `network` salen a internet y leen las fuentes URL de
-# config.ini: fuera por defecto (`pytest -m network` para lanzarlos).
+# daemon.toml: fuera por defecto (`pytest -m network` para lanzarlos).
 addopts = "-m 'not network'"
 markers = [
-    "network: requiere acceso a internet y fuentes URL en config.ini (excluido por defecto)",
+    "network: requiere acceso a internet y fuentes URL en daemon.toml (excluido por defecto)",
 ]
 
 [tool.ruff]
@@ -37,7 +37,7 @@ python_version = "3.11"
 # Los tests también: si no están aquí, VS Code los sigue comprobando (mypy
 # mira el fichero abierto) y el panel «Problemas» se llena de ruido que el
 # comando de CI nunca ve.
-files = ["src", "scripts", "main.py", "daemon.py", "tests"]
+files = ["src", "main.py", "daemon.py", "tests"]
 # El layout importa `src.*` desde la raíz y no hay metadatos de paquete: sin
 # esto mypy no arranca ("source file found twice under different module names").
 explicit_package_bases = true

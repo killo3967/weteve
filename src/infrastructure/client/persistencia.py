@@ -59,7 +59,8 @@ def load_config_ini(path: Path) -> dict:
     """Lectura del ``config.ini`` **viejo** (solo para ``migrate-config``).
 
     El resto de la aplicación ya lee ``daemon.toml``; esto se queda para poder
-    convertir un fichero antiguo sin reinterpretarlo a mano.
+    convertir un fichero antiguo sin reinterpretarlo a mano. Capa congelada el
+    2026-10-22 (T02): no se amplía.
     """
     from src.infrastructure.client.config_store import parse, parse_overrides
     from src.infrastructure.client.sources_store import refs_for_target

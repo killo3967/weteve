@@ -5,6 +5,9 @@ Aquí quedan:
 - ``load_catalog`` / ``save_catalog``: el acceso que usan demonio y GUI.
 - ``read_catalog`` / ``refs_for_target``: **lectores del INI viejo**, usados
   solo por ``daemon.py migrate-config`` para convertir un ``config.ini``.
+
+**Congelado el 2026-10-22** (T02 de ``odd/tasks/auditoria-2026-10-21.md``):
+esta capa no crece; el código nuevo lee y escribe ``daemon.toml``.
 """
 
 import configparser

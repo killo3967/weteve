@@ -71,3 +71,30 @@ class TestPestana:
         d._config_watch.stop()
         assert d.tabs.tabText(0) == "Estado"
         assert d.tabs.currentIndex() == 0
+
+
+class TestStreamsDelProveedor:
+    """«N de M streams responden»: aviso barato de que el origen se cayó."""
+
+    def _textos(self, panel: StatusPanel) -> list[str]:
+        return [w.text() for w in panel.targets_group.findChildren(
+            type(panel.state_label))]
+
+    def test_dice_cuantos_responden(self, qtbot):
+        api = FakeApi()
+        api.streams = {"checked": 3, "ok": 2, "pending": False}
+        panel = _panel(qtbot, api)
+        assert any("2 de 3 streams responden" in t
+                   for t in self._textos(panel)), self._textos(panel)
+
+    def test_avisa_si_baja_del_umbral(self, qtbot):
+        api = FakeApi()
+        api.streams = {"checked": 3, "ok": 0, "pending": False}
+        panel = _panel(qtbot, api)
+        textos = self._textos(panel)
+        assert any("0 de 3 streams responden" in t and "proveedor" in t
+                   for t in textos), textos
+
+    def test_sin_muestras_no_dice_nada(self, qtbot):
+        panel = _panel(qtbot, FakeApi())
+        assert not any("streams responden" in t for t in self._textos(panel))

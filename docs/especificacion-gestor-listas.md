@@ -1,58 +1,66 @@
-# Especificación: Gestor de listas (xTeVe/Threadfin en IPTVViewer)
+# Especificación: Gestor de listas
 
 > Resumen de referencia de usuario. La especificación técnica completa vive en
-> `odd/tasks/list-manager.md` (contrato ODD).
+> `docs/list-manager.md` (contrato ODD original) y el estado vigente en
+> `docs/diataxis/`.
 
 ## Qué es
 
-Un submenú **"Mis Listas → Gestor de listas"** que replica en IPTVViewer la
-funcionalidad esencial de [xTeVe](https://github.com/xteve-project/xTeVe) y
+**weteve** replica la funcionalidad esencial de
+[xTeVe](https://github.com/xteve-project/xTeVe) y
 [Threadfin](https://github.com/Threadfin/Threadfin): filtrar listas M3U,
 asociarlas a guías EPG (XMLTV) y **servir el resultado por web** para usarlo desde
-cualquier reproductor externo.
+cualquier reproductor externo. Funciona como aplicación independiente: un demonio
+hace el trabajo y una ventana Qt lo configura.
 
 ## Cómo funciona (3 pasos)
 
-1. **Fuente**: eliges una de tus fuentes existentes (las de `config.ini`,
-   `[source.N]`) como origen de canales y su EPG asociado.
+1. **Fuente**: eliges filas de tu cartera (bloques `[[sources]]` de `daemon.toml`)
+   como origen de canales y de guía. Varias listas se unen en una sola salida.
 2. **Filtros**: defines reglas sencillas — incluir o excluir canales por texto en
    su grupo o nombre (ej.: excluir todo lo que contenga "XXX"). Internamente se
    guardan con la sintaxis compatible de xTeVe (`{incluir}`, `!{excluir}`), así que
-   el formato podrá crecer sin perder lo ya configurado.
-3. **EPG**: la app asocia cada canal con su guía buscando primero por `tvg-id` y,
-   si falla, por nombre normalizado (sin acentos ni mayúsculas) y por parecido de
-   marca (con el número de canal como parte del nombre: `M+ LaLiga 2` no es
-   `M+ LaLiga`). Cada canal tiene además una identidad única —el canal del
-   proveedor, con su dial y su logo— aunque su parrilla venga de otra guía. Los
-   canales que quedan sin guía se revisan en un editor donde la app propone
-   sugerencias y tú confirmas la correcta; tu corrección se recuerda para siempre.
+   el formato puede crecer sin perder lo ya configurado.
+3. **EPG**: la app asocia cada canal con su guía en cuatro fases: `tvg-id`
+   exacto → nombre normalizado exacto (sin acentos ni mayúsculas) → nombre base
+   sin la etiqueta de calidad (`LA 1 HD` es `LA 1`) → parecido por palabras de
+   marca, con dos reglas duras: el sufijo numérico tiene que coincidir
+   (`M+ LaLiga 2` no es `M+ LaLiga`) y el ganador necesita margen sobre el
+   segundo candidato. Cada canal tiene además una **identidad única** —el canal
+   del proveedor, con su dial y su logo— aunque su parrilla venga de otra guía;
+   de los duplicados se sirve una variante según la prioridad de calidad. Los
+   canales que quedan sin guía se revisan en el editor de mapeado, donde la app
+   propone sugerencias y tú confirmas la correcta; tu corrección se recuerda.
 
 ## El servicio web
 
-Con un clic inicias una mini-web (por defecto `http://127.0.0.1:8080`) que
+El demonio sirve todo en un único puerto (`control_port`, 34400 por defecto) y
 expone:
 
-- `/m3u/weteve_<perfil>.m3u` — tu lista ya filtrada, lista para cargar en VLC u otro reproductor.
-- `/epg.xml` — la guía correspondiente, solo con los canales de tu lista.
+- `/m3u/weteve_<perfil>.m3u` — tu lista ya filtrada, lista para cargar en VLC u
+  otro reproductor.
+- `/xmltv/weteve_<perfil>.xml` — la guía correspondiente, solo con los canales de
+  tu lista.
+- `/logos/<fichero>` — los logos que usa la lista.
 
-El grupo **Servicio web** del asistente permite elegir el alcance:
+El alcance se elige en la pestaña **Configuración** del editor de perfiles:
 
 - **Solo este equipo (127.0.0.1)** — por defecto; nada accesible desde fuera.
 - **Toda la red local (0.0.0.0)** — VLC de tu móvil, tablet u otro PC de la red
-  puede cargar la lista con la IP de tu equipo (p. ej. `http://192.168.1.50:34000/m3u/weteve_0.m3u`).
-  Al iniciar el servicio se muestra la URL navegable con tu IP real.
+  puede cargar la lista con la IP de tu equipo (p. ej.
+  `http://192.168.1.50:34400/m3u/weteve_0.m3u`). Fuera de loopback el token es
+  obligatorio: el demonio no arranca sin él.
 
-La elección se recuerda junto al puerto en `config.ini`. Si al iniciar con
-acceso de red VLC no conecta, añade una regla de entrada en el Firewall de
+La elección se guarda en `weteve.ini` (`[DAEMON]` `control_host`/`control_port`).
+Si con acceso de red VLC no conecta, añade una regla de entrada en el Firewall de
 Windows para el puerto elegido (el perfil estándar bloquea conexiones entrantes).
 
 El servicio se puede parar cuando quieras y registra las peticiones en
-`logs/list_manager_web.log`.
+`logs/weteve-daemon.log`.
 
 ## Lo que no hace (de momento)
 
 - No retransmite los vídeos (los reproductores van directos a la fuente original).
 - No sustituye a Plex/Jellyfin como DVR ni emula tuners HDHR.
-- No actualiza las fuentes automáticamente: se refrescan desde el gestor.
 
-Estas tres cosas son las ampliaciones naturales si algún día hacen falta (fase 2).
+Estas dos cosas son las ampliaciones naturales si algún día hacen falta (fase 2).

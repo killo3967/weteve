@@ -3,8 +3,8 @@
 ## Ciclo corto
 
 ```bat
-.venv\Scripts\python.exe -m pytest -q          :: 982 tests, ~100 s
-.venv\Scripts\python.exe -m ruff check src tests scripts main.py daemon.py
+.venv\Scripts\python.exe -m pytest -q          :: 1003 tests, ~100 s
+.venv\Scripts\python.exe -m ruff check src tests main.py daemon.py
 .venv\Scripts\python.exe -m mypy
 ```
 
@@ -17,7 +17,7 @@ antes de tocar nada.
 ```bat
 .venv\Scripts\python.exe daemon.py status      :: exit 0 = vivo
 .venv\Scripts\python.exe daemon.py stop
-.venv\Scripts\python.exe scripts\healthcheck.py   :: contra un demonio vivo, manual
+.venv\Scripts\python.exe -m pytest -q -k e2e  :: demonio real con fixtures
 ```
 
 Logs: `logs/weteve-daemon.log` (demonio) y `logs/weteve.log` (GUI). El demonio
@@ -57,8 +57,18 @@ registra cada petición HTTP y cada recarga con sus tiempos.
 
 ## Deuda conocida
 
-- `config.ini`, `config_store.py`, `persistencia.py` y `sources_store.py` son la
-  capa legada de migración; el código nuevo no debe escribir INI.
-- 8 `except …: pass` en `src` (casi todos `OSError` con motivo).
-- `scripts/healthcheck.py` no está en CI: necesita un demonio vivo.
+- **Capa legada de `config.ini` congelada (2026-10-22)**: `config_store.py`,
+  `persistencia.py` y `sources_store.py` solo leen el INI viejo para
+  `daemon.py migrate-config`; el código nuevo escribe `daemon.toml`. Ver
+  [referencia-configuracion](referencia-configuracion.md).
+- `except …: pass` en `src`: los 9 bloques llevan comentario que justifica el
+  silencio (casi todos `OSError` best-effort).
+- `scripts/healthcheck.py` se retiró el 2026-10-22: duplicaba lo que ya cubren
+  los e2e (MCP, rutas, formatos) y su lista de herramientas se quedó atrás.
+  Para una comprobación a mano: `daemon.py run` + `curl` a `/health` y
+  `/m3u/weteve_<perfil>.m3u`.
+- **Logos no versionados**: `assets/logos/` está ignorado por git (se regenera y
+  engorda con cada descarga). Los elegidos a mano se apuntan en
+  `assets/logos-manual.json` (sí versionado) para poder recuperarlos tras un
+  clon: editor → doble clic en la celda Logo del canal.
 - La ventana tiene deuda de tipos Qt (`header()`/`item()` devuelven `Optional`).

@@ -62,6 +62,8 @@ class DaemonLock:
                 handle.write(" ")
                 handle.flush()
         except OSError:
+            # Best-effort: sin el byte, el candado posterior decide igualmente
+            # (en Windows msvcrt fallará y acquire devolverá False).
             pass
         handle.seek(0)
         if not _bloquear(handle):
@@ -109,6 +111,8 @@ def _soltar(handle) -> None:
 
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
     except OSError:
+        # Best-effort: release() cierra el manejador en un finally; fallar aquí
+        # no debe tumbar la liberación del candado.
         pass
 
 

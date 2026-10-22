@@ -38,7 +38,9 @@ class FilterRule:
     operator: RuleOperator = "or"
 
     def serialize(self) -> str:
-        """Formato plano para config.ini: ``field:pattern:case[:op]``.
+        """Formato plano de la regla: ``field:pattern:case[:op]``.
+
+        Es lo que viaja en la API y lo que se guarda en ``daemon.toml``.
 
         El operador solo se escribe si no es el default (back-compat con
         configs xTeVe existentes).

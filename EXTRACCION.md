@@ -1,5 +1,9 @@
 # Extracción del gestor de listas desde IPTVViewer
 
+> **Documento histórico** (2026-10-08). Describe el momento de la extracción;
+> el formato de configuración que cita (`config.ini`) es el viejo. Estado
+> vigente: `docs/diataxis/` (configuración: `daemon.toml` + `weteve.ini`).
+
 Fecha: 2026-10-08. Origen: `K:/IPTVViewer` (commit `dca2a0b`). El código se
 **movió, no se borró**: todo lo referente al gestor de listas vive ahora aquí.
 

@@ -42,6 +42,7 @@ from src.application.services.list_manager.playlist_builder import (
     build_xmltv,
 )
 from src.application.services.list_manager.quality import base_name
+from src.application.services.list_manager.stream_probe import StreamProbe
 from src.infrastructure.web.playlist_server import LOGOS_PREFIX, url_base_for
 
 logger = logging.getLogger(__name__)
@@ -75,11 +76,24 @@ def _nombre_con_codigo(channel_id: str, nombre: str) -> str:
         return visible or str(channel_id or "").strip()
     return f"{visible} ({channel_id})"
 
+def _pagina(channels: list, total: int, offset: int) -> dict:
+    """Forma única de una página de lectura.
+
+    ``truncated`` dice si la respuesta no trae todo lo que hay: el cliente sabe
+    que quedan filas (y que tiene que pedir otra página) en vez de creer que el
+    catálogo es más pequeño de lo que es.
+    """
+    offset = int(offset)
+    return {"channels": channels, "total": total, "count": len(channels),
+            "offset": offset, "truncated": offset + len(channels) < total}
+
+
 class TargetSupervisor:
     """Gestiona N targets: pipeline cacheado + servidor HTTP por target."""
 
     def __init__(self, catalog_fn=None, base_url: str = "",
-                 logo_store: LogoStore | None = None) -> None:
+                 logo_store: LogoStore | None = None,
+                 stream_probe=None) -> None:
         # dos locks: estado (lecturas) y ejecución (pipeline). Ver docstring.
         self._lock = threading.RLock()
         self._run_lock = threading.RLock()
@@ -105,6 +119,9 @@ class TargetSupervisor:
         self._scheduler = RefreshScheduler(self._scheduled_reload)
         # tiempos de la última recarga por target (perfilado del flujo)
         self._timings: dict[str, dict] = {}
+        # ¿responde todavía la línea del proveedor? Muestreo cacheado: /status
+        # no puede quedarse esperando a un stream que no contesta.
+        self._probe = stream_probe if stream_probe is not None else StreamProbe()
 
     # -- helpers internos ----------------------------------------------------
 
@@ -147,7 +164,7 @@ class TargetSupervisor:
         locales = self._logos.ensure(urls)
         if not locales:
             return channels
-        # La lista la sirve el demonio (``/weteve/{id}/playlist.m3u``), no el
+        # La lista la sirve el demonio (``/m3u/weteve_<id>.m3u``), no el
         # puerto histórico del target: el logo tiene que apuntar al mismo sitio
         # desde el que el reproductor descarga la lista.
         base = self._base_url or url_base_for(
@@ -422,8 +439,7 @@ class TargetSupervisor:
         with self._lock:
             result = self._results.get(target_id)
             if result is None:
-                return {"channels": [], "total": 0, "count": 0,
-                        "offset": int(offset)}
+                return _pagina([], 0, offset)
             target = self._targets.get(target_id)
             if target is not None:
                 epg = self._pipeline.get_epg(target.source_index)
@@ -486,8 +502,7 @@ class TargetSupervisor:
                                  str(r["internal_name"] or "").lower()))
         total = len(rows)
         page = rows[int(offset):int(offset) + int(limit)]
-        return {"channels": page, "total": total, "count": len(page),
-                "offset": int(offset)}
+        return _pagina(page, total, offset)
 
     def get_status(self) -> dict:
         """Estado agregado: {"targets": {id: {...}}} con running/URLs/errores."""
@@ -500,6 +515,7 @@ class TargetSupervisor:
                 if running and self._base_url:
                     playlist_url = f"{self._base_url}/m3u/weteve_{tid}.m3u"
                     epg_url = f"{self._base_url}/xmltv/weteve_{tid}.xml"
+                resultado = self._results.get(tid)
                 out[tid] = {
                     "name": tgt.name,
                     "running": running,
@@ -510,6 +526,10 @@ class TargetSupervisor:
                     "epg_url": epg_url,
                     # cambia con cada guardado o recarga de este perfil
                     "revision": self._revision.get(tid, 0),
+                    # «N de M streams responden»: muestreo barato del origen
+                    "streams": self._probe.status(
+                        tid, [c.url for c in resultado.channels]
+                        if resultado is not None else []),
                 }
             return {"targets": out}
 
@@ -525,8 +545,7 @@ class TargetSupervisor:
         with self._lock:
             result = self._results.get(target_id)
             if result is None:
-                return {"channels": [], "total": 0, "count": 0,
-                        "offset": int(offset)}
+                return _pagina([], 0, offset)
             rows = [
                 {
                     "name": c.name,
@@ -540,8 +559,7 @@ class TargetSupervisor:
             rows = [r for r in rows if not r["tvg_id"]]
         total = len(rows)
         page = rows[int(offset):int(offset) + int(limit)]
-        return {"channels": page, "total": total, "count": len(page),
-                "offset": int(offset)}
+        return _pagina(page, total, offset)
 
     def list_epg_channels(self, target_id: str, limit: int = 200,
                           offset: int = 0) -> dict:
@@ -565,10 +583,10 @@ class TargetSupervisor:
         items = sorted(epg.channel_names.items())
         total = len(items)
         page = items[int(offset):int(offset) + int(limit)]
-        return {"channels": [{"id": cid, "display_name": _nombre_con_codigo(cid, name),
-                              "lists": list(lists.get(cid, ()))}
-                             for cid, name in page],
-                "total": total, "count": len(page), "offset": int(offset)}
+        return _pagina(
+            [{"id": cid, "display_name": _nombre_con_codigo(cid, name),
+              "lists": list(lists.get(cid, ()))}
+             for cid, name in page], total, offset)
 
     def epg_catalog(self, target_id: str, limit: int = 200,
                     offset: int = 0) -> dict:
@@ -623,8 +641,7 @@ class TargetSupervisor:
                                   str(f["name"]).lower()))
         total = len(filas)
         page = filas[int(offset):int(offset) + int(limit)]
-        return {"channels": page, "total": total, "count": len(page),
-                "offset": int(offset)}
+        return _pagina(page, total, offset)
 
     def suggest_epg_matches(self, target_id: str, channel_name: str,
                             limit: int = 5) -> dict:

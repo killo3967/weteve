@@ -4,7 +4,7 @@
 > Espejo de recuperación en Engram: topic `odd/list-manager/tasks`.
 > Estado: **IMPLEMENTADO** (2026-10-08). Pasos 1-7 del plan completos; smoke test HTTP verificado en subproceso (m3u 200, epg 200, 404 en rutas desconocidas). Pendiente: validación manual del usuario con una lista real y VLC.
 
-## Estado actual (post-migración)
+## Estado actual (2026-10-22)
 
 La arquitectura cambió: **el demonio es el motor y la UI es un frontend**.
 
@@ -13,14 +13,35 @@ La arquitectura cambió: **el demonio es el motor y la UI es un frontend**.
 - La UI habla por **REST v1** (`/api/v1`, mismo puerto que MCP) y escribe por
   ahí: `PUT /sources`, `PUT /targets/{id}/sources|settings|rules|mappings|disabled`
   y un único `POST /targets/{id}/run` al final del lote.
-- Un solo serializador de `config.ini` (`config_store`); el fichero lo escribe
-  el demonio. `[DAEMON]` (puertos, token, arranque/parada) se escribe desde la UI
-  porque el demonio solo lo lee al arrancar.
-- Detalle operativo y de protocolo: `docs/daemon.md`.
+- Dos ficheros, un escritor cada uno: `daemon.toml` (datos: cartera y perfiles)
+  lo escribe el demonio; `weteve.ini` (`[DAEMON]`: host, puerto, token y
+  arranque) lo escribe la GUI. `config.ini` quedó como formato viejo, solo de
+  migración (`python daemon.py migrate-config`).
+- Detalle operativo y de protocolo: `docs/daemon.md`. Configuración:
+  `docs/diataxis/referencia-configuracion.md`.
 
-Lo que sigue es la especificación original (2026-10-08) y conserva valor como
-contrato funcional (filtros, matching EPG, mini-web); las partes que hablaban de
-un "asistente de pipeline" dentro del diálogo están superadas.
+### Lo que hace el pipeline hoy
+
+1. **Parseo** de la unión de las listas M3U activas del perfil.
+2. **Filtros** xTeVe en orden (`group-title`, `custom-filter`, `tvg-group`,
+   `extgrp`, `source`), combinables con `and`/`or`.
+3. **Asociación EPG en cuatro fases** (`epg_matcher.py`): `tvg-id` exacto →
+   nombre normalizado exacto → nombre base sin etiqueta de calidad (`LA 1 HD`
+   es `LA 1`) → parecido por palabras de marca, con dos reglas duras: el sufijo
+   numérico tiene que coincidir y el ganador necesita margen sobre el segundo.
+4. **Identidad canónica** por canal (el código de guía, o `url-<hash>` /
+   `name-<base>` si no lo hay): es la clave de la **ficha** (dial, nombre
+   visible, logo) y del **dedupe**.
+5. **Dedupe por calidad**: de las variantes del mismo canal se sirve una, según
+   `quality_priority`.
+6. **Salida**: M3U con dial y `url-tvg` + XMLTV solo con los canales servidos.
+   Un canal sin guía no se sirve si el perfil tiene fuente EPG; se le asigna
+   `Dummy 1h` cuando tiene dial en la ficha o `serve_without_epg` activo.
+
+El resto de este documento es la **especificación original** (2026-10-08): vale
+como contrato funcional (filtros, matching, mini-web), no como descripción del
+código actual. Las partes que hablaban de un «asistente de pipeline» dentro del
+diálogo están superadas.
 
 ## Objective
 
@@ -71,7 +92,8 @@ qué guía.
   XMLTV para asignación manual.
 - Mini-web local (solo `localhost` por defecto): `GET /m3u/weteve_<perfil>.m3u` (lista filtrada
   y mapeada) y `GET /epg.xml` (guía regenerada solo con canales activos).
-- Persistencia en `config.ini`: nueva sección por objetivo de pipeline.
+- Persistencia en `config.ini`: nueva sección por objetivo de pipeline
+  *(histórico: hoy los datos viven en `daemon.toml`)*.
 
 **Excluye (decisiones de alcance 2026-10-08):**
 - **No hay proxy de streams** (`/stream/{id}`): la m3u servida apunta a las URLs
@@ -204,6 +226,10 @@ La UI nunca pide esa sintaxis: ofrece filas "campo = [grupo|nombre] contains [te
 - Sin autenticación (local); log de requests a `logs/list_manager_web.log`.
 
 ## Data Model / Config
+
+> **Histórico.** Este bloque describe el borrador de 2026-10-08 en `config.ini`.
+> El esquema vigente es TOML en `daemon.toml`; ver
+> `docs/diataxis/referencia-configuracion.md`.
 
 `config.ini` (nuevo bloque, convivencia con `[source.N]`):
 

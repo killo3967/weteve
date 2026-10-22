@@ -8,9 +8,10 @@ Comandos:
   daemon.py install-task   Registra la tarea de inicio de sesión (schtasks)
 
 Arquitectura: TargetSupervisor posee los targets (pipeline + PlaylistServer
-por target). ControlApiServer (puerto [DAEMON] control_port) expone lo
-mínimo para la UI; McpHttpTransport (mcp_port) expone las 23 herramientas
-MCP con CRUD completo. TargetStore comparte config.ini con la UI.
+por target). ControlApiServer (puerto ``control_port``) expone lo
+mínimo para la UI; McpHttpTransport (mismo puerto, ``/mcp``) expone las 24
+herramientas MCP con CRUD completo. TargetStore comparte ``daemon.toml`` con
+la GUI (que escribe a través de la API).
 """
 
 from __future__ import annotations
@@ -177,7 +178,7 @@ def build_daemon(config_path: Path = DEFAULT_CONFIG,
     supervisor.set_base_url(base, server.port)
 
     logger.info("daemon weteve listo en %s (/mcp, /api/v1, "
-                "/weteve/{id}/playlist.m3u) targets=%d",
+                "/m3u/weteve_<id>.m3u) targets=%d",
                 base, len(store.list()))
     return {
         "supervisor": supervisor,

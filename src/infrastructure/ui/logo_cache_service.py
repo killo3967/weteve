@@ -190,6 +190,8 @@ class LogoCacheService(QObject):
                 try:
                     (self._dir / entry["file"]).unlink(missing_ok=True)
                 except OSError:
+                    # Best-effort: si no se borra, el barrido de huérfanos de
+                    # abajo lo reintenta.
                     pass
         live_files = {e.get("file") for e in self._index.values()}
         try:
@@ -199,5 +201,7 @@ class LogoCacheService(QObject):
                 if f.name not in live_files:
                     f.unlink(missing_ok=True)
         except OSError:
+            # Best-effort: un error de disco durante el barrido no debe
+            # cancelar el guardado del índice de abajo.
             pass
         self._save_index()

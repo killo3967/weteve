@@ -1,0 +1,21 @@
+{
+  "_nota": "assets/logos/ está ignorado por git: los logos elegidos a mano no viajan con el repo. Este manifiesto sí se versiona y dice qué ficheros hay que recuperar tras un clon. Al añadir un logo a mano, apúntalo aquí.",
+  "_como_recuperarlo": "Editor de perfiles → pestaña «Mapeado IPTV <-> EPG» → doble clic en la celda Logo del canal → elegir el fichero en assets/logos. La ficha del canal solo guarda el nombre del fichero, así que sin el PNG la lista se sirve con el logo del proveedor o sin logo.",
+  "logos": [
+    {
+      "canal": "Odisea",
+      "fichero": "Odisea.png",
+      "origen": "manual (elegido en el editor)"
+    },
+    {
+      "canal": "Runtime Cine",
+      "fichero": "Runtime_Cine.png",
+      "origen": "manual (elegido en el editor)"
+    },
+    {
+      "canal": "Nature Time",
+      "fichero": "Nature_Time.png",
+      "origen": "manual (elegido en el editor)"
+    }
+  ]
+}

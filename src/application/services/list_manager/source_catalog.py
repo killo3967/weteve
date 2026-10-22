@@ -1,7 +1,7 @@
 """Cartera global de fuentes (listas IPTV y guías EPG).
 
 Las fuentes dejan de pertenecer a un target: se definen una vez en la
-cartera (sección [SOURCES] de config.ini) y cada target selecciona qué
+cartera (bloques ``[[sources]]`` de ``daemon.toml``) y cada target selecciona qué
 filas usar. La lista servida es la unión de las filas IPTV activas y
 la guía, la unión de las filas EPG activas.
 

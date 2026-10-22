@@ -12,9 +12,11 @@ from __future__ import annotations
 import socket
 
 LOOPBACK = "127.0.0.1"
-TODOS = "0.0.0.0"
+#: Escuchar en todos los interfaces. No confundir con un destino: no es
+#: navegable, solo vale como ``control_host``.
+ANY_IP = "0.0.0.0"
 #: Hosts de escucha que no sirven como destino.
-_NO_NAVEGABLES = (TODOS, "::", "")
+_NO_NAVEGABLES = (ANY_IP, "::", "")
 
 
 def default_route_ip() -> str | None:
@@ -89,7 +91,7 @@ def host_options(current: str | None = None) -> list[tuple[str, str]]:
     for ip in local_ipv4_addresses():
         if ip not in {valor for valor, _ in opciones}:
             opciones.append((ip, f"{ip} (otra interfaz)"))
-    opciones.append((TODOS, "0.0.0.0 (todos los interfaces)"))
+    opciones.append((ANY_IP, "0.0.0.0 (todos los interfaces)"))
     actual = "127.0.0.1" if (current or "").strip() == "localhost" else (
         current or "").strip()
     if actual and actual not in {valor for valor, _ in opciones}:
