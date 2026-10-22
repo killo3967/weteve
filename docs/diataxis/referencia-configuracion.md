@@ -63,7 +63,7 @@ version = 2
 | `light_epg` | solo se escribe si es `false`: guía sin descripciones (por defecto sí) |
 | `quality_priority` | `{ "hd" = 9, "full hd" = 8, … }`; más número, más prioridad |
 
-### `[targets.overrides]` — EPG a mano por url
+### `[targets.overrides]` — EPG a mano por url (legado)
 
 ```toml
 [targets.overrides]
@@ -71,7 +71,12 @@ version = 2
 ```
 
 El valor es un channel-id del XMLTV (o `weteve-dummy-…`). Tiene prioridad sobre
-el emparejamiento automático.
+el emparejamiento automático, pero **por debajo de la ficha**: si el canal tiene
+`epg` en su ficha, manda la ficha.
+
+Vive solo por compatibilidad: un host rotado deja estas claves apuntando a urls
+que ya no existen (les pasa a las 226 de un perfil real). Las decisiones nuevas
+van a la ficha del canal.
 
 ### `[targets.channels."<identidad>"]` — la ficha del canal
 
@@ -80,6 +85,8 @@ el emparejamiento automático.
 dial    = 54
 display = "M+ LALIGA"
 logo    = "MLIGA.png"
+epg     = "M+ LALIGA"         # guía fijada a mano (channel-id o Dummy 1h)
+enabled = false               # apagado a mano
 alias   = "M+ LaLigaTVHD"     # nombre interno con el que se vio
 
 [targets.channels."url-0df14a8e7a69"]
@@ -87,12 +94,27 @@ logo = "Odisea.png"
 ```
 
 - Clave: el código de guía (`MLIGA`) o, si no lo hay, `url-<hash>` / `name-<base>`.
+- **Todo lo que decide el usuario vive aquí**: número, nombre, logo, guía y
+  apagado. La identidad sobrevive a que el proveedor cambie la dirección del
+  canal; una decisión guardada por url se perdería en el siguiente cambio de
+  host.
 - `dial` fuerza el número (1–9999, único entre los servidos).
 - `display` es el nombre que ve el reproductor; vacío = el de la guía.
+- `epg` fija la parrilla de ese canal y manda sobre el parecido automático.
+- `enabled = false` lo apaga; quitarlo devuelve el canal al automático. Es el
+  apagado **del canal**: si el mismo canal entra por varias urls (HD/FHD/SD), se
+  apagan todas sus variantes.
 - `logo` es un fichero de `assets/logos` (el demonio lo sirve en `/logos/`).
   Esa carpeta está ignorada por git: los logos elegidos a mano se apuntan en
   `assets/logos-manual.json` para poder recuperarlos tras un clon.
 - Solo se escriben los campos que difieren del automático.
+
+### `[targets.overrides]` y `disabled` — formato viejo, solo por url
+
+Antes la guía y el apagado se guardaban por url del stream. Se siguen **leyendo**
+(se pliegan a la ficha del canal cuando el último pipeline conoce esa url) y solo
+se escriben cuando no se pueden traducir: así una decisión nunca se pierde. En un
+fichero migrado lo normal es que queden vacíos o con urls que ya no existen.
 
 ### Reglas (`rules`)
 

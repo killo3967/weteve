@@ -154,6 +154,14 @@ class ChannelProfile:
     display: str = ""
     #: Fichero de ``assets/logos`` (el demonio lo sirve en ``/logos/``).
     logo: str = ""
+    #: Guía fijada a mano: channel-id del XMLTV o ``weteve-dummy-…``. Vacío =
+    #: lo que diga el parecido automático (o el mapeo viejo por url).
+    epg: str = ""
+    #: Decisión de servido: ``False`` = apagado a mano, ``None`` = sin decisión
+    #: (manda el automático). Antes el apagado vivía por url en
+    #: ``disabled_channels``; la identidad es la clave que sobrevive a que el
+    #: proveedor cambie la dirección del canal.
+    enabled: bool | None = None
 
 
 def merge_profiles(fichas: list[ChannelProfile]) -> ChannelProfile:
@@ -172,6 +180,11 @@ def merge_profiles(fichas: list[ChannelProfile]) -> ChannelProfile:
             dial=salida.dial if salida.dial is not None else ficha.dial,
             display=salida.display or ficha.display,
             logo=salida.logo or ficha.logo,
+            epg=salida.epg or ficha.epg,
+            # el apagado gana: si una ficha lo apaga, el canal está apagado
+            enabled=(False if False in (salida.enabled, ficha.enabled)
+                     else (True if True in (salida.enabled, ficha.enabled)
+                           else None)),
         )
     return salida
 

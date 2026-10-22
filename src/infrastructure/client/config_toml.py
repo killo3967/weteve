@@ -112,11 +112,17 @@ def dumps(config: dict) -> str:
                 lines.append(f"{_str(url)} = {_str(channel_id)}")
             lines.append("")
         # fichas de canal: una tabla por identidad y solo con lo que el
-        # usuario ha tocado (dial forzado, nombre mostrado y logo)
+        # usuario ha tocado (dial, nombre, logo, guía y apagado). Es la única
+        # forma de guardar una decisión: sobrevive a que el proveedor cambie
+        # la dirección del canal.
         for clave, ficha in (target.get("channels") or {}).items():
             campos = [(k, ficha.get(k)) for k in ("alias", "dial", "display",
-                                                  "logo")]
-            escritos = [(k, v) for k, v in campos if v not in (None, "", 0)]
+                                                  "logo", "epg", "enabled")]
+            # ``enabled = false`` es una decisión, no un valor vacío: el filtro
+            # de vacíos no puede confundirlo con 0 (en Python False == 0).
+            escritos = [(k, v) for k, v in campos
+                        if v is not None and v != ""
+                        and not (v == 0 and not isinstance(v, bool))]
             if not escritos:
                 continue
             lines.append(f'[targets.channels.{_str(clave)}]')
@@ -158,17 +164,21 @@ def load(path: Path) -> dict:
 def _profile_to_dict(ficha: ChannelProfile) -> dict:
     """Ficha del dominio → bloque TOML (el escritor filtra los vacíos)."""
     return {"alias": ficha.alias, "dial": ficha.dial,
-            "display": ficha.display, "logo": ficha.logo}
+            "display": ficha.display, "logo": ficha.logo,
+            "epg": ficha.epg, "enabled": ficha.enabled}
 
 
 def _profile_from_dict(raw: dict) -> ChannelProfile:
     """Bloque TOML → ficha del dominio (tolerante con campos de más)."""
     dial = raw.get("dial")
+    enabled = raw.get("enabled")
     return ChannelProfile(
         alias=str(raw.get("alias") or ""),
         dial=int(dial) if dial not in (None, "") else None,
         display=str(raw.get("display") or ""),
         logo=str(raw.get("logo") or ""),
+        epg=str(raw.get("epg") or ""),
+        enabled=enabled if isinstance(enabled, bool) else None,
     )
 
 

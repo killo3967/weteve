@@ -168,6 +168,15 @@ class ApiClient:
         """Lista de targets del demonio (para el selector de Configuración)."""
         return self.get("/targets")
 
+    def target(self, target_id: str) -> tuple[int, dict]:
+        """Ficha completa del perfil, con las decisiones plegadas a url.
+
+        El fichero guarda el mapeo y el apagado por identidad de canal; el
+        demonio los publica por url para que la UI no tenga que saber nada del
+        formato. Es la lista **completa**, no la página que se está viendo.
+        """
+        return self.get(f"/targets/{target_id}")
+
     def mapping_candidates(self, target_id: str,
                            limit: int = 1000, offset: int = 0,
                            include_served: bool = True) -> tuple[int, dict]:

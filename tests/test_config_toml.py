@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from src.application.services.list_manager.models import FilterRule
-from src.infrastructure.client import config_store
+from src.infrastructure.client import config_store, config_toml
 from src.infrastructure.client.config_toml import (
     CLIENT_FILE,
     CONFIG_FILE,
@@ -229,3 +229,51 @@ class TestComandoMigrar:
 
         assert daemon_mod.cmd_migrate_config(tmp_path / "no.ini") == 1
         assert "no hay" in capsys.readouterr().out
+
+
+class TestFichaConGuiaYApagado:
+    """El EPG fijado y el apagado a mano viven en la ficha, no por url."""
+
+    def _ida_y_vuelta(self, target):
+        from src.application.services.list_manager.source_catalog import (
+            SourceCatalog,
+        )
+
+        texto = config_toml.dumps({"version": 2, "sources": [],
+                                   "targets": [config_toml.target_to_dict(
+                                       target, "0")]})
+        return (config_toml.target_from_dict(
+            config_toml.tomllib.loads(texto)["targets"][0], SourceCatalog()))
+
+    def test_la_guia_de_la_ficha_sobrevive(self):
+        from src.application.services.list_manager.models import (
+            ChannelProfile,
+            PipelineTarget,
+        )
+
+        vuelta = self._ida_y_vuelta(PipelineTarget(
+            name="t", channels={"MLIGA": ChannelProfile(epg="M+ LALIGA")}))
+        assert vuelta.channels["MLIGA"].epg == "M+ LALIGA"
+
+    def test_el_apagado_false_no_se_confunde_con_un_valor_vacio(self):
+        """`False == 0` en Python: el filtro de vacíos no puede comérselo."""
+        from src.application.services.list_manager.models import (
+            ChannelProfile,
+            PipelineTarget,
+        )
+
+        vuelta = self._ida_y_vuelta(PipelineTarget(
+            name="t", channels={"MLIGA": ChannelProfile(enabled=False)}))
+        assert vuelta.channels["MLIGA"].enabled is False
+
+    def test_sin_decisiones_no_se_escribe_la_ficha(self):
+        from src.application.services.list_manager.models import (
+            ChannelProfile,
+            PipelineTarget,
+        )
+
+        texto = config_toml.dumps({"version": 2, "sources": [], "targets": [
+            config_toml.target_to_dict(
+                PipelineTarget(name="t", channels={
+                    "X": ChannelProfile(enabled=None)}), "0")]})
+        assert "targets.channels" not in texto

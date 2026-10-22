@@ -20,6 +20,9 @@ class FakeApi:
         self.preview_names: list[str] = []
         self.preview_total = 0
         self.running = True
+        #: perfil tal cual lo publica GET /targets/{id}
+        self.target_definition: dict = {"epg_overrides": {},
+                                        "disabled_channels": []}
         #: muestreo de streams del perfil (lo que publica /status)
         self.streams = {"checked": 0, "ok": 0, "pending": False}
         #: targets que devuelve GET /targets (id -> nombre)
@@ -49,6 +52,12 @@ class FakeApi:
         return 200, {"channels": page, "total": total, "count": len(page),
                      "offset": offset,
                      "truncated": offset + len(page) < total}
+
+    def target(self, target_id: str):
+        """Perfil completo: el fake publica lo que tenga el último guardado."""
+        if self.down:
+            return 0, {"error": "sin conexión"}
+        return 200, {"target": dict(self.target_definition)}
 
     def targets(self):
         if self.down:

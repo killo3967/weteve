@@ -584,3 +584,33 @@ class TestPaginacionDeLaTabla:
         w = dialog.epg_mapping
         w._manual_off.add("http://x/250.ts")   # apagado que no está cargado
         assert "http://x/250.ts" in w.get_disabled()
+
+
+class TestDecisionesEnFichas:
+    """El fichero guarda las decisiones por identidad; el demonio las publica
+    plegadas a url. La UI tiene que partir de esa lista completa, no de la
+    página que está viendo, o al guardar borraría lo que no ve."""
+
+    def _canales(self, total):
+        return [_row(name=f"Canal {i:02d}", url=f"http://x/{i}.ts",
+                     tvg_id=f"Canal {i:02d}") for i in range(total)]
+
+    def test_un_apagado_fuera_de_la_pagina_no_se_pierde(self, dialog, fake_api):
+        fake_api.served_channels = self._canales(80)
+        fake_api.target_definition = {"epg_overrides": {},
+                                      "disabled_channels": ["http://x/70.ts"]}
+        dialog._refresh_mapping()          # página de 50: la 70 no se carga
+        assert "http://x/70.ts" in dialog.epg_mapping.get_disabled()
+
+    def test_un_mapeo_del_demonio_se_ve_en_el_desplegable(self, dialog, fake_api):
+        fake_api.served_channels = [_row(name="LA 1", url="http://x/la1.ts")]
+        fake_api.epg = [{"id": "M+ LALIGA", "display_name": "M+ LALIGA"}]
+        fake_api.target_definition = {
+            "epg_overrides": {"http://x/la1.ts": "M+ LALIGA"},
+            "disabled_channels": []}
+        dialog._refresh_mapping()
+        combo = dialog.epg_mapping.table.cellWidget(
+            0, dialog.epg_mapping.COL_EPG)
+        assert combo.current_value().startswith("M+ LALIGA")
+        assert dialog.epg_mapping.get_overrides() == {
+            "http://x/la1.ts": "M+ LALIGA"}

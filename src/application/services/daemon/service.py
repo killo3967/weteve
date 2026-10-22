@@ -73,16 +73,24 @@ def logo_valido(nombre: str) -> bool:
     return (logos_dir() / limpio).is_file()
 
 
-def serialize_target(t: PipelineTarget) -> dict:
-    """PipelineTarget → dict JSON con reglas en sintaxis xteve textual."""
-    return {
+def serialize_target(t: PipelineTarget,
+                     urls: dict[str, list[str]] | None = None) -> dict:
+    """PipelineTarget → dict JSON con reglas en sintaxis xteve textual.
+
+    ``urls`` es ``identidad -> [urls]`` del último snapshot: con él las fichas
+    se pliegan a url y el cliente (UI, MCP) ve el mapeo y el apagado como
+    siempre, aunque en el fichero vivan por identidad. Sin snapshot se publica
+    solo lo que ya está por url.
+    """
+    datos: dict = {
         "name": t.name,
         "m3u": t.source_index,
         "rules": [r.serialize() for r in t.rules],
         "epg_overrides": dict(t.epg_overrides),
         "disabled_channels": list(t.disabled_channels),
         "channels": {clave: {"alias": f.alias, "dial": f.dial,
-                             "display": f.display, "logo": f.logo}
+                             "display": f.display, "logo": f.logo,
+                             "epg": f.epg, "enabled": f.enabled}
                      for clave, f in t.channels.items()},
         "serve_without_epg": bool(t.serve_without_epg),
         "light_epg": bool(t.light_epg),
@@ -94,6 +102,18 @@ def serialize_target(t: PipelineTarget) -> dict:
         "epg_refs": [{"id": r.id, "name": r.name, "location": r.location}
                      for r in t.epg_refs],
     }
+    if urls:
+        overrides: dict[str, str] = dict(datos["epg_overrides"])
+        disabled: list[str] = list(datos["disabled_channels"])
+        for identidad, ficha in t.channels.items():
+            for url in urls.get(identidad, ()):
+                if ficha.epg:
+                    overrides.setdefault(url, ficha.epg)
+                if ficha.enabled is False and url not in disabled:
+                    disabled.append(url)
+        datos["epg_overrides"] = overrides
+        datos["disabled_channels"] = disabled
+    return datos
 
 
 def serialize_source(entry: SourceEntry) -> dict:
@@ -145,20 +165,37 @@ class TargetService:
             return reload(target_id)
         return self._store.get(target_id)
 
+    def _identidades(self, target_id: str) -> dict[str, str]:
+        """``url -> identidad`` del último pipeline (vacío si no ha corrido)."""
+        getter = getattr(self._supervisor, "url_identities", None)
+        return getter(target_id) if getter is not None else {}
+
+    def _urls_por_identidad(self, target_id: str) -> dict[str, list[str]]:
+        """``identidad -> [urls]`` del último snapshot del perfil.
+
+        Sirve para plegar las fichas a url al publicar el target (la UI y el
+        MCP siguen hablando de urls). Vacío si el supervisor no lo sabe todavía
+        (pipeline sin ejecutar) o si es un doble de test.
+        """
+        getter = getattr(self._supervisor, "urls_for_identity", None)
+        return getter(target_id) if getter is not None else {}
+
     def status(self) -> dict:
         """Estado agregado de los targets (running, URLs, errores)."""
         return self._supervisor.get_status()
 
     def list_targets(self) -> dict:
         targets = self._store.list() if self._store is not None else {}
-        return {"targets": {tid: serialize_target(t)
-                            for tid, t in targets.items()}}
+        return {"targets": {tid: serialize_target(
+            t, self._urls_por_identidad(tid))
+            for tid, t in targets.items()}}
 
     def get_target(self, target_id: str) -> dict | None:
         t = self._definition(target_id)
         if t is None:
             return None
-        return {"target": serialize_target(t)}
+        return {"target": serialize_target(
+            t, self._urls_por_identidad(target_id))}
 
     def runtime_status(self, target_id: str) -> dict | None:
         """Estado de ejecución de un target, o None si no existe."""
@@ -396,8 +433,12 @@ class TargetService:
         t0 = time.perf_counter()
         self._store.save(target_id, new, epg_path=epg_path, bind=bind)
         t_file = time.perf_counter()
-        out: dict = {"ok": True, "target": serialize_target(new),
-                     "reloaded": False}
+        out: dict = {
+            "ok": True,
+            "target": serialize_target(
+                new, self._urls_por_identidad(target_id)),
+            "reloaded": False,
+        }
         if reload:
             out["reloaded"] = self._supervisor.reload_target(
                 target_id, new, epg_path=epg_path)
@@ -461,13 +502,21 @@ class TargetService:
 
     def set_mappings(self, target_id: str, mappings: list[dict],
                      reload: bool = True) -> dict:
-        """Asignación EPG en lote: ``epg_id`` nulo elimina el mapeo."""
+        """Asignación EPG en lote: ``epg_id`` nulo elimina el mapeo.
+
+        La decisión se guarda en la **ficha del canal** (por identidad) cuando
+        el último pipeline conoce su url; si no la conoce, se guarda en el
+        formato viejo por url. Nunca se pierde: lo que no se puede traducir se
+        queda donde estaba.
+        """
         t = self._definition(target_id)
         if t is None:
             return {"error": f"target {target_id} no existe"}
         if not isinstance(mappings, list):
             return {"error": "mappings debe ser una lista"}
         overrides = dict(t.epg_overrides)
+        fichas = dict(t.channels)
+        identidades = self._identidades(target_id)
         applied: list[dict] = []
         errors: list[dict] = []
         for item in mappings:
@@ -475,6 +524,24 @@ class TargetService:
             epg_id = (item or {}).get("epg_id")
             if not url:
                 errors.append({"error": "channel_url vacío", "mapping": item})
+                continue
+            identidad = identidades.get(url)
+            if identidad:
+                ficha = fichas.get(identidad) or ChannelProfile()
+                if epg_id:
+                    fichas[identidad] = replace(ficha, epg=str(epg_id))
+                    applied.append({"channel_url": url, "epg_id": str(epg_id)})
+                elif ficha.epg:
+                    fichas[identidad] = replace(ficha, epg="")
+                    applied.append({"channel_url": url, "epg_id": ""})
+                elif url in overrides:
+                    del overrides[url]       # venía del formato viejo
+                    applied.append({"channel_url": url, "epg_id": ""})
+                else:
+                    errors.append({"channel_url": url,
+                                   "error": "sin mapeo que eliminar"})
+                # la decisión ya vive en la ficha: el legado sobra
+                overrides.pop(url, None)
                 continue
             if epg_id:
                 overrides[url] = str(epg_id)
@@ -485,7 +552,8 @@ class TargetService:
             else:
                 errors.append({"channel_url": url,
                                "error": "sin mapeo que eliminar"})
-        out = self._write(target_id, replace(t, epg_overrides=overrides), reload)
+        out = self._write(target_id, replace(
+            t, epg_overrides=overrides, channels=fichas), reload)
         out["applied"] = applied
         out["errors"] = errors
         if errors:
@@ -638,15 +706,39 @@ class TargetService:
 
     def set_disabled(self, target_id: str, urls: list[str],
                      reload: bool = True) -> dict:
-        """Reemplaza la lista de canales desactivados a mano."""
+        """Reemplaza la lista de canales desactivados a mano.
+
+        Igual que los mapeos: el apagado se guarda en la ficha del canal
+        (``enabled = false``) cuando el último pipeline conoce su url, y en el
+        formato viejo por url cuando no. Reactivar quita la decisión de la
+        ficha, pero solo en canales que este pipeline ha visto: de los que no
+        están en la lista no se toca nada.
+        """
         t = self._definition(target_id)
         if t is None:
             return {"error": f"target {target_id} no existe"}
         if not isinstance(urls, (list, tuple)):
             return {"error": "disabled_channels debe ser una lista"}
         clean = tuple(str(u).strip() for u in urls if str(u).strip())
-        return self._write(target_id, replace(t, disabled_channels=clean),
-                           reload)
+        identidades = self._identidades(target_id)
+        conocidas = set(identidades.values())
+        fichas = dict(t.channels)
+        apagadas: set[str] = set()
+        restantes: list[str] = []
+        for url in clean:
+            identidad = identidades.get(url)
+            if identidad:
+                fichas[identidad] = replace(
+                    fichas.get(identidad) or ChannelProfile(), enabled=False)
+                apagadas.add(identidad)
+            else:
+                restantes.append(url)
+        for identidad, ficha in list(fichas.items()):
+            if (ficha.enabled is False and identidad not in apagadas
+                    and identidad in conocidas):
+                fichas[identidad] = replace(ficha, enabled=None)
+        return self._write(target_id, replace(
+            t, disabled_channels=tuple(restantes), channels=fichas), reload)
 
     # -- servicio web del target ---------------------------------------------
 

@@ -2633,6 +2633,17 @@ class ListManagerDialog(QDialog):
         client = self._api_client()
         if client is None:
             return
+        # El fichero guarda las decisiones en la ficha del canal (por
+        # identidad); el demonio las publica plegadas a url. Se usan como base
+        # para no guardar nunca una lista incompleta: el perfil trae todas, no
+        # la página que se está viendo.
+        codigo_perfil, cuerpo_perfil = client.target(self._target_id())
+        if codigo_perfil == 200:
+            perfil = cuerpo_perfil.get("target") or {}
+            for url, cid in (perfil.get("epg_overrides") or {}).items():
+                overrides.setdefault(url, cid)
+            disabled = tuple(set(disabled)
+                             | set(perfil.get("disabled_channels") or ()))
         solo_pendientes = self.epg_mapping.only_pending()
         # Una página: el total llega en la respuesta y «Cargar más» pide otra.
         pedido = self._mapping_limit

@@ -65,6 +65,12 @@ fichero: pide los cambios por REST.
    pipeline y actualiza el contenido servido.
 4. **MCP** opera sobre el mismo `TargetService`; cualquier cambio hecho por un
    agente se ve en la UI en cuanto se refresca (la UI no tiene copia del motor).
+5. **Las decisiones se guardan por identidad**: la UI y el MCP siguen hablando
+   de urls (es lo que ven), y el demonio traduce cada url a su canal con el
+   último pipeline: guía fijada y apagado acaban en la **ficha** del canal
+   (`[targets.channels.<identidad>]`), no en una clave por url. Lo que ese
+   pipeline no conozca se queda en el formato viejo por url: una decisión no se
+   pierde nunca.
 
 ## Logs
 

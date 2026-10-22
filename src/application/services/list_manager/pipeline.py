@@ -497,6 +497,15 @@ class ListManagerPipeline:
                 epg_id, canonico = self._resolver(
                     cache, matcher, mapped, override)
                 perfil = profile_of(target, canonico, mapped.url, mapped.name)
+                # La guía fijada en la ficha (por identidad) manda sobre el
+                # mapeo viejo por url y sobre el parecido automático: es la
+                # decisión del usuario con la clave que sobrevive a que el
+                # proveedor cambie la dirección del canal.
+                if perfil.epg and perfil.epg != epg_id:
+                    epg_id = perfil.epg
+                    canonico = matcher.canonical_for(mapped.name, epg_id)
+                    perfil = profile_of(target, canonico, mapped.url,
+                                        mapped.name)
                 # Sin guía: el dial forzado (o el toggle del target) la
                 # resuelven con la guía de relleno, antes de que la regla de
                 # servidor descarte el canal.
@@ -508,6 +517,13 @@ class ListManagerPipeline:
                     mapped, matched_epg_id=epg_id, canonical_id=canonico))
         else:
             matched = kept
+
+        # Apagado por ficha: se aplica aquí porque la identidad canónica del
+        # canal solo se conoce después de emparejar. Es aditivo con el apagado
+        # viejo por url (arriba): un canal sale si lo apaga cualquiera de los
+        # dos, nunca se sirve de más.
+        matched, apagados_por_ficha = self._apagar_por_ficha(target, matched)
+        excluded.extend(apagados_por_ficha)
 
         # Regla de servidor: un canal sin guía asignada no se sirve.
         #
@@ -562,6 +578,29 @@ class ListManagerPipeline:
                 len(duplicates))
         return PipelineResult(numbered, total_input, unmatched, excluded,
                               no_epg, require_epg, duplicates)
+
+    @staticmethod
+    def _apagar_por_ficha(
+            target: PipelineTarget,
+            canales: list[MappedChannel],
+    ) -> tuple[list[MappedChannel], list[MappedChannel]]:
+        """Separa los canales apagados en su ficha (``enabled`` es falso).
+
+        Devuelve ``(servibles, apagados)``. Sin fichas no hay nada que mirar:
+        el caso normal de un perfil recién creado.
+        """
+        if not target.channels:
+            return canales, []
+        servibles: list[MappedChannel] = []
+        apagados: list[MappedChannel] = []
+        for canal in canales:
+            perfil = profile_of(target, canal.canonical_id, canal.url,
+                                canal.name)
+            if perfil.enabled is False:
+                apagados.append(canal)
+            else:
+                servibles.append(canal)
+        return servibles, apagados
 
     def _finalize(self, served: list[MappedChannel], target: PipelineTarget,
                   epg: EPGData | None) -> list[MappedChannel]:

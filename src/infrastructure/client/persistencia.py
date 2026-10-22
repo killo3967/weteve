@@ -44,7 +44,8 @@ def load_config(path: Path) -> dict:
             "serve_without_epg": bool(target.serve_without_epg),
             "light_epg": bool(target.light_epg),
             "channels": {clave: {"alias": f.alias, "dial": f.dial,
-                                 "display": f.display, "logo": f.logo}
+                                 "display": f.display, "logo": f.logo,
+                                 "epg": f.epg, "enabled": f.enabled}
                          for clave, f in target.channels.items()},
             "port": target.port,
             "starting_number": target.starting_number,

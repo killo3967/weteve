@@ -376,3 +376,142 @@ class TestPersistencia:
                                               config_toml.catalog_from(crudo))
         assert vuelta.channels == original.channels
         assert vuelta.serve_without_epg is True
+
+
+class TestGuiaYApagadoEnLaFicha:
+    """La ficha es la clave que sobrevive a que el proveedor cambie la url.
+
+    El EPG asignado y el apagado a mano vivían por url (``epg_overrides`` y
+    ``disabled_channels``). Con el proveedor rotando direcciones eso se pierde
+    en silencio; por identidad, no.
+    """
+
+    def test_el_epg_de_la_ficha_manda_sobre_el_mapeo_por_url(self):
+        canales = [Channel("LA 1 HD", "http://x/1", "G", tvg_id="TVE")]
+        clave = channel_keys("TVE", "http://x/1", "LA 1 HD")[0]
+        result = _run(canales, channels={clave: ChannelProfile(epg="MLIGA")},
+                      epg_overrides={"http://x/1": "TVE"})
+        canal = result.channels[0]
+        assert canal.matched_epg_id == "MLIGA"
+        # la identidad sigue al canal, no a la guía elegida para su parrilla
+        assert canal.canonical_id == "TVE"
+
+    def test_una_url_distinta_conserva_la_guia_fijada(self):
+        """Es el caso que rompía el apagado y el mapeo por url."""
+        clave = channel_keys("TVE", None, "LA 1 HD")[0]
+        canales = [Channel("LA 1 HD", "http://otro-host/999", "G",
+                           tvg_id="TVE")]
+        result = _run(canales, channels={clave: ChannelProfile(epg="MLIGA")})
+        assert result.channels[0].matched_epg_id == "MLIGA"
+
+    def test_el_apagado_en_la_ficha_saca_el_canal(self):
+        canales = [
+            Channel("LA 1 HD", "http://x/1", "G", tvg_id="TVE"),
+            Channel("M+ LALIGA", "http://x/2", "G", tvg_id="MLIGA"),
+        ]
+        clave = channel_keys("TVE", "http://x/1", "LA 1 HD")[0]
+        result = _run(canales, channels={clave: ChannelProfile(enabled=False)})
+        assert [c.name for c in result.channels] == ["M+ LALIGA"]
+        assert [c.name for c in result.excluded_disabled] == ["LA 1 HD"]
+
+    def test_el_apagado_en_la_ficha_sobrevive_al_cambio_de_url(self):
+        clave = channel_keys("TVE", None, "LA 1 HD")[0]
+        canales = [Channel("LA 1 HD", "http://host-nuevo/7", "G",
+                           tvg_id="TVE")]
+        result = _run(canales, channels={clave: ChannelProfile(enabled=False)})
+        assert result.channels == []
+        assert [c.name for c in result.excluded_disabled] == ["LA 1 HD"]
+
+    def test_enabled_none_no_apaga_nada(self):
+        canales = [Channel("LA 1 HD", "http://x/1", "G", tvg_id="TVE")]
+        clave = channel_keys("TVE", "http://x/1", "LA 1 HD")[0]
+        result = _run(canales, channels={clave: ChannelProfile(dial=5)})
+        assert [c.url for c in result.channels] == ["http://x/1"]
+        assert result.excluded_disabled == []
+
+    def test_el_apagado_por_url_sigue_funcionando(self):
+        canales = [Channel("LA 1 HD", "http://x/1", "G", tvg_id="TVE")]
+        result = _run(canales, disabled_channels=("http://x/1",))
+        assert result.channels == []
+        assert [c.name for c in result.excluded_disabled] == ["LA 1 HD"]
+
+    def test_las_fichas_se_funden_con_el_apagado_ganando(self):
+        union = merge_profiles([ChannelProfile(enabled=True, epg=""),
+                                ChannelProfile(enabled=False, epg="MLIGA")])
+        assert union.enabled is False
+        assert union.epg == "MLIGA"
+
+
+class TestGuardarPorIdentidad:
+    """Una decisión que llega por url se guarda en la ficha de su canal.
+
+    La UI y el MCP siguen hablando de urls; el fichero guarda identidades. Lo
+    que el último pipeline no sepa traducir se queda en el formato viejo: es
+    preferible un fichero mixto a perder una decisión.
+    """
+
+    IDENTIDADES = {"http://x/1": "TVE"}
+
+    def _servicio(self, target=None):
+        servicio, store = _servicio()
+        store.targets["0"] = target or PipelineTarget(name="t",
+                                                     source_index="0")
+        servicio._supervisor.url_identities = lambda _tid: dict(self.IDENTIDADES)
+        servicio._supervisor.urls_for_identity = lambda _tid: {
+            "TVE": ["http://x/1"]}
+        return servicio, store
+
+    def test_el_mapeo_se_guarda_en_la_ficha(self):
+        servicio, store = self._servicio()
+        servicio.set_mappings("0", [{"channel_url": "http://x/1",
+                                     "epg_id": "M+ LALIGA"}], reload=False)
+        t = store.targets["0"]
+        assert t.channels["TVE"].epg == "M+ LALIGA"
+        assert t.epg_overrides == {}
+
+    def test_el_mapeo_se_puede_quitar(self):
+        servicio, store = self._servicio(PipelineTarget(
+            name="t", source_index="0",
+            channels={"TVE": ChannelProfile(epg="M+ LALIGA")}))
+        servicio.set_mappings("0", [{"channel_url": "http://x/1",
+                                     "epg_id": None}], reload=False)
+        assert store.targets["0"].channels["TVE"].epg == ""
+
+    def test_una_url_desconocida_se_queda_en_el_formato_viejo(self):
+        servicio, store = self._servicio()
+        servicio.set_mappings("0", [{"channel_url": "http://no-visto/9",
+                                     "epg_id": "SUR"}], reload=False)
+        t = store.targets["0"]
+        assert t.epg_overrides == {"http://no-visto/9": "SUR"}
+        assert t.channels == {}
+
+    def test_el_apagado_se_guarda_en_la_ficha(self):
+        servicio, store = self._servicio()
+        servicio.set_disabled("0", ["http://x/1"], reload=False)
+        t = store.targets["0"]
+        assert t.channels["TVE"].enabled is False
+        assert t.disabled_channels == ()
+
+    def test_reactivar_quita_la_decision(self):
+        servicio, store = self._servicio(PipelineTarget(
+            name="t", source_index="0",
+            channels={"TVE": ChannelProfile(enabled=False)}))
+        servicio.set_disabled("0", [], reload=False)
+        assert store.targets["0"].channels["TVE"].enabled is None
+
+    def test_reactivar_no_toca_lo_que_el_pipeline_no_ha_visto(self):
+        servicio, store = self._servicio(PipelineTarget(
+            name="t", source_index="0",
+            channels={"OTRO": ChannelProfile(enabled=False)}))
+        servicio.set_disabled("0", [], reload=False)
+        assert store.targets["0"].channels["OTRO"].enabled is False
+
+    def test_el_target_publica_las_fichas_plegadas_a_url(self):
+        from src.application.services.daemon.service import serialize_target
+
+        t = PipelineTarget(name="t", channels={
+            "TVE": ChannelProfile(epg="M+ LALIGA", enabled=False)})
+        datos = serialize_target(t, {"TVE": ["http://x/1"]})
+        assert datos["epg_overrides"] == {"http://x/1": "M+ LALIGA"}
+        assert datos["disabled_channels"] == ["http://x/1"]
+        assert datos["channels"]["TVE"]["epg"] == "M+ LALIGA"

@@ -423,6 +423,33 @@ class TargetSupervisor:
         with self._lock:
             return target_id in self._results
 
+    def _canales_del_snapshot(self, target_id: str) -> list:
+        """Canales del último pipeline del perfil (servidos y descartados)."""
+        with self._lock:
+            result = self._results.get(target_id)
+            if result is None:
+                return []
+            return (list(result.channels) + list(result.excluded_no_epg)
+                    + list(result.excluded_disabled)
+                    + list(result.excluded_duplicate))
+
+    def url_identities(self, target_id: str) -> dict[str, str]:
+        """``url -> identidad`` del último snapshot.
+
+        Es lo que permite guardar una decisión que llega por url (UI, MCP,
+        API) en la ficha de su canal. Vacío si el pipeline no ha corrido: en
+        ese caso la decisión se guarda en el formato viejo, que es lo seguro.
+        """
+        return {c.url: channel_identity(c.canonical_id, c.url, c.name)
+                for c in self._canales_del_snapshot(target_id) if c.url}
+
+    def urls_for_identity(self, target_id: str) -> dict[str, list[str]]:
+        """``identidad -> [urls]`` del último snapshot (el inverso)."""
+        salida: dict[str, list[str]] = {}
+        for url, identidad in self.url_identities(target_id).items():
+            salida.setdefault(identidad, []).append(url)
+        return salida
+
     def mapping_candidates(self, target_id: str, limit: int = 200,
                            offset: int = 0,
                            include_served: bool = False) -> dict:

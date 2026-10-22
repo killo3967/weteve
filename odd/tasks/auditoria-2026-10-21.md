@@ -123,7 +123,29 @@ Cada tarea se cierra cuando su criterio de aceptación se cumple **y** la suite
 
 ### T05 — Migrar `epg_overrides` y `disabled_channels` a fichas
 
-- [ ] Estado: PENDIENTE · Severidad: ALTA (funcional)
+- [x] Estado: HECHO (2026-10-22) · Severidad: ALTA (funcional)
+  **Una sola clave: la identidad del canal.** `ChannelProfile` gana `epg` y
+  `enabled`; el pipeline los lee (la ficha manda sobre el mapeo viejo por url y
+  sobre el parecido automático) y `_apagar_por_ficha` aplica el apagado después
+  de resolver la identidad, que es cuando ya se sabe de qué canal se habla.
+  El demonio traduce en el guardado: `set_mappings`/`set_disabled` reciben urls
+  (lo que ven la UI y el MCP) y escriben en la ficha usando el mapa url →
+  identidad del último pipeline; lo que no sepa traducir se queda en el formato
+  viejo, que se sigue leyendo. `serialize_target` hace el camino inverso para
+  publicar lo de siempre, y la UI parte de esa lista completa (no de la página
+  cargada) para no guardar nunca de menos.
+  **Ensayo con el perfil real** (copia del `daemon.toml`, snapshot de 855 filas
+  del demonio en marcha): 41 apagados → 41 fichas con `enabled = false`,
+  residuo 0, pérdidas 0; fichero 47 764 → 43 474 bytes.
+  **Hallazgo importante**: los **226 mapeos por url son huérfanos** — apuntan al
+  host viejo del proveedor (`host antiguo del proveedor`) y la lista actual usa otro
+  (`host nuevo del mismo proveedor`). Ninguno casa con un canal actual: llevan tiempo sin
+  aplicarse y el pipeline resolvía esos canales por parecido automático. No se
+  borran ni se reanclan a ciegas (201 de ellos comparten id de canal en la ruta,
+  pero reanclar por número es adivinar): se conservan tal cual hasta que el
+  usuario decida. Las decisiones nuevas ya van a fichas.
+  Tests: `TestGuiaYApagadoEnLaFicha` (7), `TestGuardarPorIdentidad` (7),
+  `TestFichaConGuiaYApagado` (3) y `TestDecisionesEnFichas` (2).
 - Qué: hoy el EPG asignado y el apagado manual van por url y el dial/nombre/logo
   por identidad. Son dos claves para el mismo canal.
 - Dónde: `models.py` (`PipelineTarget`), `config_toml.py`, `service.py`,
@@ -237,10 +259,9 @@ Cada tarea se cierra cuando su criterio de aceptación se cumple **y** la suite
 
 ## Acceptance Criteria
 
-- [ ] Las 11 tareas están cerradas o explícitamente descartadas con motivo.
-  Hechas T01-T04 y T06-T11 (2026-10-22). **Queda T05**, aplazada a propósito
-  por el usuario: es la única cara (7 módulos y ~19 tests) y va sola.
-- [x] Suite (1003 tests), ruff y mypy en verde en cada cierre.
+- [x] Las 11 tareas están cerradas o explícitamente descartadas con motivo:
+  T01-T04 y T06-T11 (2026-10-22, commit `8241b1d`) y T05 después, sola.
+- [x] Suite (1022 tests), ruff y mypy en verde en cada cierre.
 - [ ] `docs/forensic-audit/2026-10-21.md` queda como referencia histórica; este
   documento es el que manda para el trabajo pendiente.
 
@@ -252,5 +273,6 @@ Cada tarea se cierra cuando su criterio de aceptación se cumple **y** la suite
   muestrear pocos canales y con caché.
 - **Seguridad (aceptada)**: el token viaja en claro por HTTP dentro de la LAN.
   Si algún día se abre fuera, hace falta TLS o un proxy delante.
-- Orden seguido: T01 → T02 → T03 → T04 → T06 → T07 → T08 → T09 → T10 → T11.
-  T05 queda para el final, sola.
+- Orden seguido: T01 → T02 → T03 → T04 → T06 → T07 → T08 → T09 → T10 → T11 →
+  T05 (la única con riesgo de datos, con respaldo previo del `daemon.toml` y
+  ensayo sobre copia).

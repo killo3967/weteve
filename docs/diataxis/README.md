@@ -18,8 +18,10 @@ configura.
 
 - **Perfil**: una salida completa (lista + filtros + guía + numeración). En el
   código y en la API se llama `target`.
-- **Ficha**: lo que el usuario ha fijado a mano para un canal (número, nombre
-  visible, logo). En el código, `ChannelProfile`.
+- **Ficha**: lo que el usuario ha fijado a mano para un canal — número, nombre
+  visible, logo, guía y si se sirve o no. Va por **identidad** del canal, así
+  que sobrevive a que el proveedor cambie la dirección. En el código,
+  `ChannelProfile`.
 - **Guía ligera**: `epg.xml` sin descripciones ni categorías (~3 MB en vez de
   9 MB). Activa por defecto.
 
@@ -27,7 +29,7 @@ configura.
 
 | Comprobación | Resultado |
 |---|---|
-| `pytest -q` | 1003 tests en verde |
+| `pytest -q` | 1022 tests en verde |
 | `ruff check` | limpio |
 | `mypy` | sin errores (142 ficheros) |
 | Demonio | 146 canales servidos, 0 sin logo |
