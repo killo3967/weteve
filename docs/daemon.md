@@ -5,7 +5,7 @@
 
 El demonio es el servicio permanente de weteve: posee los targets (pipeline +
 servidor HTTP de playlist por target), expone una API de control para la UI Qt
-y un endpoint **MCP** completo para que agentes (Claude, etc.) lo gobiernen.
+y un endpoint **MCP** completo para que agentes de IA lo gobiernen.
 
 ## Arquitectura
 
@@ -196,8 +196,9 @@ Las escrituras aceptan `"reload": false` para agrupar varios cambios y ejecutar 
 pipeline una sola vez al final con `POST .../run`. Códigos: 200, 400 (cuerpo o
 cambio inválido), 404, 405. CORS solo para orígenes de loopback.
 
-Las reglas de filtro viajan en sintaxis xTeVe textual (`campo:{patrón}:case`,
-`!{...}` para exclusiones), y se guardan así en `daemon.toml`.
+Las reglas de filtro viajan en sintaxis textual por campos
+(`campo:{patrón}:case`, `!{...}` para exclusiones), y se guardan así en
+`daemon.toml`.
 
 ## Cartera de fuentes y multi-origen
 

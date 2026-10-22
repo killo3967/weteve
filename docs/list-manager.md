@@ -2,7 +2,7 @@
 
 > Documento único de feature (contrato ODD de gentle-pi: `odd/tasks/<feature-name>.md`).
 > Espejo de recuperación en Engram: topic `odd/list-manager/tasks`.
-> Estado: **IMPLEMENTADO** (2026-10-08). Pasos 1-7 del plan completos; smoke test HTTP verificado en subproceso (m3u 200, epg 200, 404 en rutas desconocidas). Pendiente: validación manual del usuario con una lista real y VLC.
+> Estado: **IMPLEMENTADO** (2026-10-08). Pasos 1-7 del plan completos; smoke test HTTP verificado en subproceso (m3u 200, epg 200, 404 en rutas desconocidas). Pendiente: validación manual del usuario con una lista real y un reproductor.
 
 ## Estado actual (2026-10-22)
 
@@ -23,7 +23,7 @@ La arquitectura cambió: **el demonio es el motor y la UI es un frontend**.
 ### Lo que hace el pipeline hoy
 
 1. **Parseo** de la unión de las listas M3U activas del perfil.
-2. **Filtros** xTeVe en orden (`group-title`, `custom-filter`, `tvg-group`,
+2. **Filtros** por campos, en orden (`group-title`, `custom-filter`, `tvg-group`,
    `extgrp`, `source`), combinables con `and`/`or`.
 3. **Asociación EPG en cuatro fases** (`epg_matcher.py`): `tvg-id` exacto →
    nombre normalizado exacto → nombre base sin etiqueta de calidad (`LA 1 HD`
@@ -45,16 +45,16 @@ diálogo están superadas.
 
 ## Objective
 
-Nuevo submenú **"Gestor de listas"** bajo "Mis Listas" que integra la funcionalidad
-esencial de xTeVe/Threadfin en IPTVViewer: tomar una o varias listas M3U, aplicarles
+Un gestor de listas que integra la funcionalidad esencial de este tipo de
+herramientas: tomar una o varias listas M3U, aplicarles
 un motor de filtros, asociarlas a guías EPG (XMLTV) por coincidencia automática
 con corrección manual, y **servir el resultado como una mini-web local** que expone
 la lista filtrada (`.m3u`) y la guía regenerada (`.xml`) para consumo por el propio
-IPTVViewer o por reproductores externos (VLC, Jellyfin, Plex-like).
+la aplicación anfitriona o por reproductores externos.
 
 ## Problem
 
-IPTVViewer ya descarga y parsea M3U y XMLTV por fuente (`[source.N]`), pero:
+El programa anfitrión ya descargaba y parseaba M3U y XMLTV por fuente, pero:
 
 - El único "filtro" es un campo de texto plano por fuente que se evalúa de forma
   opaca dentro del parseo; no hay reglas combinables, ni incluir/excluir, ni
@@ -64,13 +64,14 @@ IPTVViewer ya descarga y parsea M3U y XMLTV por fuente (`[source.N]`), pero:
 - No hay manera de consumir el resultado filtrado desde fuera de la aplicación:
   las URLs de los streams quedan encapsuladas en la app.
 
-xTeVe/Threadfin resuelven exactamente esto (filtros, mapeo EPG, exportación web),
+Los gestores de listas de referencia resuelven exactamente esto (filtros, mapeo
+EPG, exportación web),
 pero son aplicaciones Go separadas con su propia UI y su propio ciclo de vida.
 
 ## Why
 
 Unificar la gestión de listas en la aplicación evita mantener dos herramientas
-(la app y un xTeVe externo), reutiliza los parsers existentes (`FileM3URepository`,
+(la app y un gestor externo), reutiliza los parsers existentes (`FileM3URepository`,
 `XMLTVRepository`) y da al usuario control visible sobre qué canales consume y con
 qué guía.
 
@@ -84,7 +85,7 @@ qué guía.
   EPG → generación de salida.
 - Motor de filtros: la **UI** expone reglas simples (incluir/excluir por texto sobre
   grupo o nombre, combinables); el **modelo de dominio** persiste la sintaxis
-  extendida de xTeVe (`group-title` / `custom-filter`, `{incluir}` / `!{excluir}`,
+  extendida por campos (`group-title` / `custom-filter`, `{incluir}` / `!{excluir}`,
   case-sensitive opcional) para crecer después sin migración.
 - Asociación EPG automática: match por `tvg-id`, fallback por nombre normalizado
   (lowercase, sin acentos/puntuación, colapsado de espacios).
@@ -98,7 +99,7 @@ qué guía.
 **Excluye (decisiones de alcance 2026-10-08):**
 - **No hay proxy de streams** (`/stream/{id}`): la m3u servida apunta a las URLs
   originales de los canales. La reproducción externa va directa al origen.
-- **No hay emulación HDHR** (`discover.json` / `lineup.json`).
+- **No emula sintonizadores de red** (descubrimiento ni lista de canales sintonizados).
 - No hay buffer/re-streaming, ni imágen-caché de logos, ni usuarios/autenticación
   en la web (es local).
 - No se toca el flujo actual de "Mis Listas" (selección de fuente activa, player):
@@ -107,7 +108,7 @@ qué guía.
 
 ## Non-Goals
 
-- Compatible byte a byte con la salida de xTeVe.
+- Compatible byte a byte con la salida de otro gestor de listas.
 - Soportar las 100% de las excentricidades de M3U del ecosistema (se cubre lo que
   ya parsea `FileM3URepository`).
 - Scheduler de auto-actualización de fuentes (queda para una fase futura; las
@@ -140,8 +141,8 @@ la estructura `[source.N]` de `main.py` (load/save config).
 ```python
 @dataclass(frozen=True)
 class FilterRule:
-    field: Literal["group-title", "custom-filter"]  # xTeVe-compatible en el modelo
-    pattern: str          # texto simple en UI; patrón xTeVe si viene de config antigua
+    field: Literal["group-title", "custom-filter"]  # campos del modelo
+    pattern: str          # texto simple en UI; patrón heredado si viene de config antigua
     exclude: bool
     case_sensitive: bool = False
 
@@ -162,11 +163,11 @@ class ServiceConfig:
 
 El wizard en 3 pasos mapea 1:1 sobre `PipelineTarget`; cada paso edita un campo.
 
-### Filtros (modelo xTeVe, UI simple)
+### Filtros (modelo por campos, UI simple)
 
 Sintaxis interna del `FilterRule.pattern` cuando `field="custom-filter"`: subcadena
 sobre los atributos crudos del EXTINF. Semántica equivalente a `filterThisStream` de
-xTeVe (`src/m3u.go`):
+El modelo de referencia define:
 
 - Regla sin llaves: coincide si el patrón aparece en el grupo o el nombre.
 - `{texto}`: incluir además los canales que cumplan `texto`.
@@ -184,7 +185,7 @@ La UI nunca pide esa sintaxis: ofrece filas "campo = [grupo|nombre] contains [te
    calidad —también cuando el proveedor la pega al nombre (`M+ LaLigaTVHD`,
    `M+ #VAMOSHD`)—.
 4. Fallback por parecido de marca: se comparan las palabras significativas
-   (`M+`, `Movistar+` y `Movistar Plus` son la misma marca, el sufijo `TV` no
+   (las variantes del nombre del operador son la misma marca, el sufijo `TV` no
    distingue, `M+LCAMPEON4` es `M+ Liga de Campeones 4`, las anotaciones entre
    paréntesis se ignoran). Dos reglas duras: el sufijo numérico tiene que
    coincidir (`M+ LaLiga 2` no es `M+ LaLiga`) y el ganador necesita margen
@@ -263,7 +264,7 @@ wizard vacío.
 
 ## Implementation Plan
 
-1. `models.py` + `filter_engine.py` con tests unitarios (semántica xTeVe).
+1. `models.py` + `filter_engine.py` con pruebas unitarias (semántica de campos).
 2. `epg_matcher.py` con tests (normalización, fallback, sugerencias).
 3. `pipeline.py` + `playlist_builder.py` con tests (fixtures M3U/XMLTV reales
    reducidos, incluido caso Pluto TV sin tvg-name).
@@ -271,7 +272,7 @@ wizard vacío.
 5. `list_manager_dialog.py`: wizard 3 pasos + tabla de filtros + editor EPG.
 6. Integración en `main_window.py` (submenú "Gestor de listas") y `main.py`
    (load/save `[listmanager.*]`).
-7. Smoke test manual: servir lista real de España filtrada y cargarla en VLC.
+7. Prueba manual: servir una lista real filtrada y cargarla en un reproductor.
 
 ## Test Plan
 

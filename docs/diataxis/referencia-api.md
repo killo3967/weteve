@@ -47,7 +47,7 @@ Límite de página: 1000. Todas las lecturas salen del snapshot; solo `run` y
 | `POST /targets/{id}/run` | ejecutar el pipeline |
 | `POST /targets/{id}/refresh-epg` | volver a leer las guías (descarga) |
 | `PUT /targets/{id}/settings` | nombre, puerto, bind, prioridad, dummy, guía ligera |
-| `PUT /targets/{id}/rules` | filtros en sintaxis xteve |
+| `PUT /targets/{id}/rules` | filtros por campos |
 | `PUT /targets/{id}/mappings` | mapeos EPG en lote |
 | `PUT /targets/{id}/channels` | fichas: dial, nombre mostrado y logo |
 | `PUT /targets/{id}/sources` | selección de fuentes del perfil |

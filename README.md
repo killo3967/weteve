@@ -1,38 +1,72 @@
 # weteve
 
-Gestor de listas IPTV independiente, extraído de [IPTVViewer](K:/IPTVViewer).
-Toma una o varias listas M3U (URL o fichero), aplica filtros en sintaxis xTeVe,
-asocia la guía EPG (XMLTV) y sirve el resultado por un servidor web local
-(`/m3u/weteve_<perfil>.m3u` y `/xmltv/weteve_<perfil>.xml`).
+Gestor de listas de televisión por internet. Toma una o varias listas de canales
+(formato M3U, por URL o fichero) y sus guías de programación (XMLTV), aplica
+filtros, casa cada canal con su guía, lo numera y **sirve el resultado por HTTP**
+para que cualquier reproductor lo cargue tal cual.
 
 Dos procesos, un solo motor: **el demonio** hace el trabajo (pipeline + servidor)
-y **la ventana Qt** es su frontend (habla REST). El demonio expone además un
-endpoint MCP para gobernarlo por agentes.
+y **la ventana de escritorio** es su frontend. El demonio expone además un
+endpoint MCP para que agentes de IA lo gobiernen.
+
+## Qué hace
+
+- **Cartera de fuentes**: las listas y las guías se definen una vez y cada perfil
+  elige qué filas usa. Varias listas se unen en una sola salida; los canales
+  repetidos entre listas no se deduplican (se ven con el nombre de su lista).
+- **Filtros** por campos (`group-title`, `custom-filter`, `tvg-group`, `extgrp`,
+  `source`) con `{incluir}` / `!{excluir}` y operador `and`/`or`.
+- **Casado con la guía en cuatro fases**: identificador exacto → nombre
+  normalizado → nombre base sin la etiqueta de calidad → parecido por palabras
+  de marca (con el sufijo numérico obligatorio y margen sobre el segundo
+  candidato). Lo que no casa se asigna a mano, y cada asignación se recuerda.
+- **Ficha del canal**: todo lo que decides tú de un canal —número, nombre que ve
+  el reproductor, logo, guía y si se sirve o no— se guarda por **identidad** del
+  canal, así que sobrevive a que el proveedor cambie la dirección.
+- **Guía de relleno**: los canales sin programación real se pueden servir con una
+  guía sintética de bloques de una hora.
+- **Duplicados por calidad**: de cada canal repetido (4K/Full HD/HD/SD) se sirve
+  una sola variante, según la prioridad que fijes.
+- **Numeración real**: el número sale del dial que publica la guía, no de la
+  posición en la lista; los que no tienen se numeran a continuación.
+- **Servidor propio**: una lista y una guía por perfil, más los logos, todo en un
+  único puerto. Sin proxy: la lista apunta a las direcciones originales.
+- **Refresco programado** de cada fuente (`refresh_min`) y **vigilancia del
+  proveedor**: un muestreo barato de unos pocos canales dice si la línea sigue
+  respondiendo antes de que falle el reproductor.
+- **Instancia única** por fichero de datos, con candado del sistema.
 
 ## Arquitectura
 
 ```
-main.py                    ventana Qt (frontend del demonio)
+main.py                    ventana de escritorio (frontend del demonio)
 daemon.py                  demonio: run | status | stop | install-task | migrate-config
 src/
 ├── application/
-│   ├── list_manager/      pipeline: filtros, match EPG, calidad, fichas, playlist/XMLTV
-│   └── services/daemon/   motor: TargetService, TargetSupervisor, REST, MCP
-├── domain/                entidades (Channel, EPGData, Playlist) y puertos
+│   ├── list_manager/      pipeline: filtros, casado de guía, calidad, fichas,
+│   │                      playlist y guía de salida, muestreo del proveedor
+│   └── services/daemon/   motor: servicio de dominio, supervisor, REST, MCP
+├── domain/                entidades y puertos (canal, guía, playlist)
 └── infrastructure/
-    ├── adapters/          file_m3u_repository, xmltv_repository
-    ├── client/            cliente REST, codec de config, lanzador, candado
-    ├── ui/                widgets Qt (diálogo de perfiles, mapeado, cartera)
-    ├── utils/             sevenzip (EPGs comprimidos)
-    └── web/               servidor único: REST, MCP, playlists y logos
-tests/                     1003 tests (unit + e2e con demonio real)
+    ├── adapters/          lectores de M3U y XMLTV (+ comprimidos)
+    ├── client/            cliente REST, codec de configuración, lanzador, candado
+    ├── ui/                ventana y paneles: perfiles, mapeo, cartera, estado
+    ├── utils/             extracción de guías comprimidas
+    └── web/               servidor único: REST, MCP, listas, guías y logos
+tests/                     prueba automática (unitaria y de extremo a extremo)
 ```
+
+El demonio es el dueño del estado: ejecuta el pipeline, sirve las listas y
+publica un snapshot que la ventana pinta. La ventana nunca calcula nada; pide y
+ordena por la API.
 
 ## Requisitos
 
-- Windows 10/11 (probado aquí), Python 3.11+
-- `tar.exe` de Windows o 7-Zip instalado (solo si el EPG viene en .7z; los .gz
-  y .zip los maneja Python directamente)
+- Sistema: Windows 10/11 (es el que se ha probado; el lanzador del demonio usa
+  procesos sin consola propios de ese sistema).
+- Python 3.11 o superior.
+- `tar.exe` del sistema o una herramienta de descompresión si la guía viene en
+  formato `.7z` (los `.gz` y `.zip` los maneja Python).
 
 ## Puesta en marcha
 
@@ -44,7 +78,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-El demonio se arranca desde la propia ventana si marcas `autostart`, o a mano:
+El demonio se arranca desde la propia ventana o a mano:
 
 ```powershell
 .venv\Scripts\python.exe daemon.py run
@@ -60,79 +94,49 @@ Dos ficheros, con **un escritor cada uno**:
 
 | Fichero | Contenido | Escribe |
 |---|---|---|
-| `daemon.toml` | cartera de fuentes y perfiles (reglas, mapeos, prioridad) | el demonio |
-| `weteve.ini` | `[DAEMON]`: host, puerto, token y arranque | la GUI |
+| `daemon.toml` | cartera de fuentes y perfiles (reglas, fichas, prioridad) | el demonio |
+| `weteve.ini` | `[DAEMON]`: host, puerto, token y arranque | la ventana |
 
 `config.ini` es el formato **viejo**: solo se lee para migrar
 (`python daemon.py migrate-config`). Detalle de cada clave, del esquema TOML y de
 la migración: `docs/diataxis/referencia-configuracion.md`.
 
-Las reglas de filtro viajan en sintaxis xTeVe (`campo:{patrón}:case`): texto
-plano incluye, `{texto}` incluye canales que cumplan, `!{texto}` excluye.
+## Uso
 
-### Mapeo EPG y canales sin guía
-
-Si el perfil tiene fuente EPG, **un canal sin guía asignada no se sirve**: así
-se evita una lista de canales que el reproductor muestra sin programación. La
-regla no se aplica cuando no hay fuente EPG configurada.
-
-En la pestaña «Mapeado IPTV <-> EPG» del diálogo:
-
-- **EPG asignado**: desplegable con los canales de la guía. La etiqueta se
-  muestra sin el sufijo `.TV` (p. ej. `La1`), pero lo que se guarda es el
-  channel-id real (`La1.TV`). También se puede teclear un id que la guía no
-  anuncie.
-- **`Dummy 1h`** (primera opción con nombre, tras la vacía): guía de relleno
-  sintética — bloques de 1 h durante 7 días, con el nombre del canal como
-  título. Genera un id propio por canal (`weteve-dummy-…`), así que se puede
-  rescatar canal a canal.
-- **Activo**: casilla derivada (sin guía asignada o apagado a mano). Apagar un
-  canal lo saca de la lista y lo persiste como canal desactivado. Reactivar una
-  fila **sin** guía no es posible: la casilla vuelve sola a su estado real, y
-  primero hay que asignarle `Dummy 1h` o un canal de la guía. Al asignarle guía
-  se limpia también el apagado manual, para que elegir `Dummy 1h` no parezca no
-  hacer nada.
-
-> Los canales que la coincidencia automática no empareja son muchos en listas
-> de proveedor (nombres como «La 1 HD» frente a ids como `La1.TV`). Con la regla
-> activa, la lista servida se reduce hasta que se asignan: usa el desplegable o
-> `Dummy 1h` para recuperarlos.
-
-## Servidor web
+```powershell
+.venv\Scripts\python.exe main.py            # ventana
+.venv\Scripts\python.exe daemon.py status   # exit 0 = vivo
+.venv\Scripts\python.exe daemon.py stop
+```
 
 El demonio sirve todo en un único puerto (`control_port`, 34400 por defecto):
 
-- `/m3u/weteve_<perfil>.m3u` — la lista filtrada, numerada y con `url-tvg`
-- `/xmltv/weteve_<perfil>.xml` — la guía asociada a ese perfil
-- `/logos/<fichero>` — los logos que sirve la lista
-- `/api/v1/...` — REST para la GUI y otros frontends
-- `/mcp` — JSON-RPC MCP para agentes
+- `/m3u/weteve_<perfil>.m3u` — la lista filtrada, numerada y con la guía asociada
+- `/xmltv/weteve_<perfil>.xml` — la guía de ese perfil
+- `/logos/<fichero>` — los logos que usa la lista
+- `/api/v1/...` — API REST para la ventana y otros clientes
+- `/mcp` — protocolo MCP para agentes
 
 ## Calidad
 
-La configuración de las herramientas vive en `pyproject.toml` (ruff, mypy y
-pytest; no quedan `pytest.ini` ni `setup.cfg`):
+La configuración de las herramientas vive en `pyproject.toml`:
 
 ```powershell
 .venv\Scripts\activate
-ruff check .          # lint (ruleset fijado en [tool.ruff])
-mypy                  # tipos ([tool.mypy]: files, explicit_package_bases)
+ruff check .          # lint
+mypy                  # tipos
 pytest -q             # suite completa (excluye los marcados network)
 pytest -m network -q  # los que salen a internet y leen las fuentes URL
 ```
 
-Los e2e del demonio (`tests/test_daemon_e2e_*.py`) arrancan un demonio real con
-puertos efímeros y las fixtures M3U/XMLTV: no tocan tu `daemon.toml` ni necesitan
-red. `.github/workflows/ci.yml` ejecuta ruff, mypy, compileall y pytest en
-Windows/Python 3.11.
+Las pruebas de extremo a extremo arrancan un demonio real con puertos efímeros y
+datos de ejemplo: no tocan tu configuración ni necesitan red.
 
 ## Documentación
 
 - `docs/diataxis/` — **documentación canónica**: puesta en marcha, API,
   configuración, arquitectura y cómo trabajar en el proyecto.
-
-### Documentación heredada
-
-- `docs/list-manager.md` — especificación original del gestor de listas
-- `docs/especificacion-gestor-listas.md` — especificación funcional de referencia
-- `EXTRACCION.md` — cómo se extrajo weteve de IPTVViewer (histórico)
+- `docs/daemon.md` — el demonio: ciclo de vida, guardado, estado y protocolos.
+- `docs/list-manager.md` y `docs/especificacion-gestor-listas.md` — especificación
+  funcional de referencia.
+- `EXTRACCION.md` — procedencia del código (documento histórico).

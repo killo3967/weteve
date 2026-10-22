@@ -42,8 +42,8 @@ version = 2
 | `id` | corto y estable |
 | `name` | se usa como etiqueta de origen (filtro `source`) |
 | `kind` | `m3u` (canales) o `epg` (guía) |
-| `source_type` | `file`, `url` o `movistar` (se deduce de `location`) |
-| `location` | ruta, URL http(s) o `movistar://epg?span=7` |
+| `source_type` | `file`, `url` o guía de operador (se deduce de `location`) |
+| `location` | ruta, URL http(s) o el esquema propio de una guía de operador |
 | `refresh_min` | minutos entre recargas; `0` = estática |
 | `priority` | peso al desempatar guías (mayor gana); solo se escribe si no es 0 |
 | `enabled` | si participa en la unión |
@@ -57,7 +57,7 @@ version = 2
 | `port`, `bind` | herencia del modo antiguo; hoy manda `control_port` |
 | `starting_number` | número del primer canal de la cola sin dial |
 | `m3u_sources`, `epg_sources` | ids de la cartera que aporta el perfil |
-| `rules` | filtros en sintaxis xteve (ver abajo) |
+| `rules` | filtros por campos (ver abajo) |
 | `disabled` | urls apagadas a mano a nivel de perfil (legado por url) |
 | `serve_without_epg` | `true` = servir con Dummy 1h los que no tienen guía |
 | `light_epg` | solo se escribe si es `false`: guía sin descripciones (por defecto sí) |

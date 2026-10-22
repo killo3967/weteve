@@ -227,7 +227,8 @@ Cada tarea se cierra cuando su criterio de aceptación se cumple **y** la suite
   cuatro fases de match → identidad canónica → dedupe por calidad → salida);
   el resto queda marcado como especificación original (y su bloque de
   `config.ini` como histórico). `docs/especificacion-gestor-listas.md` se
-  reescribió: sin «IPTVViewer», cartera `[[sources]]`, las cuatro fases, rutas
+  reescribió: sin nombres de otras herramientas, cartera `[[sources]]`, las cuatro
+  fases de casado, rutas
   `/m3u` y `/xmltv` en el puerto único y `weteve.ini` como sitio del alcance.
   `docs/daemon.md` y `README.md` al día en el cierre de T02.
 - Qué: `docs/list-manager.md` y `docs/especificacion-gestor-listas.md` describen

@@ -60,7 +60,8 @@ se **anuncia** la IP de la red, porque `0.0.0.0` no es una dirección de destino
 
 Cada guía bautiza al mismo canal a su manera (`M+ LaLigaTVHD`, `M+ LALIGA TV HD`,
 `M+ LaLiga`, `M+ LALIGA`). La identidad se resuelve contra la guía que **publica
-dial** (solo Movistar lo hace) con un matcher por marca: el sufijo numérico tiene
+dial** (solo algunas guías lo publican) con un casador por marca: el sufijo
+numérico tiene
 que coincidir y el ganador necesita margen. Las guías XMLTV solo traen logo, y
 tomarlas por canónicas partía el canal en dos.
 
