@@ -283,8 +283,8 @@ class TestCarteraDeFuentes:
 
         path = tmp_path / "daemon.toml"
         write_daemon(path,
-                     sources=[source("a", "platero", "m3u",
-                                     "C:/platero.m3u")],
+                     sources=[source("a", "principal", "m3u",
+                                     "C:/listas/principal.m3u")],
                      targets=[target("0", name="t", custom_m3u="C:/x.m3u")])
         store = TargetStore(path)
         store.load()
@@ -293,18 +293,18 @@ class TestCarteraDeFuentes:
     def test_sources_lee_la_cartera(self, tmp_path):
         service, _ = self._service(tmp_path)
         body = service.sources()
-        assert [s["name"] for s in body["sources"]] == ["platero"]
+        assert [s["name"] for s in body["sources"]] == ["principal"]
 
     def test_set_sources_reemplaza_y_conserva_ids(self, tmp_path):
         service, path = self._service(tmp_path)
         out = service.set_sources([
-            {"id": "a", "name": "platero", "kind": "m3u",
-             "location": "C:/platero.m3u"},
+            {"id": "a", "name": "principal", "kind": "m3u",
+             "location": "C:/listas/principal.m3u"},
             {"name": "guia", "kind": "epg", "location": "C:/tv.xml"},
         ])
         assert out["ok"] is True and out["errors"] == []
         nombres = sorted(s["name"] for s in out["sources"])
-        assert nombres == ["guia", "platero"]
+        assert nombres == ["guia", "principal"]
         assert service.sources()["sources"][0]["id"] == "a"
         assert "guia" in path.read_text(encoding="utf-8")
 
@@ -312,7 +312,7 @@ class TestCarteraDeFuentes:
         service, _ = self._service(tmp_path)
         out = service.set_sources([{"kind": "otro", "location": "x"}])
         assert out["errors"] and "error" in out
-        assert service.sources()["sources"][0]["name"] == "platero"
+        assert service.sources()["sources"][0]["name"] == "principal"
 
     def test_set_target_sources_resuelve_refs(self, tmp_path):
         service, _ = self._service(tmp_path)
@@ -350,4 +350,4 @@ class TestCarteraDeFuentes:
     def test_update_source_con_ubicacion_invalida(self, tmp_path):
         service, _ = self._service(tmp_path)
         assert "sin host" in service.update_source("a", location="http://")["error"]
-        assert service.sources()["sources"][0]["location"] == "C:/platero.m3u"
+        assert service.sources()["sources"][0]["location"] == "C:/listas/principal.m3u"

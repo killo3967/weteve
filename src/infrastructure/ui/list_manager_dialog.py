@@ -904,7 +904,7 @@ class EpgMappingWidget(QWidget):
             Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_row_menu)
         layout.addWidget(self.table)
-        # channel-id -> guía(s) que lo anuncian ('Doble_M', 'Koala'…). Vacío en
+        # channel-id -> guía(s) que lo anuncian ('guia-1', 'guia-2'…). Vacío en
         # fuentes con una sola guía o sin datos: entonces no hay sufijo.
         self._epg_lists: dict[str, tuple[str, ...]] = {}
         self._names: dict[str, str] = {}
@@ -983,7 +983,7 @@ class EpgMappingWidget(QWidget):
         Se listan la etiqueta limpia y el channel-id: en TV.xml ambos coinciden
         ('La1'), pero otras fuentes usan ids distintos del nombre ('es.la1') y
         poder pegar el id sigue siendo útil. Cuando la EPG es una unión de
-        guías, cada opción lleva la lista que la anuncia ('La 1 · Doble_M').
+        guías, cada opción lleva la lista que la anuncia ('La 1 · guia-1').
         """
         names = sorted({label for label in self._epg_labels if label})
         return ([DUMMY_LABEL] + names) if self._dummy_offered() else names

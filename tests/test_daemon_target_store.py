@@ -127,7 +127,7 @@ class TestTargetStoreSelections:
     def _con_cartera(self, path: Path) -> None:
         write_daemon(
             path,
-            sources=[source("aa", "platero", "m3u", "C:/listas/platero.m3u"),
+            sources=[source("aa", "principal", "m3u", "C:/listas/principal.m3u"),
                      source("bb", "TV", "epg", "C:/e.xml")],
             targets=[target("0", name="Existente",
                             m3u_sources=["aa"], epg_sources=["bb"],
@@ -142,7 +142,7 @@ class TestTargetStoreSelections:
         t = store.get("0")
         assert t is not None
         assert t.source_refs == (
-            SourceRef("aa", "platero", "C:/listas/platero.m3u"),)
+            SourceRef("aa", "principal", "C:/listas/principal.m3u"),)
         assert t.epg_refs == (SourceRef("bb", "TV", "C:/e.xml"),)
 
     def test_save_con_refs_persiste_selecciones(self, tmp_path: Path) -> None:
@@ -154,7 +154,7 @@ class TestTargetStoreSelections:
         assert base is not None
         t = dataclasses_replace(
             base,
-            source_refs=(SourceRef("aa", "platero", "C:/l.m3u"),),
+            source_refs=(SourceRef("aa", "principal", "C:/l.m3u"),),
             epg_refs=(SourceRef("bb", "TV", "C:/e.xml"),),
         )
         store.save("0", t, epg_path="/lists/existing.xml")

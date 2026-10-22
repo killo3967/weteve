@@ -287,7 +287,7 @@ class TestDialYLogoDeGuiasDistintas:
             channel_info={"k.la1": ChannelInfo(logo="http://koala/la1.png")},
         )
         ref_mv = SourceRef("m", "Movistar+", "movistar.xml", 10)
-        ref_koala = SourceRef("k", "Koala", "koala.xml", 0)
+        ref_koala = SourceRef("k", "guia-2", "koala.xml", 0)
         pipeline = ListManagerPipeline(
             m3u_repository=_FakeM3URepo(
                 [Channel("LA 1 HD", "http://s/la1", "General")]),

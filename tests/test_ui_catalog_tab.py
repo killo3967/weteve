@@ -16,7 +16,7 @@ FILAS = [
     {"id": "BBDRA", "name": "BBC Series", "code": "BBDRA", "dial": 32,
      "logo": "", "lists": ["Guía Movistar+"], "served": False},
     {"id": "UCL", "name": "UCL", "code": "UCL", "dial": 143,
-     "logo": "", "lists": ["Doble_M", "Guía Movistar+"], "served": False},
+     "logo": "", "lists": ["guia-1", "Guía Movistar+"], "served": False},
 ]
 
 

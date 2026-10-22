@@ -35,13 +35,13 @@ class TestCatalogoMcp:
     def test_add_y_list_sources(self, env):
         reg, _, _ = env
         out = _call(reg, "add_source", {
-            "name": "platero", "kind": "m3u",
+            "name": "principal", "kind": "m3u",
             "location": "http://s/l.m3u", "refresh_min": 30,
         })
         assert "id" in out and out.get("error") is None
         listing = _call(reg, "list_sources", {})["sources"]
         assert len(listing) == 1
-        assert listing[0]["name"] == "platero"
+        assert listing[0]["name"] == "principal"
         assert listing[0]["kind"] == "m3u"
         assert listing[0]["refresh_min"] == 30
 

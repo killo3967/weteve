@@ -10,9 +10,10 @@ Cuatro fases (especificación: odd/tasks/list-manager.md):
      ganador necesita margen sobre el segundo candidato.
 
 Las cuatro fases existen porque cada guía bautiza al mismo canal a su manera:
-la lista IPTV dice ``M+ LaLigaTVHD``, Koala ``M+ LALIGA TV HD``, Doble_M
-``M+ LaLiga`` y la guía de Movistar+ ``M+ LALIGA`` (código ``MLIGA``, dial
-54). Sin el parecido por marca, ese canal son cuatro canales distintos.
+la lista del proveedor escribe ``LA LIGA TV HD``, una guía lo anuncia como
+``LALIGA TV HD``, otra como ``LaLiga`` y la guía de la parrilla como
+``LA LIGA`` (código propio, dial 54). Sin el parecido por marca, ese canal son
+cuatro canales distintos.
 
 Sin match: el canal queda sin EPG y el editor manual puede asignarlo mediante
 ``epg_overrides`` (persistidos con prioridad sobre el automático).
@@ -160,7 +161,7 @@ class EpgMatcher:
         self._con_metadatos = set(info)
         # Canónicos: solo los ids que publican DIAL. Las guías XMLTV traen
         # logo (channel_info) pero no número; tomarlas por canónicas partía la
-        # identidad en dos: "CUATRO HD" (Koala) y "C4" (Movistar) son el mismo
+        # identidad en dos: "CUATRO HD" (una guía) y "C4" (otra) son el mismo
         # canal y el número solo lo da la segunda.
         self._canonicos = {cid for cid, meta in info.items()
                            if meta.dial is not None}

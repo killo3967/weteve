@@ -57,11 +57,11 @@ Límite de página: 1000. Todas las lecturas salen del snapshot; solo `run` y
 
 ```json
 {"channels": [
-  {"identity": "MLIGA", "dial": 54, "display": "M+ LALIGA", "logo": "MLIGA.png"}
+  {"identity": "COD1", "dial": 54, "display": "Canal Uno", "logo": "COD1.png"}
 ]}
 ```
 
-- `identity` es la clave de la ficha (`MLIGA`, `url-<hash>`, `name-<base>`).
+- `identity` es la clave de la ficha (`COD1`, `url-<hash>`, `name-<base>`).
 - Campo ausente = no se toca. `null`/`""` = vuelve al automático.
 - `logo` acepta **nombre** de `assets/logos`, **ruta** a una imagen (se copia) o
   **URL http(s)** (se descarga y se guarda).
@@ -89,7 +89,7 @@ Ejemplo mínimo:
 ```json
 {"jsonrpc":"2.0","id":2,"method":"tools/call",
  "params":{"name":"modify_channels","arguments":{"target_id":"0",
-   "channels":[{"identity":"MLIGA","display":"M+ LALIGA"}]}}}
+   "channels":[{"identity":"COD1","display":"Canal Uno"}]}}}
 ```
 
 ## Campos de `/status` por perfil

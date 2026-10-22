@@ -459,7 +459,7 @@ class ListManagerPipeline:
         salen los programas (un mapeo manual manda sobre esto) y
         ``canonical_id`` dice de qué canal estamos hablando (dial, logo y
         agrupación de variantes). Antes las dos se contestaban con el mismo
-        id, y por eso un mapeo a Koala dejaba el canal sin dial.
+        id, y por eso un mapeo a otra guía dejaba el canal sin dial.
 
         La cache se invalida cuando cambian los mapeos (la firma los incluye),
         así que guardar el id del mapeo dentro no la deja obsoleta.

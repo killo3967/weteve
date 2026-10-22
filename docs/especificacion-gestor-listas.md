@@ -23,7 +23,7 @@ demonio hace el trabajo y una ventana de escritorio lo configura.
    exacto → nombre normalizado exacto (sin acentos ni mayúsculas) → nombre base
    sin la etiqueta de calidad (`LA 1 HD` es `LA 1`) → parecido por palabras de
    marca, con dos reglas duras: el sufijo numérico tiene que coincidir
-   (`M+ LaLiga 2` no es `M+ LaLiga`) y el ganador necesita margen sobre el
+   (`LaLiga 2` no es `LaLiga`) y el ganador necesita margen sobre el
    segundo candidato. Cada canal tiene además una **identidad única** —el canal
    del proveedor, con su dial y su logo— aunque su parrilla venga de otra guía;
    de los duplicados se sirve una variante según la prioridad de calidad. Los

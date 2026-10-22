@@ -127,7 +127,7 @@ class TestEpgMappingTable:
         from types import SimpleNamespace
         return SimpleNamespace(
             channel_names={"es.la1": "La 1", "es.clan": "Clan"},
-            epg_lists={"es.la1": ["Doble_M"], "es.clan": ["Doble_M", "Koala"]})
+            epg_lists={"es.la1": ["guia-1"], "es.clan": ["guia-1", "guia-2"]})
 
     def test_desplegable_dice_de_que_guia_viene_cada_canal(self, qtbot, dialog):
         """Con varias guías el nombre del canal solo no identifica la fuente."""
@@ -137,15 +137,15 @@ class TestEpgMappingTable:
         combo = w.table.cellWidget(0, w.COL_EPG)
         texts = combo._combo.ensure_items() or [combo._combo.itemText(i)
                                                for i in range(combo._combo.count())]
-        assert "La 1 · Doble_M" in texts
-        assert "Clan · Doble_M + Koala" in texts
+        assert "La 1 · guia-1" in texts
+        assert "Clan · guia-1 + guia-2" in texts
 
     def test_override_persistido_se_ve_con_su_lista(self, qtbot, dialog):
         w = self._widget(qtbot, dialog)
         w.set_epg(self._epg_con_listas())
         w.load_unmatched(self._channels(), {"http://s/raro": "es.clan"})
         combo = w.table.cellWidget(1, w.COL_EPG)
-        assert combo.current_value() == "Clan · Doble_M + Koala"
+        assert combo.current_value() == "Clan · guia-1 + guia-2"
 
     def test_el_sufijo_no_rompe_la_asignacion(self, qtbot, dialog):
         """La etiqueta visible lleva sufijo; el fichero guarda el channel-id."""
@@ -153,7 +153,7 @@ class TestEpgMappingTable:
         w.set_epg(self._epg_con_listas())
         w.load_unmatched(self._channels(), {})
         combo = w.table.cellWidget(0, w.COL_EPG)
-        combo._combo.setCurrentText("Clan · Doble_M + Koala")
+        combo._combo.setCurrentText("Clan · guia-1 + guia-2")
         assert w.get_overrides() == {"http://s/la1": "es.clan"}
 
     def test_sin_datos_de_lista_no_hay_sufijo(self, qtbot, dialog):

@@ -71,7 +71,7 @@ ordena por la API.
 ## Puesta en marcha
 
 ```powershell
-cd K:\weteve
+cd <ruta-del-proyecto>
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt

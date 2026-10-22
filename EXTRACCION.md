@@ -9,11 +9,11 @@ Fecha: 2026-10-08. Origen: `K:/IPTVViewer` (commit `dca2a0b`). El código se
 
 ## Qué se ha hecho
 
-1. **Creado `K:\weteve`** como aplicación independiente con la misma estructura
+1. **Creado `<ruta-del-proyecto>`** como aplicación independiente con la misma estructura
    de paquetes (`src/application`, `src/domain`, `src/infrastructure`) para que
    los imports `from src....` funcionen sin reescritura.
 
-2. **Copiado a `K:\weteve\src\`**:
+2. **Copiado a `<ruta-del-proyecto>\src\`**:
    - `application/services/list_manager/` — pipeline completo (models,
      filter_engine, epg_matcher, pipeline, playlist_builder)
    - `infrastructure/ui/list_manager_dialog.py` — wizard Qt (3 pasos + web)
@@ -23,11 +23,11 @@ Fecha: 2026-10-08. Origen: `K:/IPTVViewer` (commit `dca2a0b`). El código se
    - `domain/entities/` (channel, epg, playlist) y `domain/ports/` (i_epg_repo,
      i_playlist_repo) — compartidos con el visor, copiados para desacoplar
 
-3. **Copiado a `K:\weteve\tests\`**: los 4 ficheros de test del gestor
+3. **Copiado a `<ruta-del-proyecto>\tests\`**: los 4 ficheros de test del gestor
    (`test_list_manager_{epg_matcher,filter_engine,pipeline,server}.py`) y los
    fixtures (`tests/fixtures/list_manager/`).
 
-4. **Copiado a `K:\weteve\docs\`**: `list-manager.md` (spec odd/tasks) y
+4. **Copiado a `<ruta-del-proyecto>\docs\`**: `list-manager.md` (spec odd/tasks) y
    `especificacion-gestor-listas.md` (referencia Diataxis).
 
 5. **Eliminado de IPTVViewer** (mismo código, ya está aquí):
@@ -89,7 +89,7 @@ pytest/pytest-qt (dev), ruff/mypy (dev).
 ## Cómo continuar el desarrollo
 
 ```powershell
-cd K:\weteve
+cd <ruta-del-proyecto>
 .venv\Scripts\activate      # venv ya creado con las dependencias instaladas
 pytest tests/ -q            # suite en verde (salvo flakes loopback)
 python main.py              # arranca el wizard

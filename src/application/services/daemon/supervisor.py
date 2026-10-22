@@ -637,8 +637,8 @@ class TargetSupervisor:
                 result = self._results.get(target_id)
                 if result is not None:
                     # «En la lista» va por identidad: el canal canónico cuenta
-                    # aunque su parrilla venga de otra guía (un mapeo a Koala
-                    # dejaba el canal de Movistar como si no estuviera).
+                    # aunque su parrilla venga de otra guía (un mapeo a otra guía
+                    # dejaba el canal canónico como si no estuviera).
                     servidos = {c.matched_epg_id for c in result.channels
                                 if c.matched_epg_id}
                     servidos |= {c.canonical_id for c in result.channels

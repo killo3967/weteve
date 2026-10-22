@@ -21,7 +21,7 @@ from src.infrastructure.client.persistencia import load_config
 
 def _seed(path: Path) -> None:
     write_daemon(path, targets=[target(
-        "0", name="test", custom_m3u="C:/l/platero.m3u",
+        "0", name="test", custom_m3u="C:/l/principal.m3u",
         custom_epg="C:/e/TV.xml", epg_source=-1,
         rules=["group-title:Spain:0:and"], port=8080, bind="127.0.0.1")])
 
@@ -36,7 +36,7 @@ def _save(path: Path, **kw) -> None:
     store.load()
     target_obj = PipelineTarget(
         name=kw.get("name", "test"),
-        source_index=kw.get("m3u", "C:/l/platero.m3u"),
+        source_index=kw.get("m3u", "C:/l/principal.m3u"),
         rules=kw.get("rules", ()),
         epg_overrides=dict(kw.get("overrides", {})),
         disabled_channels=tuple(kw.get("disabled", ())),
@@ -54,18 +54,18 @@ class TestLoadConfigLegacy:
         _seed(path)
         cfg = load_config(path)
         t = cfg["targets"][0]
-        assert t["custom_m3u"] == "C:/l/platero.m3u"
+        assert t["custom_m3u"] == "C:/l/principal.m3u"
         assert t["m3u_refs"] == [] and t["epg_refs"] == []
 
     def test_selecciones_cargan_como_refs_con_location(self, tmp_path):
         path = tmp_path / "daemon.toml"
         write_daemon(path,
-                     sources=[source("aa", "platero", "m3u",
+                     sources=[source("aa", "principal", "m3u",
                                      "http://s/l.m3u", refresh_min=30)],
                      targets=[target("0", m3u_sources=["aa"])])
         cfg = load_config(path)
         assert cfg["targets"][0]["m3u_refs"] == [
-            SourceRef("aa", "platero", "http://s/l.m3u")
+            SourceRef("aa", "principal", "http://s/l.m3u")
         ]
 
 
@@ -73,11 +73,11 @@ class TestGuardadoSelecciones:
     def test_save_persiste_y_conserva(self, tmp_path):
         path = tmp_path / "daemon.toml"
         write_daemon(path,
-                     sources=[source("aa", "platero", "m3u", "C:/l.m3u"),
+                     sources=[source("aa", "principal", "m3u", "C:/l.m3u"),
                               source("bb", "secunda", "m3u", "C:/s.m3u")],
                      targets=[target("0")])
 
-        _save(path, refs=(SourceRef("aa", "platero", "C:/l.m3u"),
+        _save(path, refs=(SourceRef("aa", "principal", "C:/l.m3u"),
                           SourceRef("bb", "secunda", "C:/s.m3u")),
               rules=(FilterRule.parse("group-title:Spain:0:and"),))
 

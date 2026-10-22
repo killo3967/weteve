@@ -66,9 +66,9 @@ class TestUnionDeFuentes:
                          Channel("Antena", "http://b/3", "General")],
         })
         p.register_merged("merged",
-                          (SourceRef("s1", "platero", "C:/a.m3u"),
+                          (SourceRef("s1", "principal", "C:/a.m3u"),
                            SourceRef("s2", "secunda", "C:/b.m3u")), ())
-        res = p.run(_target((SourceRef("s1", "platero", "C:/a.m3u"),
+        res = p.run(_target((SourceRef("s1", "principal", "C:/a.m3u"),
                              SourceRef("s2", "secunda", "C:/b.m3u"))))
         assert res.total_input == 3
         assert [c.name for c in res.channels] == ["La 1", "La 2", "Antena"]
@@ -80,18 +80,18 @@ class TestUnionDeFuentes:
             "C:/a.m3u": [Channel("La 1", "http://a/1", "General")],
             "C:/b.m3u": [Channel("La 1", "http://b/1", "General")],
         })
-        refs = (SourceRef("s1", "platero", "C:/a.m3u"),
+        refs = (SourceRef("s1", "principal", "C:/a.m3u"),
                 SourceRef("s2", "secunda", "C:/b.m3u"))
         p.register_merged("merged", refs, ())
         res = p.run(_target(refs))
-        assert [c.source_name for c in res.channels] == ["platero", "secunda"]
+        assert [c.source_name for c in res.channels] == ["principal", "secunda"]
 
     def test_campo_de_agrupacion_source_expone_la_lista(self):
         """El filtro 'Lista' lee groups['source'], igual que tvg-group."""
         p = _pipeline({"C:/a.m3u": [Channel("La 1", "http://a/1", "General")]})
-        p.register_merged("merged", (SourceRef("s1", "platero", "C:/a.m3u"),), ())
+        p.register_merged("merged", (SourceRef("s1", "principal", "C:/a.m3u"),), ())
         ch = p._channels_of("merged")[0]
-        assert ch.groups.get("source") == ["platero"]
+        assert ch.groups.get("source") == ["principal"]
 
     def test_sin_refs_se_mantiene_el_flujo_antiguo(self):
         """Regresión: register_source(index, path, epg) intacto."""
@@ -105,24 +105,24 @@ class TestUnionDeFuentes:
         p = _pipeline({"C:/a.m3u": [Channel("A", "http://s/1", "General")]})
         # s2 no existe en el repo: su lista queda vacía pero no explota
         p.register_merged("merged",
-                          (SourceRef("s1", "platero", "C:/a.m3u"),
+                          (SourceRef("s1", "principal", "C:/a.m3u"),
                            SourceRef("s2", "fantasma", "C:/x.m3u")), ())
-        res = p.run(_target((SourceRef("s1", "platero", "C:/a.m3u"),)))
+        res = p.run(_target((SourceRef("s1", "principal", "C:/a.m3u"),)))
         assert res.total_input == 1
 
     def test_filtro_excluye_por_lista(self):
-        """Regla 'Lista' funcional: custom-filter:-{platero} deja fuera su lista."""
+        """Regla 'Lista' funcional: custom-filter:-{principal} deja fuera su lista."""
         from src.application.services.list_manager.models import FilterRule
         p = _pipeline({
             "C:/a.m3u": [Channel("La 1", "http://a/1", "General")],
             "C:/b.m3u": [Channel("Antena", "http://b/1", "General")],
         })
-        refs = (SourceRef("s1", "platero", "C:/a.m3u"),
+        refs = (SourceRef("s1", "principal", "C:/a.m3u"),
                 SourceRef("s2", "secunda", "C:/b.m3u"))
         p.register_merged("merged", refs, ())
         t = PipelineTarget(
             name="t", source_index="merged", source_refs=refs,
-            rules=(FilterRule.parse("source:!{platero}:0"),),
+            rules=(FilterRule.parse("source:!{principal}:0"),),
         )
         res = p.run(t)
         assert [c.name for c in res.channels] == ["Antena"]
@@ -136,7 +136,7 @@ class TestEpgFusionada:
             {"C:/g1.xml": _epg("La 1", "es.la1"),
              "C:/g2.xml": _epg("Antena 3", "es.a3")},
         )
-        refs = (SourceRef("s1", "platero", "C:/a.m3u"),)
+        refs = (SourceRef("s1", "principal", "C:/a.m3u"),)
         epg_refs = (SourceRef("e1", "guia1", "C:/g1.xml"),
                     SourceRef("e2", "guia2", "C:/g2.xml"))
         p.register_merged("merged", refs, epg_refs)
@@ -147,8 +147,8 @@ class TestEpgFusionada:
 
     def test_sin_epg_refs_y_sin_epg_legacy_no_casa(self):
         p = _pipeline({"C:/a.m3u": [Channel("A", "http://s/1", "General")]})
-        p.register_merged("merged", (SourceRef("s1", "platero", "C:/a.m3u"),), ())
-        res = p.run(_target((SourceRef("s1", "platero", "C:/a.m3u"),)))
+        p.register_merged("merged", (SourceRef("s1", "principal", "C:/a.m3u"),), ())
+        res = p.run(_target((SourceRef("s1", "principal", "C:/a.m3u"),)))
         assert res.unmatched == ["A"]
 
     def test_canal_con_override_manual_por_url_sigue_funcionando(self):
@@ -156,7 +156,7 @@ class TestEpgFusionada:
             {"C:/a.m3u": [Channel("Raro", "http://a/1", "General")]},
             {"C:/g.xml": _epg("La 1", "es.la1")},
         )
-        refs = (SourceRef("s1", "platero", "C:/a.m3u"),)
+        refs = (SourceRef("s1", "principal", "C:/a.m3u"),)
         epg_refs = (SourceRef("e1", "guia", "C:/g.xml"),)
         p.register_merged("merged", refs, epg_refs)
         t = PipelineTarget(name="t", source_index="merged", source_refs=refs,
@@ -173,12 +173,12 @@ class TestEpgFusionada:
             {"C:/g1.xml": _epg("La 1", "es.la1"),
              "C:/g2.xml": _epg("Antena 3", "es.a3")},
         )
-        refs = (SourceRef("s1", "platero", "C:/a.m3u"),)
-        epg_refs = (SourceRef("e1", "Doble_M", "C:/g1.xml"),
-                    SourceRef("e2", "Koala", "C:/g2.xml"))
+        refs = (SourceRef("s1", "principal", "C:/a.m3u"),)
+        epg_refs = (SourceRef("e1", "guia-1", "C:/g1.xml"),
+                    SourceRef("e2", "guia-2", "C:/g2.xml"))
         p.register_merged("merged", refs, epg_refs)
-        assert p.epg_lists("merged") == {"es.la1": ("Doble_M",),
-                                        "es.a3": ("Koala",)}
+        assert p.epg_lists("merged") == {"es.la1": ("guia-1",),
+                                        "es.a3": ("guia-2",)}
 
     def test_id_anunciado_por_dos_guias_lista_las_dos(self):
         p = _pipeline(
@@ -186,8 +186,8 @@ class TestEpgFusionada:
             {"C:/g1.xml": _epg("La 1", "es.la1"),
              "C:/g2.xml": _epg("La 1 HD", "es.la1")},
         )
-        refs = (SourceRef("s1", "platero", "C:/a.m3u"),)
-        epg_refs = (SourceRef("e1", "Doble_M", "C:/g1.xml"),
-                    SourceRef("e2", "Koala", "C:/g2.xml"))
+        refs = (SourceRef("s1", "principal", "C:/a.m3u"),)
+        epg_refs = (SourceRef("e1", "guia-1", "C:/g1.xml"),
+                    SourceRef("e2", "guia-2", "C:/g2.xml"))
         p.register_merged("merged", refs, epg_refs)
-        assert p.epg_lists("merged")["es.la1"] == ("Doble_M", "Koala")
+        assert p.epg_lists("merged")["es.la1"] == ("guia-1", "guia-2")

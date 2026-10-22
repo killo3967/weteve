@@ -2,7 +2,7 @@
 
 Cada guía bautiza al mismo canal a su manera. El pipeline tiene que servir una
 sola variante, con el dial real y con los programas que haya elegido el mapeo,
-que puede apuntar a una guía sin dial (Koala, Doble_M).
+que puede apuntar a una guía sin dial (guia-2, guia-1).
 """
 
 from datetime import datetime, timedelta
@@ -34,7 +34,7 @@ class _FakeEpgRepo:
 
 
 def _guia() -> EPGData:
-    """Tres guías en una: Movistar+ (con dial), Koala y Doble_M (sin dial)."""
+    """Tres guías en una: Movistar+ (con dial), guia-2 y guia-1 (sin dial)."""
     nombres = {
         "MLIGA": "M+ LALIGA",
         "MLIG1": "M+ LALIGA 2",

@@ -27,17 +27,17 @@ from src.infrastructure.client.config_toml import (
     target_to_dict,
 )
 
-INIVIEJO = Path("K:/weteve/config.ini")
+INIVIEJO = Path(__file__).resolve().parents[1] / "config.ini"
 
 
 def _config() -> dict:
     return {
         "version": SCHEMA_VERSION,
         "sources": [
-            {"id": "s1", "name": "platero", "kind": "m3u",
-             "source_type": "file", "location": "C:/listas/platero.m3u",
+            {"id": "s1", "name": "principal", "kind": "m3u",
+             "source_type": "file", "location": "C:/listas/principal.m3u",
              "refresh_min": 0, "enabled": True},
-            {"id": "e1", "name": "Doble_M", "kind": "epg",
+            {"id": "e1", "name": "guia-1", "kind": "epg",
              "source_type": "url",
              "location": "https://x/master/guiatv.xml",
              "refresh_min": 1440, "enabled": False},

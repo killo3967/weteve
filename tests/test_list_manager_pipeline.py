@@ -181,12 +181,12 @@ class TestBuildM3U:
         assert 'tvg-chno="7"' in out
 
     def test_nombre_sin_prefijo_de_lista(self):
-        ch = MappedChannel("LA 1 HD", "http://s/la1", source_name="platero2026",
+        ch = MappedChannel("LA 1 HD", "http://s/la1", source_name="principal",
                            chno=1)
         out = build_m3u([ch])
         assert out.rstrip().endswith("http://s/la1")
         assert ",LA 1 HD" in out
-        assert "platero2026" not in out
+        assert "principal" not in out
 
 
 class TestBuildXmltv:

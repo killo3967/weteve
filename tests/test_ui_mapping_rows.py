@@ -125,14 +125,14 @@ class TestCanalesYaServidos:
     def test_por_defecto_se_piden_tambien_los_servidos(self, dialog, fake_api):
         fake_api.served_channels = [self._servido()]
         fake_api.epg = [{"id": "La 1 HD", "display_name": "La 1 HD",
-                         "lists": ["Doble_M"]}]
+                         "lists": ["guia-1"]}]
         dialog._refresh_mapping()
         assert fake_api.last_include_served is True
         assert _rows(dialog) == ["LA 1 HD"]
         combo = dialog.epg_mapping.table.cellWidget(
             0, dialog.epg_mapping.COL_EPG)
         # se ve la guía efectiva, no una celda vacía
-        assert combo.current_value() == "La 1 HD · Doble_M"
+        assert combo.current_value() == "La 1 HD · guia-1"
 
     def test_la_casilla_filtra_los_que_ya_sirven(self, dialog, fake_api):
         fake_api.served_channels = [self._servido()]

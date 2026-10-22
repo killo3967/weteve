@@ -9,7 +9,7 @@ from src.application.services.list_manager.source_catalog import (
 
 
 def _entry(**kw):
-    base = dict(id="a1", name="platero", kind="m3u", source_type="file",
+    base = dict(id="a1", name="principal", kind="m3u", source_type="file",
                 location="C:/x.m3u", refresh_min=60, enabled=True)
     base.update(kw)
     return SourceEntry(**base)
@@ -25,7 +25,7 @@ class TestSourceEntry:
     def test_with_updates_no_mut_original(self):
         e = _entry()
         renamed = e.with_updates(name="otro")
-        assert e.name == "platero" and renamed.name == "otro"
+        assert e.name == "principal" and renamed.name == "otro"
         assert renamed.id == e.id
 
     def test_new_source_id_es_unico_y_estable_en_formato(self):

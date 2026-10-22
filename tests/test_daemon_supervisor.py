@@ -302,7 +302,7 @@ class TestCatalogoPorIdentidad:
         return sup
 
     def test_el_canal_mapeado_a_otra_guia_cuenta_como_servido(self):
-        """El mapeo apunta a Koala; el canal de Movistar sigue en la lista."""
+        """El mapeo apunta a guia-2; el canal de Movistar sigue en la lista."""
         sup = self._supervisor()
         target = PipelineTarget(name="t", source_index="0",
                                 epg_overrides={"http://x/1": "M+ LALIGA TV HD"})

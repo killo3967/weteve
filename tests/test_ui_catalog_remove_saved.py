@@ -22,9 +22,9 @@ def _seed(path: Path) -> None:
 
     write_daemon(
         path,
-        sources=[source("aaa", "platero2026", "m3u", "C:/platero.m3u"),
+        sources=[source("aaa", "principal", "m3u", "C:/listas/principal.m3u"),
                  source("bbb", "abilio", "m3u", "http://")],
-        targets=[target("0", name="test", custom_m3u="C:/platero.m3u",
+        targets=[target("0", name="test", custom_m3u="C:/listas/principal.m3u",
                         m3u_sources=["aaa"], port=9999)])
 
 
@@ -38,8 +38,8 @@ def dialog(qtbot, tmp_path, monkeypatch):
     _seed(path)
     d = ListManagerDialog(None, config={
         "target_id": "0", "_config_path": path, "name": "test",
-        "custom_m3u": "C:/platero.m3u", "port": 9999,
-        "m3u_refs": [SourceRef("aaa", "platero2026", "C:/platero.m3u")],
+        "custom_m3u": "C:/listas/principal.m3u", "port": 9999,
+        "m3u_refs": [SourceRef("aaa", "principal", "C:/listas/principal.m3u")],
     })
     qtbot.addWidget(d)
     d._config_watch.stop()  # el refresco desde disco no participa aquí
@@ -60,7 +60,7 @@ class TestQuitarListaYGuardar:
         dialog._on_save()
         enviado = [c for c in fake_api.calls if c[0] == "sources"][-1]
         names = [e["name"] for e in enviado[1] if e["kind"] == "m3u"]
-        assert names == ["platero2026"]
+        assert names == ["principal"]
 
     def test_la_lista_activa_sigue_seleccionada(self, dialog, fake_api):
         """Quitar otra fila no puede deseleccionar la lista del target."""

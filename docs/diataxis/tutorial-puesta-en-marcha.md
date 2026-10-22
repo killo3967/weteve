@@ -11,7 +11,7 @@ y la ventana para configurarla.
 ## 2. Instalar
 
 ```bat
-cd K:\weteve
+cd <ruta-del-proyecto>
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 ```

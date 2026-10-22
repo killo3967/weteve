@@ -229,7 +229,7 @@ class TestCanonicoSoloConDial:
 
     Las guías XMLTV traen ``channel_info`` con el icono pero sin dial. Si se
     tomaran por canónicas, el mismo canal quedaría partido en dos identidades
-    ("CUATRO HD" por Koala, "C4" por Movistar) y se serviría dos veces.
+    ("CUATRO HD" por guia-2, "C4" por Movistar) y se serviría dos veces.
     """
 
     def test_una_guia_con_logo_pero_sin_dial_no_es_canonica(self):

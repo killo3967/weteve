@@ -67,7 +67,7 @@ version = 2
 
 ```toml
 [targets.overrides]
-"http://proveedor/canal/3849" = "M+ LALIGA TV HD"
+"http://proveedor/canal/3849" = "Canal Uno HD"
 ```
 
 El valor es un channel-id del XMLTV (o `weteve-dummy-…`). Tiene prioridad sobre
@@ -81,19 +81,19 @@ van a la ficha del canal.
 ### `[targets.channels."<identidad>"]` — la ficha del canal
 
 ```toml
-[targets.channels."MLIGA"]
+[targets.channels."COD1"]
 dial    = 54
-display = "M+ LALIGA"
-logo    = "MLIGA.png"
-epg     = "M+ LALIGA"         # guía fijada a mano (channel-id o Dummy 1h)
+display = "Canal Uno"
+logo    = "COD1.png"
+epg     = "Canal Uno"         # guía fijada a mano (channel-id o Dummy 1h)
 enabled = false               # apagado a mano
-alias   = "M+ LaLigaTVHD"     # nombre interno con el que se vio
+alias   = "CANAL UNO HD"      # nombre interno con el que se vio
 
 [targets.channels."url-0df14a8e7a69"]
 logo = "Odisea.png"
 ```
 
-- Clave: el código de guía (`MLIGA`) o, si no lo hay, `url-<hash>` / `name-<base>`.
+- Clave: el código de guía (`COD1`) o, si no lo hay, `url-<hash>` / `name-<base>`.
 - **Todo lo que decide el usuario vive aquí**: número, nombre, logo, guía y
   apagado. La identidad sobrevive a que el proveedor cambie la dirección del
   canal; una decisión guardada por url se perdería en el siguiente cambio de

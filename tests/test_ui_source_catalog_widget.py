@@ -12,7 +12,7 @@ from src.infrastructure.ui.source_catalog_widget import SourceCatalogWidget
 pytest.importorskip("PyQt6")
 
 
-def _entry(eid="a", name="platero", kind="m3u", stype="url",
+def _entry(eid="a", name="principal", kind="m3u", stype="url",
            loc="http://s/l.m3u", refresh=30, enabled=True):
     return SourceEntry(eid, name, kind, stype, loc, refresh, enabled)
 
@@ -23,7 +23,7 @@ class TestSourceCatalogWidget:
                                 catalog=SourceCatalog([_entry()]))
         qtbot.addWidget(w)
         assert w.table.rowCount() == 1
-        assert w.table.item(0, 0).text() == "platero"
+        assert w.table.item(0, 0).text() == "principal"
         assert w.table.item(0, 1).text() == "URL remota"
         assert w.table.item(0, 2).text() == "http://s/l.m3u"
         assert w.table.item(0, 3).text() == "30"

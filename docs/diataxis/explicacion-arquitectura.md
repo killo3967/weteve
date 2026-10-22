@@ -58,8 +58,8 @@ se **anuncia** la IP de la red, porque `0.0.0.0` no es una dirección de destino
 
 ### Identidad del canal
 
-Cada guía bautiza al mismo canal a su manera (`M+ LaLigaTVHD`, `M+ LALIGA TV HD`,
-`M+ LaLiga`, `M+ LALIGA`). La identidad se resuelve contra la guía que **publica
+Cada guía bautiza al mismo canal a su manera (`LaLigaTVHD`, `LALIGA TV HD`,
+`LaLiga`, `LA LIGA`). La identidad se resuelve contra la guía que **publica
 dial** (solo algunas guías lo publican) con un casador por marca: el sufijo
 numérico tiene
 que coincidir y el ganador necesita margen. Las guías XMLTV solo traen logo, y

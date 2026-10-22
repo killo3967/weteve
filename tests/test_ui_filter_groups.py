@@ -315,15 +315,15 @@ class TestCampoLista:
                 self.groups = groups
         from src.application.services.list_manager.models import SourceRef
         pl = ListManagerPipeline(m3u_repository=_Repo())
-        pl.register_merged("m", (SourceRef("s1", "platero", "x.m3u"),), ())
+        pl.register_merged("m", (SourceRef("s1", "principal", "x.m3u"),), ())
         fields = pl.get_group_fields("m")
-        assert fields["source"] == ["platero"]
+        assert fields["source"] == ["principal"]
 
     def test_combo_incluye_lista(self, qtbot, rules_widget):
         """El combo Campo ofrece 'Lista' cuando el pipeline la expone."""
         rules_widget._dialog = type("D", (), {
             "available_group_fields": staticmethod(lambda: {
-                "group-title": ["A"], "source": ["platero"]}),
+                "group-title": ["A"], "source": ["principal"]}),
         })()
         rules_widget._fill_field_combo(rules_widget._field_combo) \
             if hasattr(rules_widget, "_field_combo") else None

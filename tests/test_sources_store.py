@@ -16,8 +16,8 @@ from src.infrastructure.client.sources_store import load_catalog, save_catalog
 
 
 def _entry(**kw) -> SourceEntry:
-    base = dict(id="abc123", name="platero", kind="m3u", source_type="file",
-                location="C:/listas/platero.m3u", refresh_min=60,
+    base = dict(id="abc123", name="principal", kind="m3u", source_type="file",
+                location="C:/listas/principal.m3u", refresh_min=60,
                 enabled=True)
     base.update(kw)
     return SourceEntry(**base)
@@ -30,7 +30,7 @@ class TestRoundTrip:
     def test_save_y_load_conservan_todos_los_campos(self, tmp_path):
         cfg = write_daemon(tmp_path / "daemon.toml")
         cat = SourceCatalog([
-            _entry(id="a", name="platero", refresh_min=60),
+            _entry(id="a", name="principal", refresh_min=60),
             _entry(id="b", name="guias", kind="epg", source_type="url",
                    location="http://e/x.xml.gz", refresh_min=0, enabled=False),
         ])
@@ -51,7 +51,7 @@ class TestRoundTrip:
 
     def test_ubicacion_con_espacios_y_unicode(self, tmp_path):
         cfg = write_daemon(tmp_path / "daemon.toml")
-        loc = "C:/Users/tomas/Downloads/Lista España 2026.m3u"
+        loc = "C:/listas/Lista de ejemplo.m3u"
         save_catalog(cfg, SourceCatalog([_entry(id="a", location=loc)]))
         assert load_catalog(cfg).get("a").location == loc
 

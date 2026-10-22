@@ -24,17 +24,17 @@ version = 2
 # ---------------------------------------------------------------------------
 
 [[sources]]
-id = "7dd4d840b120"
-name = "platero2026"
+id = "lista-1"
+name = "principal"
 kind = "m3u"
 source_type = "file"                  # "file" o "url" (informativo)
-location = "C:/Users/tomas/Downloads/platero2026.m3u"
+location = "C:/listas/principal.m3u"
 refresh_min = 0                       # 0 = estática; si no, minutos entre recargas
 enabled = true
 
 [[sources]]
-id = "a33499effccd"
-name = "Doble_M"
+id = "guia-1"
+name = "guia-1"
 kind = "epg"
 source_type = "url"
 location = "https://ejemplo.net/guia/master/guiatv.xml"
@@ -42,11 +42,11 @@ refresh_min = 1440                    # una vez al día
 enabled = true
 
 [[sources]]
-id = "82a9f9cfacc3"
-name = "Koala"
+id = "guia-2"
+name = "guia-2"
 kind = "epg"
 source_type = "url"
-location = "https://ejemplo.net/epg/koala7.xml.gz"
+location = "https://ejemplo.net/epg/guia2.xml.gz"
 refresh_min = 1440
 enabled = true
 
@@ -64,8 +64,8 @@ bind = "127.0.0.1"                    # legado: 127.0.0.1 u 0.0.0.0
 starting_number = 1                   # primer tvg-chno
 
 # Fuentes que aporta este target (ids de la cartera; se unen)
-m3u_sources = ["7dd4d840b120"]
-epg_sources = ["a33499effccd", "82a9f9cfacc3"]
+m3u_sources = ["lista-1"]
+epg_sources = ["guia-1", "guia-2"]
 
 # Campos de fuente única (legado). Si rellenas `m3u_sources`/`epg_sources`,
 # estos se ignoran; se conservan para no perder configuraciones antiguas.

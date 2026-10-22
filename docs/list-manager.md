@@ -182,18 +182,18 @@ La UI nunca pide esa sintaxis: ofrece filas "campo = [grupo|nombre] contains [te
    puntuación → colapsar espacios.
 2. Match 1º por `tvg-id` exacto (canal vs canal del XMLTV).
 3. Fallback por nombre normalizado exacto y por nombre base, sin la etiqueta de
-   calidad —también cuando el proveedor la pega al nombre (`M+ LaLigaTVHD`,
-   `M+ #VAMOSHD`)—.
+   calidad —también cuando el proveedor la pega al nombre (`LaLigaTVHD`,
+   `#VAMOSHD`)—.
 4. Fallback por parecido de marca: se comparan las palabras significativas
    (las variantes del nombre del operador son la misma marca, el sufijo `TV` no
-   distingue, `M+LCAMPEON4` es `M+ Liga de Campeones 4`, las anotaciones entre
+   distingue, `LIGACAMPEON4` es `Liga de Campeones 4`, las anotaciones entre
    paréntesis se ignoran). Dos reglas duras: el sufijo numérico tiene que
-   coincidir (`M+ LaLiga 2` no es `M+ LaLiga`) y el ganador necesita margen
+   coincidir (`LaLiga 2` no es `LaLiga`) y el ganador necesita margen
    sobre el segundo candidato.
 5. **Identidad del canal** (`canonical_id`): el id de la guía que publica dial y
    logo, resuelto aparte del emparejamiento. Manda para el número, el logo y
    para agrupar variantes, aunque la parrilla venga de otra guía: un mapeo
-   manual a Koala ya no deja el canal sin dial. Dos nombres del mismo canal
+   manual a otra guía ya no deja el canal sin dial. Dos nombres del mismo canal
    (`BeMad tv HD` y `BE MAD HD`) se sirven una sola vez.
 6. Sin match: el canal **no se sirve** cuando el target tiene fuente EPG
    (`require_epg`), porque un canal sin guía es ruido en el reproductor. Se

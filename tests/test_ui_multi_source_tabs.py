@@ -38,7 +38,7 @@ class TestPestanasCartera:
         d = _dialog(qtbot, config_ini)
         w = d.catalog_m3u_widget
         w.add_row()
-        w.table.item(0, 0).setText("platero")
+        w.table.item(0, 0).setText("principal")
         w.table.item(0, 2).setText("http://s/l.m3u")
         w.set_selection([w.selected_ids()[0]])
         d._on_save()
@@ -70,7 +70,7 @@ class TestPestanasCartera:
         w = d.catalog_m3u_widget
         w.add_row()
         row = w.table.rowCount() - 1
-        w.table.item(row, 0).setText("platero")
+        w.table.item(row, 0).setText("principal")
         w.table.item(row, 2).setText("http://s/l.m3u")
         w.set_selection([w.selected_ids()[0]])  # fila activa del target
         bb = d.findChildren(QDialogButtonBox)[0]
@@ -78,7 +78,7 @@ class TestPestanasCartera:
         wait_save(d)
 
         cartera = [c for c in fake_api.calls if c[0] == "sources"][-1][1]
-        assert [e["name"] for e in cartera] == ["platero"]
+        assert [e["name"] for e in cartera] == ["principal"]
         assert cartera[0]["kind"] == "m3u"
         seleccion = [c for c in fake_api.calls
                      if c[0] == "target_sources"][-1]
@@ -88,10 +88,10 @@ class TestPestanasCartera:
         from toml_helpers import source, target, write_daemon
 
         write_daemon(config_ini,
-                     sources=[source("platero", "platero", "m3u",
+                     sources=[source("principal", "principal", "m3u",
                                      "http://s/l.m3u", refresh_min=30)],
                      targets=[target("0", name="x",
-                                     m3u_sources=["platero"])])
+                                     m3u_sources=["principal"])])
         d = ListManagerDialog(None, config={
             "target_id": "0", "_config_path": config_ini, "name": "x",
             "port": 8080,
@@ -103,7 +103,7 @@ class TestPestanasCartera:
         assert w.table.rowCount() == 1
         # sin m3u_refs en el config dict, la selección viene vacía; el test
         # del round-trip completo vive en test_persistencia_refs
-        assert w.table.item(0, 0).text() == "platero"
+        assert w.table.item(0, 0).text() == "principal"
 
 
 class TestCamposHeredados:
