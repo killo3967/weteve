@@ -102,7 +102,7 @@ class LogoStore:
 
     def _download(self, url: str) -> bytes:
         peticion = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (weteve logo store)",
+            "User-Agent": "Mozilla/5.0 (compatible; weteve/1.0)",
             # los CDN de Movistar sirven el logo sin esto
             "Referer": "https://www.movistarplus.es/programacion-tv",
         })

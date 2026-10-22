@@ -26,8 +26,7 @@ from src.infrastructure.client.sources_store import load_catalog
 REPO = Path(__file__).resolve().parents[1]
 CONFIG = Path(os.environ.get("WETEVE_NETWORK_CONFIG",
                              str(REPO / "daemon.toml")))
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+UA = "Mozilla/5.0 (compatible; weteve/1.0)"
 TIMEOUT = 20
 MAX_BYTES = 20 * 1024 * 1024  # guard: no arrastrar >20MB a memoria en tests
 

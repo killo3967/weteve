@@ -8,6 +8,10 @@ import requests
 from src.domain.entities.channel import Channel
 from src.domain.ports.i_playlist_repo import IPlaylistRepository
 
+#: Cabecera propia con forma de navegador: los proveedores rechazan clientes
+#: sin identificar al descargar la lista por URL.
+USER_AGENT = "Mozilla/5.0 (compatible; weteve/1.0)"
+
 
 def normalize_spacing(text: str) -> str:
     """Limpia espacios: recorta extremos y colapsa secuencias a un espacio.
@@ -65,7 +69,7 @@ class FileM3URepository(IPlaylistRepository):
         if source.startswith('http'):
             # Descarga remota
             try:
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
+                headers = {'User-Agent': USER_AGENT}
                 # requests detecta proxies de variables de entorno automáticamente
                 response = requests.get(source, headers=headers, timeout=15)
                 response.raise_for_status()

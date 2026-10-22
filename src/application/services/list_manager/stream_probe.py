@@ -31,9 +31,9 @@ SAMPLE = 3
 TTL_SECONDS = 300.0
 #: Timeout por petición: si el proveedor no contesta rápido, está caído.
 TIMEOUT_SECONDS = 5.0
-#: Cabecera de navegador: muchos proveedores rechazan clientes desconocidos.
-_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-               "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+#: Cabecera propia: muchos proveedores rechazan clientes sin identificar,
+#: así que se mantiene la forma de un User-Agent de navegador.
+_USER_AGENT = "Mozilla/5.0 (compatible; weteve/1.0)"
 
 
 def probe_url(url: str, timeout: float = TIMEOUT_SECONDS) -> bool:
