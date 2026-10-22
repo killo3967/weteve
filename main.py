@@ -1,6 +1,6 @@
 """weteve — gestor de listas IPTV independiente.
 
-Aplicación extraída de IPTVViewer. Orquesta: fuente M3U + filtros (sintaxis
+Aplicación independiente. Orquesta: fuente M3U + filtros (sintaxis
 xTeVe) + asignación EPG + servidor web local (playlist.m3u / epg.xml).
 
 Uso: python main.py

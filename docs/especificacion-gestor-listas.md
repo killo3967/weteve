@@ -46,7 +46,7 @@ El alcance se elige en la pestaña **Configuración** del editor de perfiles:
 - **Solo este equipo (127.0.0.1)** — por defecto; nada accesible desde fuera.
 - **Toda la red local (0.0.0.0)** — un reproductor de tu móvil, tablet u otro PC
   de la red puede cargar la lista con la IP de tu equipo (p. ej.
-  `http://192.168.1.50:34400/m3u/weteve_0.m3u`). Fuera de loopback el token es
+  `http://192.0.2.50:34400/m3u/weteve_0.m3u`). Fuera de loopback el token es
   obligatorio: el demonio no arranca sin él.
 
 La elección se guarda en `weteve.ini` (`[DAEMON]` `control_host`/`control_port`).

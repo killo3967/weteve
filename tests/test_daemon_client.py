@@ -85,7 +85,7 @@ class TestDaemonClient:
                 pass
 
         monkeypatch.setattr(http_client, "HTTPConnection", _Conexion)
-        c = DaemonClient(host="192.168.1.46", port=34400, retries=0)
+        c = DaemonClient(host="192.0.2.46", port=34400, retries=0)
         assert c.ping() is False
         assert c.status() is None
 

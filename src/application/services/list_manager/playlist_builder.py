@@ -86,7 +86,7 @@ def build_xmltv(channels: list[MappedChannel], epg,
     """
     import xml.etree.ElementTree as ET
 
-    tv = ET.Element("tv", {"generator-info-name": "IPTVViewer list-manager"})
+    tv = ET.Element("tv", {"generator-info-name": "weteve"})
     # Dos canales pueden compartir id EPG (asignados al mismo canal de guía, o
     # nombres duplicados): el XMLTV exige un <channel> por id y una sola
     # parrilla por franja.

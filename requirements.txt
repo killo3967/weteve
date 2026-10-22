@@ -1,4 +1,4 @@
-# weteve — gestor de listas IPTV (extraído de IPTVViewer)
+# weteve — gestor de listas IPTV
 
 # UI
 PyQt6>=6.5

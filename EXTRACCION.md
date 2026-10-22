@@ -1,10 +1,10 @@
-# Extracción del gestor de listas desde IPTVViewer
+# Extracción del gestor de listas desde otra aplicación
 
 > **Documento histórico** (2026-10-08). Describe el momento de la extracción;
 > el formato de configuración que cita (`config.ini`) es el viejo. Estado
 > vigente: `docs/diataxis/` (configuración: `daemon.toml` + `weteve.ini`).
 
-Fecha: 2026-10-08. Origen: `K:/IPTVViewer` (commit `dca2a0b`). El código se
+Fecha: 2026-10-08. Origen: `<ruta-de-origen>` (commit `dca2a0b`). El código se
 **movió, no se borró**: todo lo referente al gestor de listas vive ahora aquí.
 
 ## Qué se ha hecho
@@ -30,7 +30,7 @@ Fecha: 2026-10-08. Origen: `K:/IPTVViewer` (commit `dca2a0b`). El código se
 4. **Copiado a `<ruta-del-proyecto>\docs\`**: `list-manager.md` (spec odd/tasks) y
    `especificacion-gestor-listas.md` (referencia Diataxis).
 
-5. **Eliminado de IPTVViewer** (mismo código, ya está aquí):
+5. **Eliminado del origen** (mismo código, ya está aquí):
    - `src/application/services/list_manager/` (directorio completo)
    - `src/infrastructure/ui/list_manager_dialog.py`
    - `src/infrastructure/web/` (directorio completo, solo contenía esto)
@@ -38,18 +38,18 @@ Fecha: 2026-10-08. Origen: `K:/IPTVViewer` (commit `dca2a0b`). El código se
    - `odd/tasks/list-manager.md`
    - `docs/diataxis/referencia/especificacion-gestor-listas.md`
 
-6. **Desconectado IPTVViewer del gestor**:
+6. **Desconectado el gestor del origen**:
    - `main.py`: import de `FilterRule`, parsing de secciones
      `listmanager.target.N`, clave `listmanager_targets` en `load_config()` y su
      serialización en `save_config()`.
    - `main_window.py`: submenú "Gestor de listas", `_update_list_manager_menu()`
      y `_open_list_manager()`.
    - `config.ini` del usuario conserva la sección `[listmanager.target.0]`;
-     IPTVViewer ahora la ignora (no la lee ni la escribe). Bórrala a mano si
+     la aplicación de origen ahora la ignora (no la lee ni la escribe). Bórrala a mano si
      quieres limpiarla.
 
 7. **Creado `main.py` standalone para weteve**: carga `config.ini` (secciones
-   `listmanager.target.N`, formato idéntico al de IPTVViewer), abre el wizard y
+   `listmanager.target.N`, formato idéntico al del origen), abre el wizard y
    persiste el target al aceptar. Logging a `logs/weteve.log`.
 
 ## Adaptaciones para el modo standalone
@@ -58,15 +58,15 @@ Fecha: 2026-10-08. Origen: `K:/IPTVViewer` (commit `dca2a0b`). El código se
   listas de app anfitriona) y el modo de origen es siempre "custom" (URL o
   fichero propio). Se quitó el selector "Listas de la aplicación".
 - weteve no tiene reproductores ni proxy: solo el pipeline de listas y el
-  servidor web. Lo demás se quedó en IPTVViewer.
+  servidor web. Lo demás se quedó en el origen.
 
-## Entorno del que viene (IPTVViewer)
+## Entorno del que viene
 
 - Python 3.11 + PyQt6 (UI), arquitectura hexagonal (application/domain/
 - infrastructure) con tests pytest/pytest-qt.
-- El gestor nació como feature "xTeVe interno" (spec en `docs/list-manager.md`):
-  fuente M3U -> filtros sintaxis xTeVe -> match EPG -> servido por mini-web.
-- La extracción se hizo con la suite de IPTVViewer en verde (215 tests OK tras
+- El gestor nació como feature interna del origen (spec en `docs/list-manager.md`):
+  fuente M3U -> filtros -> match EPG -> servido por mini-web.
+- La extracción se hizo con la suite del origen en verde (215 tests OK tras
   quitar el gestor).
 
 ## Dependencias de weteve
@@ -76,11 +76,11 @@ pytest/pytest-qt (dev), ruff/mypy (dev).
 
 - `requests` la usan los repositorios M3U/XMLTV para descargar por URL.
 - `psutil` la usa `playlist_server.find_port_owner()` (opcional en runtime).
-- No hay dependencia de VLC/mpv/Tor: eso es del visor, no del gestor.
+- No hay dependencia de reproductores ni de proxy: eso es del visor, no del gestor.
 
 ## Verificación tras la extracción
 
-- IPTVViewer: `pytest tests/ -q` → **215 passed** (ya sin tests del gestor).
+- Origen: `pytest tests/ -q` → **215 passed** (ya sin tests del gestor).
 - weteve: `pytest tests/ -q` → **67 passed** + 2 fallos E2E HTTP `WinError 10054`
   (ConnectionResetError en loopback). Es el filtro de red local conocido del
   equipo (memoria `env/loopback-firewall`), no código: los RSTs ambientales

@@ -36,8 +36,8 @@ class TestDirecciones:
         assert all(etiqueta for _, etiqueta in opciones)
 
     def test_un_valor_guardado_que_ya_no_existe_se_conserva(self):
-        opciones = host_options("192.168.1.99")
-        assert opciones[0][0] == "192.168.1.99"
+        opciones = host_options("192.0.2.99")
+        assert opciones[0][0] == "192.0.2.99"
         assert "no disponible" in opciones[0][1]
 
     def test_localhost_se_normaliza(self):
