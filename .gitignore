@@ -40,3 +40,6 @@ weteve.lock
 
 # Logos descargados por el demonio (se regeneran solos)
 assets/logos/
+
+# Copias locales previas a cambios delicados (pueden llevar datos del usuario)
+backups/
